@@ -7,6 +7,11 @@ module.exports = {
       colors: {
         cream: "#FFFFFF",
         ink: "#104028",
+        night: "#000000",
+        pine: "#173323",
+        mint: "#D9F2E2",
+        moss: "#89B79B",
+        line: "#1E2A23",
       },
     },
   },
