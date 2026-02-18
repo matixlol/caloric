@@ -1,0 +1,23 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "caloric-passkey-host",
+  "main": "src/index.ts",
+  "compatibility_date": "2026-02-18",
+  "routes": [
+    {
+      "pattern": "caloric.mati.lol",
+      "custom_domain": true
+    }
+  ],
+  "assets": {
+    "directory": "./public",
+    "not_found_handling": "single-page-application"
+  },
+  "vars": {
+    "RP_ID": "caloric.mati.lol",
+    "IOS_BUNDLE_ID": "lol.mati.caloric",
+    "ANDROID_PACKAGE_NAME": "lol.mati.caloric",
+    "APPLE_TEAM_ID": "BQ7842UUHJ",
+    "ANDROID_SHA256_CERT_FINGERPRINTS": ""
+  }
+}

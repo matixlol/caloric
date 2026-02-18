@@ -11,11 +11,15 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "lol.mati.caloric",
+      "associatedDomains": [
+        "webcredentials:caloric.mati.lol"
+      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
+      "package": "lol.mati.caloric",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
