@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useMemo, useState } from "react";
-import { ActivityIndicator, Pressable, Text, TextInput, View } from "react-native";
+import { ActivityIndicator, Pressable, ScrollView, Text, TextInput, View, useColorScheme } from "react-native";
 import { useAccount, usePasskeyAuth } from "jazz-tools/expo";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaloricAccount } from "../jazz/schema";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -11,8 +12,37 @@ type PasskeyAuthGateProps = {
   children: ReactNode;
 };
 
+type AuthScreenProps = {
+  isDark: boolean;
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+};
+
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
+}
+
+function AuthScreen({ isDark, title, subtitle, children }: AuthScreenProps) {
+  const insets = useSafeAreaInsets();
+
+  return (
+    <View className={`flex-1 ${isDark ? "bg-night" : "bg-cream"}`} style={{ paddingTop: insets.top }}>
+      <ScrollView
+        className="flex-1"
+        contentContainerClassName="flex-grow justify-center px-6 py-10"
+        keyboardShouldPersistTaps="handled"
+        showsVerticalScrollIndicator={false}
+      >
+        <View className="w-full self-center">
+          <Text className={`text-[46px] font-extrabold leading-[48px] ${isDark ? "text-mint" : "text-ink"}`}>{title}</Text>
+          <Text className={`mt-3 mb-8 text-base font-medium ${isDark ? "text-moss" : "text-ink/65"}`}>{subtitle}</Text>
+
+          <View className={`rounded-3xl border p-6 ${isDark ? "border-line bg-night" : "border-ink/10 bg-white"}`}>{children}</View>
+        </View>
+      </ScrollView>
+    </View>
+  );
 }
 
 export function PasskeyAuthGate({ appName, rpId, children }: PasskeyAuthGateProps) {
@@ -22,8 +52,8 @@ export function PasskeyAuthGate({ appName, rpId, children }: PasskeyAuthGateProp
     rpId: configuredRpId || "example.com",
   });
   const me = useAccount(CaloricAccount, { resolve: { profile: true } });
+  const isDark = useColorScheme() === "dark";
 
-  const [displayName, setDisplayName] = useState("");
   const [emailInput, setEmailInput] = useState("");
   const [queuedEmail, setQueuedEmail] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -65,11 +95,6 @@ export function PasskeyAuthGate({ appName, rpId, children }: PasskeyAuthGateProp
       return;
     }
 
-    if (!displayName.trim()) {
-      setError("Name is required.");
-      return;
-    }
-
     const normalizedEmail = normalizeEmail(emailInput);
     if (!EMAIL_REGEX.test(normalizedEmail)) {
       setError("Enter a valid email.");
@@ -79,8 +104,9 @@ export function PasskeyAuthGate({ appName, rpId, children }: PasskeyAuthGateProp
     setError(null);
     setBusy(true);
     try {
+      const passkeyLabel = normalizedEmail.split("@")[0] || normalizedEmail;
       setQueuedEmail(normalizedEmail);
-      await auth.signUp(displayName.trim());
+      await auth.signUp(passkeyLabel);
     } catch (signUpError) {
       setQueuedEmail(null);
       setError(signUpError instanceof Error ? signUpError.message : "Passkey sign up failed.");
@@ -104,92 +130,99 @@ export function PasskeyAuthGate({ appName, rpId, children }: PasskeyAuthGateProp
 
   if (auth.state === "anonymous") {
     return (
-      <View className="flex-1 items-center justify-center bg-night px-6">
-        <View className="w-full max-w-md rounded-2xl border border-line bg-night p-6">
-          <Text className="mb-2 text-2xl font-bold text-mint">Secure Sign-In</Text>
-          <Text className="mb-6 text-sm text-moss">
-            Use a passkey to sign in. We also require an email on your profile.
-          </Text>
+      <AuthScreen
+        isDark={isDark}
+        title="LOGIN"
+        subtitle="Use your email and passkey to continue."
+      >
+        <View className="w-full">
+          <View className="gap-5">
+            <View className="gap-2">
+              <Text className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-moss" : "text-ink/50"}`}>Email</Text>
+              <TextInput
+                value={emailInput}
+                onChangeText={setEmailInput}
+                placeholder="you@company.com"
+                placeholderTextColor={isDark ? "#93A785" : "#5D7A69"}
+                className={`h-14 rounded-none border-2 px-5 text-[17px] font-semibold ${isDark ? "border-moss/60 bg-pine/70 text-mint" : "border-ink/25 bg-white text-ink"}`}
+                autoCapitalize="none"
+                keyboardType="email-address"
+              />
+            </View>
+          </View>
 
-          <TextInput
-            value={displayName}
-            onChangeText={setDisplayName}
-            placeholder="Full name"
-            placeholderTextColor="#93A785"
-            className="mb-3 rounded-lg border border-line px-4 py-3 text-mint"
-            autoCapitalize="words"
-          />
+          {error ? <Text className={`mt-3 text-sm ${isDark ? "text-red-300" : "text-red-700"}`}>{error}</Text> : null}
 
-          <TextInput
-            value={emailInput}
-            onChangeText={setEmailInput}
-            placeholder="Email"
-            placeholderTextColor="#93A785"
-            className="mb-4 rounded-lg border border-line px-4 py-3 text-mint"
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
+          <View className="mt-6 gap-3">
+            <Pressable
+              className={`items-center rounded-none px-5 py-5 ${busy ? "opacity-60" : ""} ${isDark ? "bg-mint" : "bg-ink"}`}
+              disabled={busy || !emailIsValid}
+              onPress={handleSignUp}
+            >
+              <Text className={`text-base font-bold ${isDark ? "text-night" : "text-cream"}`}>Create Passkey</Text>
+            </Pressable>
 
-          {error ? <Text className="mb-3 text-sm text-red-300">{error}</Text> : null}
+            <View className="flex-row items-center gap-3">
+              <View className={`h-px flex-1 ${isDark ? "bg-line" : "bg-ink/10"}`} />
+              <Text className={`text-[10px] font-bold uppercase ${isDark ? "text-moss" : "text-ink/40"}`}>Or</Text>
+              <View className={`h-px flex-1 ${isDark ? "bg-line" : "bg-ink/10"}`} />
+            </View>
 
-          <Pressable
-            className={`mb-3 items-center rounded-lg px-4 py-3 ${busy ? "bg-moss" : "bg-mint"}`}
-            disabled={busy || !emailIsValid || !displayName.trim()}
-            onPress={handleSignUp}
-          >
-            <Text className="font-semibold text-night">Create Passkey</Text>
-          </Pressable>
-
-          <Pressable
-            className={`items-center rounded-lg border border-moss px-4 py-3 ${busy ? "opacity-60" : ""}`}
-            disabled={busy}
-            onPress={handleLogIn}
-          >
-            <Text className="font-semibold text-mint">Log In with Existing Passkey</Text>
-          </Pressable>
+            <Pressable
+              className={`items-center rounded-none border-2 px-5 py-5 ${busy ? "opacity-60" : ""} ${isDark ? "border-moss bg-night" : "border-ink/25 bg-white"}`}
+              disabled={busy}
+              onPress={handleLogIn}
+            >
+              <Text className={`text-base font-semibold ${isDark ? "text-mint" : "text-ink"}`}>Log In with Existing Passkey</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      </AuthScreen>
     );
   }
 
   if (!me.$isLoaded) {
     return (
-      <View className="flex-1 items-center justify-center bg-night">
-        <ActivityIndicator size="large" color="#D9F57A" />
+      <View className={`flex-1 items-center justify-center ${isDark ? "bg-night" : "bg-cream"}`}>
+        <ActivityIndicator size="large" color={isDark ? "#D9F2E2" : "#104028"} />
       </View>
     );
   }
 
   if (!currentEmail) {
     return (
-      <View className="flex-1 items-center justify-center bg-night px-6">
-        <View className="w-full max-w-md rounded-2xl border border-line bg-night p-6">
-          <Text className="mb-2 text-2xl font-bold text-mint">Add Your Email</Text>
-          <Text className="mb-6 text-sm text-moss">
-            Your account requires an email. This is stored on your public profile.
-          </Text>
+      <AuthScreen
+        isDark={isDark}
+        title="ADD EMAIL"
+        subtitle="Your account requires an email. This is stored on your public profile."
+      >
+        <View className="w-full">
+          <View className="gap-2">
+            <Text className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-moss" : "text-ink/50"}`}>Email</Text>
+            <TextInput
+              value={emailInput}
+              onChangeText={setEmailInput}
+              placeholder="you@company.com"
+              placeholderTextColor={isDark ? "#93A785" : "#5D7A69"}
+              className={`h-14 rounded-none border-2 px-5 text-[17px] font-semibold ${isDark ? "border-moss/60 bg-pine/70 text-mint" : "border-ink/25 bg-white text-ink"}`}
+              autoCapitalize="none"
+              keyboardType="email-address"
+            />
+          </View>
 
-          <TextInput
-            value={emailInput}
-            onChangeText={setEmailInput}
-            placeholder="Email"
-            placeholderTextColor="#93A785"
-            className="mb-4 rounded-lg border border-line px-4 py-3 text-mint"
-            autoCapitalize="none"
-            keyboardType="email-address"
-          />
+          {error ? <Text className={`mt-3 text-sm ${isDark ? "text-red-300" : "text-red-700"}`}>{error}</Text> : null}
 
-          {error ? <Text className="mb-3 text-sm text-red-300">{error}</Text> : null}
-
-          <Pressable
-            className="items-center rounded-lg bg-mint px-4 py-3"
-            onPress={handleSaveEmail}
-            disabled={busy}
-          >
-            <Text className="font-semibold text-night">Save Email</Text>
-          </Pressable>
+          <View className="mt-6">
+            <Pressable
+              className={`items-center rounded-none px-5 py-5 ${busy ? "opacity-60" : ""} ${isDark ? "bg-mint" : "bg-ink"}`}
+              onPress={handleSaveEmail}
+              disabled={busy}
+            >
+              <Text className={`text-base font-bold ${isDark ? "text-night" : "text-cream"}`}>Save Email</Text>
+            </Pressable>
+          </View>
         </View>
-      </View>
+      </AuthScreen>
     );
   }
 

@@ -1,4 +1,3 @@
-import "jazz-tools/expo/polyfills";
 import { Stack } from "expo-router";
 import { JazzExpoProvider } from "jazz-tools/expo";
 import "../global.css";
