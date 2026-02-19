@@ -10,8 +10,8 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { MEAL_TIMES, type MealKey, normalizeMeal } from "../src/meals";
-import { CaloricAccount } from "../src/jazz/schema";
+import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
+import { CaloricAccount } from "../../src/jazz/schema";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;

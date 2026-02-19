@@ -14,7 +14,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CaloricAccount } from "../src/jazz/schema";
+import { CaloricAccount } from "../../src/jazz/schema";
 
 const DEFAULT_CALORIE_GOAL = 2500;
 const DEFAULT_PROTEIN_PCT = 30;
