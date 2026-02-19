@@ -63,3 +63,28 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Backend Service
+
+This repo also includes a Bun backend in `backend/` that proxies MyFitnessPal search/detail APIs and stores all upstream responses in Postgres using Drizzle migrations.
+
+Quick start:
+
+```bash
+cd backend
+bun install
+cp .env.example .env
+bun run db:generate
+bun run db:migrate
+bun run dev
+```
+
+## Deployed Backend API
+
+Base URL: `https://backend.caloric.mati.lol`
+
+- Health check: `GET https://backend.caloric.mati.lol/health`
+- Search only: `GET https://backend.caloric.mati.lol/search?query=banana&maxItems=3&includeDetails=false`
+- Search + detail payloads: `GET https://backend.caloric.mati.lol/search?query=banana&maxItems=1&includeDetails=true`
+
+Note: there is no separate public detail endpoint right now; detail records are returned in the `details` array on `/search` when `includeDetails=true`.
