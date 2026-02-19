@@ -116,7 +116,7 @@ export default function LogFoodScreen() {
           Choose a Food
         </Text>
         <Text className="mb-6 text-sm font-semibold uppercase text-ink/40">
-          Saved food items from Jazz DB
+          Saved food items
         </Text>
 
         {foods.map((food) => {

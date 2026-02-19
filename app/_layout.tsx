@@ -28,7 +28,7 @@ function JazzProvider({ children }: { children: ReactNode }) {
 function MissingClerkKeyScreen() {
   return (
     <View className="flex-1 items-center justify-center bg-cream px-6">
-      <Text className="text-center text-lg font-semibold text-ink">Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY to enable login.</Text>
+      <Text className="text-center text-lg font-semibold text-ink">Missing authentication configuration. Set your publishable key to enable login.</Text>
     </View>
   );
 }

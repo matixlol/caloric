@@ -123,7 +123,7 @@ export default function SettingsScreen() {
     me.root.$jazz.set("macroProteinPct", parsedProtein);
     me.root.$jazz.set("macroCarbsPct", parsedCarbs);
     me.root.$jazz.set("macroFatPct", parsedFat);
-    setSaveSuccess("Saved to Jazz.");
+    setSaveSuccess("Saved successfully.");
   };
 
   return (

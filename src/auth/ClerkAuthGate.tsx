@@ -41,14 +41,20 @@ function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
-function getClerkErrorMessage(error: unknown) {
+function sanitizeProviderMentions(value: string) {
+  return value.replace(/clerk/gi, "auth");
+}
+
+function getAuthErrorMessage(error: unknown) {
   if (isClerkAPIResponseError(error) && error.errors.length > 0) {
     const firstError = error.errors[0];
-    return firstError.longMessage || firstError.message || "Authentication failed.";
+    return sanitizeProviderMentions(
+      firstError.longMessage || firstError.message || "Authentication failed.",
+    );
   }
 
   if (error instanceof Error) {
-    return error.message;
+    return sanitizeProviderMentions(error.message);
   }
 
   return "Authentication failed.";
@@ -173,7 +179,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
       setError("Sign in could not be completed. Please try again.");
     } catch (signInError) {
-      setError(getClerkErrorMessage(signInError));
+      setError(getAuthErrorMessage(signInError));
     } finally {
       setBusy(false);
     }
@@ -206,7 +212,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
       setError("Verification is incomplete. Request a new code and try again.");
     } catch (verificationError) {
-      setError(getClerkErrorMessage(verificationError));
+      setError(getAuthErrorMessage(verificationError));
     } finally {
       setBusy(false);
     }
@@ -246,7 +252,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
       setVerificationMode("sign-up");
       setInfo("We sent a verification code to your email.");
     } catch (signUpError) {
-      setError(getClerkErrorMessage(signUpError));
+      setError(getAuthErrorMessage(signUpError));
     } finally {
       setBusy(false);
     }
@@ -281,7 +287,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
       setError("Verification is incomplete. Request a new code and try again.");
     } catch (verificationError) {
-      setError(getClerkErrorMessage(verificationError));
+      setError(getAuthErrorMessage(verificationError));
     } finally {
       setBusy(false);
     }
@@ -321,7 +327,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
       setInfo("Continue in browser to finish sign in.");
     } catch (socialError) {
-      setError(getClerkErrorMessage(socialError));
+      setError(getAuthErrorMessage(socialError));
     } finally {
       setBusy(false);
     }
@@ -345,10 +351,10 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
         title={showingVerification ? "VERIFY" : isSigningIn ? "LOGIN" : "SIGN UP"}
         subtitle={
           showingVerification
-            ? "Enter the one-time code sent by Clerk to continue."
+            ? "Enter the one-time code sent to continue."
             : isSigningIn
-              ? "Sign in with your Clerk account."
-              : "Create a Clerk account to continue."
+              ? "Sign in to your account."
+              : "Create an account to continue."
         }
       >
         <View className="w-full">
