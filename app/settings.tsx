@@ -17,19 +17,6 @@ function ToggleRow({ label, on }: { label: string; on: boolean }) {
   );
 }
 
-function UnitSelector({ left, right }: { left: string; right: string }) {
-  return (
-    <View className="flex-row rounded-lg bg-ink/10 p-1">
-      <View className="rounded-md bg-cream px-4 py-1.5">
-        <Text className="text-xs font-bold text-ink">{left}</Text>
-      </View>
-      <View className="px-4 py-1.5">
-        <Text className="text-xs font-bold text-ink">{right}</Text>
-      </View>
-    </View>
-  );
-}
-
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -79,22 +66,7 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <SectionTitle title="Measurement Units" />
-        <View className="border-b border-ink/10 py-4">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-base font-semibold text-ink">Weight Units</Text>
-            <UnitSelector left="KG" right="LB" />
-          </View>
-        </View>
-        <View className="border-b border-ink/10 py-4">
-          <View className="flex-row items-center justify-between">
-            <Text className="text-base font-semibold text-ink">Energy Units</Text>
-            <UnitSelector left="KCAL" right="KJ" />
-          </View>
-        </View>
-
         <SectionTitle title="Preferences" />
-        <ToggleRow label="Dark Mode" on={false} />
         <ToggleRow label="Meal Reminders" on />
         <ToggleRow label="Show Fiber" on />
       </ScrollView>
