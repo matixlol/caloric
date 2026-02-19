@@ -1,4 +1,5 @@
 import { useRouter } from "expo-router";
+import { useUser } from "@clerk/clerk-expo";
 import { Pressable, ScrollView, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -9,6 +10,11 @@ function SectionTitle({ title }: { title: string }) {
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { user } = useUser();
+  const profileEmail =
+    user?.primaryEmailAddress?.emailAddress ||
+    user?.emailAddresses?.[0]?.emailAddress ||
+    "No email found";
 
   return (
     <View className="flex-1 bg-cream" style={{ paddingTop: insets.top + 20 }}>
@@ -20,6 +26,12 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
+        <SectionTitle title="Account" />
+        <View className="mb-8 border-b border-ink/10 py-3">
+          <Text className="mb-1 text-sm font-medium text-ink/40">Signed in as</Text>
+          <Text className="text-base font-semibold text-ink">{profileEmail}</Text>
+        </View>
+
         <SectionTitle title="Goals" />
         <View className="mb-10">
           <View className="mb-3 flex-row items-end justify-between">
