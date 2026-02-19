@@ -31,6 +31,9 @@ const CaloricRoot = co.map({
   foods: co.optional(co.list(FoodItem)),
   logs: co.optional(co.list(FoodLogEntry)),
   calorieGoal: z.optional(z.number()),
+  macroProteinPct: z.optional(z.number()),
+  macroCarbsPct: z.optional(z.number()),
+  macroFatPct: z.optional(z.number()),
 });
 
 const CaloricProfile = co.profile({
@@ -77,6 +80,13 @@ const DEFAULT_FOODS = [
   },
 ];
 
+const DEFAULT_CALORIE_GOAL = 2500;
+const DEFAULT_MACROS = {
+  proteinPct: 30,
+  carbsPct: 50,
+  fatPct: 20,
+};
+
 export const CaloricAccount = co
   .account({
     root: CaloricRoot,
@@ -87,7 +97,10 @@ export const CaloricAccount = co
       account.$jazz.set("root", {
         foods: DEFAULT_FOODS,
         logs: [],
-        calorieGoal: 2500,
+        calorieGoal: DEFAULT_CALORIE_GOAL,
+        macroProteinPct: DEFAULT_MACROS.proteinPct,
+        macroCarbsPct: DEFAULT_MACROS.carbsPct,
+        macroFatPct: DEFAULT_MACROS.fatPct,
       });
     }
 
@@ -129,10 +142,10 @@ export const CaloricAccount = co
     }
 
     if (!root.$jazz.has("calorieGoal")) {
-      root.$jazz.set("calorieGoal", 2500);
+      root.$jazz.set("calorieGoal", DEFAULT_CALORIE_GOAL);
     }
 
-    if (root.foods && root.foods.length === 0) {
+    if (root.foods && root.foods.$isLoaded && root.foods.length === 0) {
       root.foods.$jazz.push(...DEFAULT_FOODS);
     }
   });

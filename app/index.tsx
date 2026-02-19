@@ -70,7 +70,9 @@ function MealSectionHeader({ title, isDark, href }: { title: string; isDark: boo
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const isDark = useColorScheme() === "dark";
-  const me = useAccount(CaloricAccount, { resolve: { root: { logs: true } } });
+  const me = useAccount(CaloricAccount, {
+    resolve: { root: { logs: { $each: { nutrition: true } } } },
+  });
 
   if (!me.$isLoaded) {
     return (
@@ -80,8 +82,16 @@ export default function HomeScreen() {
     );
   }
 
-  const logs = (me.root.logs ?? []).filter(Boolean).sort((a, b) => b.createdAt - a.createdAt);
-  const lunchLogs = logs.filter((entry) => entry.meal.toLowerCase() === "lunch");
+  const logs = (me.root.logs ?? [])
+    .filter(
+      (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } =>
+        Boolean(entry?.$isLoaded),
+    )
+    .sort((a, b) => b.createdAt - a.createdAt);
+
+  const lunchLogs = logs.filter(
+    (entry) => typeof entry.meal === "string" && entry.meal.toLowerCase() === "lunch",
+  );
 
   const caloriesConsumed = logs.reduce((sum, entry) => sum + (entry.nutrition?.calories ?? 0), 0);
   const protein = logs.reduce((sum, entry) => sum + (entry.nutrition?.protein ?? 0), 0);

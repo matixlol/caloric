@@ -29,7 +29,10 @@ function FoodRow({
           <Text className="text-base font-bold text-ink">{name}</Text>
           <Text className="mt-1 text-xs font-medium text-ink/50">{meta}</Text>
         </View>
-        <Text className="text-lg font-bold text-ink" style={{ fontVariant: ["tabular-nums"] }}>
+        <Text
+          className="text-lg font-bold text-ink"
+          style={{ fontVariant: ["tabular-nums"] }}
+        >
           {calories}
         </Text>
       </View>
@@ -40,19 +43,26 @@ function FoodRow({
 export default function LogFoodScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const me = useAccount(CaloricAccount, { resolve: { root: { foods: true, logs: true } } });
+  const me = useAccount(CaloricAccount, {
+    resolve: { root: { foods: { $each: { nutrition: true } }, logs: true } },
+  });
   const [selectedFoodId, setSelectedFoodId] = useState<string | null>(null);
 
   if (!me.$isLoaded) {
     return (
       <View className="flex-1 items-center justify-center bg-cream">
-        <Text className="text-sm font-semibold uppercase text-ink/40">Loading foods…</Text>
+        <Text className="text-sm font-semibold uppercase text-ink/40">
+          Loading foods…
+        </Text>
       </View>
     );
   }
 
-  const foods = (me.root.foods ?? []).filter(Boolean);
-  const selectedFood = foods.find((food) => food?.$jazz.id === selectedFoodId) || null;
+  const foods = (me.root.foods ?? []).filter(
+    (food): food is NonNullable<typeof food> & { $isLoaded: true } =>
+      Boolean(food?.$isLoaded),
+  );
+  const selectedFood = foods.find((food) => food.$jazz.id === selectedFoodId) || null;
 
   const handleAddToLog = () => {
     if (!selectedFood) return;
@@ -86,22 +96,35 @@ export default function LogFoodScreen() {
 
   return (
     <View className="flex-1 bg-cream">
-      <View className="flex-row items-center justify-between px-6 pb-5" style={{ paddingTop: insets.top + 20 }}>
+      <View
+        className="flex-row items-center justify-between px-6 pb-5"
+        style={{ paddingTop: insets.top + 20 }}
+      >
         <Pressable accessibilityRole="button" onPress={() => router.back()}>
-          <Text className="text-sm font-bold uppercase tracking-wide text-ink/40">Cancel</Text>
+          <Text className="text-sm font-bold uppercase tracking-wide text-ink/40">
+            Cancel
+          </Text>
         </Pressable>
-        <Text className="text-[11px] font-bold uppercase text-ink">Log Lunch</Text>
+        <Text className="text-[11px] font-bold uppercase text-ink">
+          Log Lunch
+        </Text>
         <View className="w-[52px]" />
       </View>
 
       <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        <Text className="mb-2 mt-2 text-[32px] font-extrabold text-ink">Choose a Food</Text>
-        <Text className="mb-6 text-sm font-semibold uppercase text-ink/40">Saved food items from Jazz DB</Text>
+        <Text className="mb-2 mt-2 text-[32px] font-extrabold text-ink">
+          Choose a Food
+        </Text>
+        <Text className="mb-6 text-sm font-semibold uppercase text-ink/40">
+          Saved food items from Jazz DB
+        </Text>
 
         {foods.map((food) => {
           if (!food) return null;
           const calories = food.nutrition?.calories ?? 0;
-          const meta = [food.brand, food.serving].filter(Boolean).join(" • ") || "No serving details";
+          const meta =
+            [food.brand, food.serving].filter(Boolean).join(" • ") ||
+            "No serving details";
 
           return (
             <FoodRow
@@ -123,7 +146,9 @@ export default function LogFoodScreen() {
           disabled={!selectedFood}
           onPress={handleAddToLog}
         >
-          <Text className="text-center text-base font-bold uppercase tracking-wide text-cream">Add to Log</Text>
+          <Text className="text-center text-base font-bold uppercase tracking-wide text-cream">
+            Add to Log
+          </Text>
         </Pressable>
       </View>
     </View>
