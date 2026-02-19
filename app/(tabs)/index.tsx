@@ -23,7 +23,7 @@ const palette = {
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: iosColor("systemBlue", "#2563EB"),
+  tint: "#2563EB",
 };
 
 const DEFAULT_CALORIE_GOAL = 2500;
@@ -141,7 +141,7 @@ export default function HomeScreen() {
       (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } =>
         Boolean(entry?.$isLoaded),
     )
-    .sort((a, b) => b.createdAt - a.createdAt);
+    .sort((a, b) => a.createdAt - b.createdAt);
 
   const caloriesConsumed = logs.reduce((sum, entry) => sum + (entry.nutrition?.calories ?? 0), 0);
   const protein = logs.reduce((sum, entry) => sum + (entry.nutrition?.protein ?? 0), 0);

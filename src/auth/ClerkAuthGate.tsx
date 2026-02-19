@@ -46,10 +46,10 @@ const palette = {
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: iosColor("systemBlue", "#2563EB"),
-  buttonDisabled: iosColor("systemGray3", "#D1D5DB"),
+  tint: "#2563EB",
+  buttonDisabled: "#D1D5DB",
   error: iosColor("systemRed", "#DC2626"),
-  white: iosColor("white", "#FFFFFF"),
+  white: "#FFFFFF",
 };
 
 function normalizeEmail(value: string) {

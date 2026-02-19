@@ -24,9 +24,9 @@ const palette = {
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: iosColor("systemBlue", "#2563EB"),
-  tintDisabled: iosColor("systemGray3", "#D1D5DB"),
-  buttonText: iosColor("white", "#FFFFFF"),
+  tint: "#2563EB",
+  tintDisabled: "#D1D5DB",
+  buttonText: "#FFFFFF",
 };
 
 function FoodRow({
@@ -117,7 +117,12 @@ export default function LogFoodScreen() {
       createdAt: Date.now(),
     });
 
-    router.navigate("/");
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/");
   };
 
   return (

@@ -33,11 +33,11 @@ const palette = {
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: iosColor("systemBlue", "#2563EB"),
-  tintDisabled: iosColor("systemGray3", "#D1D5DB"),
+  tint: "#2563EB",
+  tintDisabled: "#D1D5DB",
   success: iosColor("systemGreen", "#16A34A"),
   error: iosColor("systemRed", "#DC2626"),
-  white: iosColor("white", "#FFFFFF"),
+  white: "#FFFFFF",
 };
 
 function parseWholeNumber(value: string) {

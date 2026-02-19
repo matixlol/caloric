@@ -1,8 +1,4 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
-import { Platform, PlatformColor } from "react-native";
-
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
 export default function TabsLayout() {
   return (
@@ -11,12 +7,12 @@ export default function TabsLayout() {
       disableTransparentOnScrollEdge
       minimizeBehavior="onScrollDown"
       iconColor={{
-        default: iosColor("secondaryLabel", "#6B7280"),
-        selected: iosColor("label", "#111827"),
+        default: "#6B7280",
+        selected: "#111827",
       }}
       labelStyle={{
-        default: { color: iosColor("secondaryLabel", "#6B7280") },
-        selected: { color: iosColor("label", "#111827") },
+        default: { color: "#6B7280" },
+        selected: { color: "#111827" },
       }}
     >
       <NativeTabs.Trigger name="index">
