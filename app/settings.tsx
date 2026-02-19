@@ -1,8 +1,17 @@
-import { useRouter } from "expo-router";
 import { useUser } from "@clerk/clerk-expo";
+import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { useEffect, useState } from "react";
-import { Pressable, ScrollView, Text, TextInput, View } from "react-native";
 import { useAccount } from "jazz-tools/expo";
+import {
+  Platform,
+  PlatformColor,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaloricAccount } from "../src/jazz/schema";
 
@@ -13,9 +22,22 @@ const DEFAULT_FAT_PCT = 20;
 const MIN_CALORIE_GOAL = 100;
 const MAX_CALORIE_GOAL = 10000;
 
-function SectionTitle({ title }: { title: string }) {
-  return <Text className="mb-6 mt-8 text-xs font-bold uppercase tracking-wide text-ink/40">{title}</Text>;
-}
+const iosColor = (name: string, fallback: string) =>
+  Platform.OS === "ios" ? PlatformColor(name) : fallback;
+
+const palette = {
+  background: iosColor("systemGroupedBackground", "#F3F4F6"),
+  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
+  label: iosColor("label", "#111827"),
+  secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
+  tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
+  separator: iosColor("separator", "#E5E7EB"),
+  tint: iosColor("systemBlue", "#2563EB"),
+  tintDisabled: iosColor("systemGray3", "#D1D5DB"),
+  success: iosColor("systemGreen", "#16A34A"),
+  error: iosColor("systemRed", "#DC2626"),
+  white: iosColor("white", "#FFFFFF"),
+};
 
 function parseWholeNumber(value: string) {
   const normalized = value.replace(/[^0-9]/g, "");
@@ -28,9 +50,42 @@ function clamp(value: number, min: number, max: number) {
   return Math.max(min, Math.min(max, value));
 }
 
+function FormRow({
+  label,
+  value,
+  onChange,
+  suffix,
+  accessibilityLabel,
+  maxLength,
+}: {
+  label: string;
+  value: string;
+  onChange: (next: string) => void;
+  suffix?: string;
+  accessibilityLabel: string;
+  maxLength: number;
+}) {
+  return (
+    <View style={styles.formRow}>
+      <Text style={styles.formRowLabel}>{label}</Text>
+      <View style={styles.formValueWrap}>
+        <TextInput
+          value={value}
+          onChangeText={onChange}
+          keyboardType="number-pad"
+          inputMode="numeric"
+          maxLength={maxLength}
+          accessibilityLabel={accessibilityLabel}
+          style={styles.formInput}
+        />
+        {suffix ? <Text style={styles.formSuffix}>{suffix}</Text> : null}
+      </View>
+    </View>
+  );
+}
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
-  const router = useRouter();
   const { user } = useUser();
   const me = useAccount(CaloricAccount, { resolve: { profile: true, root: true } });
   const [goalInput, setGoalInput] = useState("");
@@ -39,6 +94,8 @@ export default function SettingsScreen() {
   const [fatInput, setFatInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const canUseGlass =
+    Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
   const fallbackEmail =
     user?.primaryEmailAddress?.emailAddress ||
@@ -52,10 +109,10 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (!me.$isLoaded) return;
 
-    setGoalInput(String(me.root.calorieGoal ?? DEFAULT_CALORIE_GOAL));
-    setProteinInput(String(me.root.macroProteinPct ?? DEFAULT_PROTEIN_PCT));
-    setCarbsInput(String(me.root.macroCarbsPct ?? DEFAULT_CARBS_PCT));
-    setFatInput(String(me.root.macroFatPct ?? DEFAULT_FAT_PCT));
+    setGoalInput(String(syncedGoal ?? DEFAULT_CALORIE_GOAL));
+    setProteinInput(String(syncedProtein ?? DEFAULT_PROTEIN_PCT));
+    setCarbsInput(String(syncedCarbs ?? DEFAULT_CARBS_PCT));
+    setFatInput(String(syncedFat ?? DEFAULT_FAT_PCT));
   }, [
     me.$isLoaded,
     syncedGoal,
@@ -71,8 +128,8 @@ export default function SettingsScreen() {
 
   if (!me.$isLoaded) {
     return (
-      <View className="flex-1 items-center justify-center bg-cream">
-        <Text className="text-sm font-semibold uppercase text-ink/40">Loading settings…</Text>
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading settings…</Text>
       </View>
     );
   }
@@ -108,13 +165,19 @@ export default function SettingsScreen() {
 
   const profileEmail = me.profile.email || fallbackEmail;
   const previewGoal = parsedGoal ?? loadedGoal;
-  const sliderProgress = clamp(((previewGoal - 1200) / (4000 - 1200)) * 100, 0, 100);
+  const goalProgress = clamp(((previewGoal - 1200) / (4000 - 1200)) * 100, 0, 100);
 
   const handleSave = () => {
     setSaveError(null);
     setSaveSuccess(null);
 
-    if (validationError || parsedGoal === null || parsedProtein === null || parsedCarbs === null || parsedFat === null) {
+    if (
+      validationError ||
+      parsedGoal === null ||
+      parsedProtein === null ||
+      parsedCarbs === null ||
+      parsedFat === null
+    ) {
       setSaveError(validationError || "Enter valid values before saving.");
       return;
     }
@@ -127,107 +190,250 @@ export default function SettingsScreen() {
   };
 
   return (
-    <View className="flex-1 bg-cream" style={{ paddingTop: insets.top + 20 }}>
-      <View className="mb-8 flex-row items-center justify-between px-6">
-        <Pressable accessibilityRole="button" onPress={() => router.back()}>
-          <Text className="border-b-2 border-ink pb-0.5 text-sm font-bold uppercase text-ink">BACK</Text>
-        </Pressable>
-        <Text className="text-sm font-bold uppercase text-ink">SETTINGS</Text>
-      </View>
+    <View style={styles.screen}>
+      <ScrollView
+        keyboardShouldPersistTaps="handled"
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[
+          styles.contentContainer,
+          {
+            paddingTop: insets.top + 4,
+            paddingBottom: insets.bottom + 116,
+          },
+        ]}
+      >
+        <Text style={styles.largeTitle}>Settings</Text>
 
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        <SectionTitle title="Account" />
-        <View className="mb-8 border-b border-ink/10 py-3">
-          <Text className="mb-1 text-sm font-medium text-ink/40">Signed in as</Text>
-          <Text className="text-base font-semibold text-ink">{profileEmail}</Text>
-        </View>
-
-        <SectionTitle title="Goals" />
-        <View className="mb-10">
-          <View className="mb-3 flex-row items-end justify-between">
-            <Text className="text-base font-semibold text-ink">Daily Calorie Goal</Text>
-            <TextInput
-              className="min-w-[130px] border-b border-ink/20 pb-1 text-right text-[32px] font-extrabold text-ink"
-              style={{ fontVariant: ["tabular-nums"] }}
-              value={goalInput}
-              onChangeText={setGoalInput}
-              keyboardType="number-pad"
-              inputMode="numeric"
-              maxLength={5}
-              accessibilityLabel="Daily calorie goal"
-            />
-          </View>
-          <View className="relative my-5 h-1 bg-ink/10">
-            <View className="absolute h-5 w-5 rounded-full bg-ink" style={{ left: `${sliderProgress}%`, top: -8, marginLeft: -10 }} />
+        <Text style={styles.sectionTitle}>Account</Text>
+        <View style={styles.card}>
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Signed in as</Text>
+            <Text style={styles.accountValue}>{profileEmail}</Text>
           </View>
         </View>
 
-        <SectionTitle title="Macro Ratios" />
-        <View className="mb-4 flex-row gap-3">
-          <View className="flex-1 border-b-2 border-ink pb-2">
-            <Text className="mb-1 text-[11px] font-bold uppercase text-ink/40">Protein</Text>
-            <View className="flex-row items-center">
-              <TextInput
-                className="text-xl font-bold text-ink"
-                style={{ fontVariant: ["tabular-nums"] }}
-                value={proteinInput}
-                onChangeText={setProteinInput}
-                keyboardType="number-pad"
-                inputMode="numeric"
-                maxLength={3}
-                accessibilityLabel="Protein macro ratio"
-              />
-              <Text className="text-xl font-bold text-ink">%</Text>
-            </View>
-          </View>
-          <View className="flex-1 border-b-2 border-ink pb-2">
-            <Text className="mb-1 text-[11px] font-bold uppercase text-ink/40">Carbs</Text>
-            <View className="flex-row items-center">
-              <TextInput
-                className="text-xl font-bold text-ink"
-                style={{ fontVariant: ["tabular-nums"] }}
-                value={carbsInput}
-                onChangeText={setCarbsInput}
-                keyboardType="number-pad"
-                inputMode="numeric"
-                maxLength={3}
-                accessibilityLabel="Carbs macro ratio"
-              />
-              <Text className="text-xl font-bold text-ink">%</Text>
-            </View>
-          </View>
-          <View className="flex-1 border-b-2 border-ink pb-2">
-            <Text className="mb-1 text-[11px] font-bold uppercase text-ink/40">Fat</Text>
-            <View className="flex-row items-center">
-              <TextInput
-                className="text-xl font-bold text-ink"
-                style={{ fontVariant: ["tabular-nums"] }}
-                value={fatInput}
-                onChangeText={setFatInput}
-                keyboardType="number-pad"
-                inputMode="numeric"
-                maxLength={3}
-                accessibilityLabel="Fat macro ratio"
-              />
-              <Text className="text-xl font-bold text-ink">%</Text>
-            </View>
+        <Text style={styles.sectionTitle}>Goals</Text>
+        <View style={styles.card}>
+          <FormRow
+            label="Daily Calories"
+            value={goalInput}
+            onChange={setGoalInput}
+            accessibilityLabel="Daily calorie goal"
+            maxLength={5}
+          />
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${goalProgress}%` }]} />
           </View>
         </View>
-        <Text className="mb-8 text-xs font-semibold uppercase text-ink/40">Total: {macroTotal}%</Text>
+
+        <Text style={styles.sectionTitle}>Macro Ratios</Text>
+        <View style={styles.card}>
+          <FormRow
+            label="Protein"
+            value={proteinInput}
+            onChange={setProteinInput}
+            suffix="%"
+            accessibilityLabel="Protein macro ratio"
+            maxLength={3}
+          />
+          <View style={styles.divider} />
+          <FormRow
+            label="Carbs"
+            value={carbsInput}
+            onChange={setCarbsInput}
+            suffix="%"
+            accessibilityLabel="Carbs macro ratio"
+            maxLength={3}
+          />
+          <View style={styles.divider} />
+          <FormRow
+            label="Fat"
+            value={fatInput}
+            onChange={setFatInput}
+            suffix="%"
+            accessibilityLabel="Fat macro ratio"
+            maxLength={3}
+          />
+          <View style={styles.divider} />
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Total</Text>
+            <Text style={[styles.totalValue, macroTotal !== 100 && styles.errorText]}>
+              {macroTotal}%
+            </Text>
+          </View>
+        </View>
       </ScrollView>
 
-      <View className="bg-cream px-6 pb-6 pt-6" style={{ paddingBottom: insets.bottom + 20 }}>
-        {saveError ? <Text className="mb-3 text-xs font-semibold uppercase text-red-600">{saveError}</Text> : null}
-        {saveSuccess ? <Text className="mb-3 text-xs font-semibold uppercase text-emerald-700">{saveSuccess}</Text> : null}
+      <View style={[styles.actionBarContainer, { paddingBottom: insets.bottom + 12 }]}>
+        {canUseGlass ? (
+          <GlassView
+            glassEffectStyle="regular"
+            tintColor="rgba(255,255,255,0.2)"
+            style={StyleSheet.absoluteFillObject}
+          />
+        ) : null}
+
+        {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
+        {saveSuccess ? <Text style={styles.successText}>{saveSuccess}</Text> : null}
+
         <Pressable
-          className={`rounded-xl px-4 py-[18px] ${hasChanges ? "bg-ink" : "bg-ink/35"}`}
           accessibilityRole="button"
           onPress={handleSave}
           disabled={!hasChanges}
+          style={[styles.saveButton, !hasChanges && styles.saveButtonDisabled]}
         >
-          <Text className="text-center text-base font-bold uppercase tracking-wide text-cream">Save Changes</Text>
+          <Text style={styles.saveButtonText}>Save Changes</Text>
         </Pressable>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.background,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: palette.secondaryLabel,
+  },
+  largeTitle: {
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: "700",
+    color: palette.label,
+    paddingHorizontal: 4,
+  },
+  sectionTitle: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  card: {
+    backgroundColor: palette.card,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 2,
+  },
+  formRow: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  formRowLabel: {
+    fontSize: 17,
+    lineHeight: 22,
+    color: palette.label,
+  },
+  accountValue: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 15,
+    lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+  formValueWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    minWidth: 92,
+  },
+  formInput: {
+    minWidth: 52,
+    textAlign: "right",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.tint,
+    fontVariant: ["tabular-nums"],
+  },
+  formSuffix: {
+    marginLeft: 2,
+    fontSize: 17,
+    lineHeight: 22,
+    color: palette.tint,
+    fontWeight: "600",
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.separator,
+  },
+  progressTrack: {
+    marginTop: 2,
+    marginBottom: 12,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: palette.tertiaryLabel,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: palette.tint,
+  },
+  totalValue: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+    fontVariant: ["tabular-nums"],
+  },
+  actionBarContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: "rgba(255,255,255,0.35)",
+    overflow: "hidden",
+  },
+  saveButton: {
+    marginTop: 2,
+    borderRadius: 12,
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.tint,
+  },
+  saveButtonDisabled: {
+    backgroundColor: palette.tintDisabled,
+  },
+  saveButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.white,
+  },
+  errorText: {
+    marginBottom: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.error,
+  },
+  successText: {
+    marginBottom: 6,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.success,
+  },
+});

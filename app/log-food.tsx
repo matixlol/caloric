@@ -1,41 +1,63 @@
+import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { useRouter } from "expo-router";
 import { useState } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
 import { useAccount } from "jazz-tools/expo";
+import {
+  Platform,
+  PlatformColor,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaloricAccount } from "../src/jazz/schema";
+
+const iosColor = (name: string, fallback: string) =>
+  Platform.OS === "ios" ? PlatformColor(name) : fallback;
+
+const palette = {
+  background: iosColor("systemGroupedBackground", "#F3F4F6"),
+  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
+  label: iosColor("label", "#111827"),
+  secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
+  separator: iosColor("separator", "#E5E7EB"),
+  tint: iosColor("systemBlue", "#2563EB"),
+  tintDisabled: iosColor("systemGray3", "#D1D5DB"),
+  buttonText: iosColor("white", "#FFFFFF"),
+};
 
 function FoodRow({
   name,
   meta,
   calories,
   selected,
+  isLast,
   onPress,
 }: {
   name: string;
   meta: string;
   calories: number;
   selected: boolean;
+  isLast: boolean;
   onPress: () => void;
 }) {
   return (
     <Pressable
-      className={`mb-3 rounded-2xl border p-4 ${selected ? "border-ink bg-ink/5" : "border-ink/10 bg-white"}`}
-      onPress={onPress}
       accessibilityRole="button"
+      onPress={onPress}
+      style={[styles.foodRow, !isLast && styles.foodRowDivider]}
     >
-      <View className="flex-row items-center justify-between">
-        <View className="shrink pr-3">
-          <Text className="text-base font-bold text-ink">{name}</Text>
-          <Text className="mt-1 text-xs font-medium text-ink/50">{meta}</Text>
-        </View>
-        <Text
-          className="text-lg font-bold text-ink"
-          style={{ fontVariant: ["tabular-nums"] }}
-        >
-          {calories}
-        </Text>
+      <View style={styles.foodMain}>
+        <Text style={styles.foodName}>{name}</Text>
+        <Text style={styles.foodMeta}>{meta}</Text>
       </View>
+      <View style={styles.foodRight}>
+        <Text style={styles.foodCalories}>{calories.toLocaleString()}</Text>
+        <Text style={styles.foodUnit}>kcal</Text>
+      </View>
+      {selected ? <Text style={styles.selectedMark}>✓</Text> : null}
     </Pressable>
   );
 }
@@ -47,13 +69,13 @@ export default function LogFoodScreen() {
     resolve: { root: { foods: { $each: { nutrition: true } }, logs: true } },
   });
   const [selectedFoodId, setSelectedFoodId] = useState<string | null>(null);
+  const canUseGlass =
+    Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
   if (!me.$isLoaded) {
     return (
-      <View className="flex-1 items-center justify-center bg-cream">
-        <Text className="text-sm font-semibold uppercase text-ink/40">
-          Loading foods…
-        </Text>
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading foods…</Text>
       </View>
     );
   }
@@ -91,66 +113,177 @@ export default function LogFoodScreen() {
       createdAt: Date.now(),
     });
 
-    router.back();
+    router.navigate("/");
   };
 
   return (
-    <View className="flex-1 bg-cream">
-      <View
-        className="flex-row items-center justify-between px-6 pb-5"
-        style={{ paddingTop: insets.top + 20 }}
+    <View style={styles.screen}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[
+          styles.contentContainer,
+          {
+            paddingTop: insets.top + 4,
+            paddingBottom: insets.bottom + 96,
+          },
+        ]}
       >
-        <Pressable accessibilityRole="button" onPress={() => router.back()}>
-          <Text className="text-sm font-bold uppercase tracking-wide text-ink/40">
-            Cancel
-          </Text>
-        </Pressable>
-        <Text className="text-[11px] font-bold uppercase text-ink">
-          Log Lunch
-        </Text>
-        <View className="w-[52px]" />
-      </View>
+        <Text style={styles.largeTitle}>Foods</Text>
+        <Text style={styles.subtitle}>Pick one item to add to lunch</Text>
 
-      <ScrollView className="flex-1 px-6" showsVerticalScrollIndicator={false}>
-        <Text className="mb-2 mt-2 text-[32px] font-extrabold text-ink">
-          Choose a Food
-        </Text>
-        <Text className="mb-6 text-sm font-semibold uppercase text-ink/40">
-          Saved food items
-        </Text>
+        <View style={styles.card}>
+          {foods.map((food, index) => {
+            const calories = food.nutrition?.calories ?? 0;
+            const meta =
+              [food.brand, food.serving].filter(Boolean).join(" • ") ||
+              "No serving details";
 
-        {foods.map((food) => {
-          if (!food) return null;
-          const calories = food.nutrition?.calories ?? 0;
-          const meta =
-            [food.brand, food.serving].filter(Boolean).join(" • ") ||
-            "No serving details";
-
-          return (
-            <FoodRow
-              key={food.$jazz.id}
-              name={food.name}
-              meta={meta}
-              calories={calories}
-              selected={selectedFoodId === food.$jazz.id}
-              onPress={() => setSelectedFoodId(food.$jazz.id)}
-            />
-          );
-        })}
+            return (
+              <FoodRow
+                key={food.$jazz.id}
+                name={food.name}
+                meta={meta}
+                calories={calories}
+                selected={selectedFoodId === food.$jazz.id}
+                isLast={index === foods.length - 1}
+                onPress={() => setSelectedFoodId(food.$jazz.id)}
+              />
+            );
+          })}
+        </View>
       </ScrollView>
 
-      <View className="px-6 pt-6" style={{ paddingBottom: insets.bottom + 20 }}>
+      <View style={[styles.actionBarContainer, { paddingBottom: insets.bottom + 12 }]}>
+        {canUseGlass ? (
+          <GlassView
+            glassEffectStyle="regular"
+            tintColor="rgba(255,255,255,0.2)"
+            style={StyleSheet.absoluteFillObject}
+          />
+        ) : null}
         <Pressable
-          className={`rounded-xl p-5 ${selectedFood ? "bg-ink" : "bg-ink/30"}`}
           accessibilityRole="button"
           disabled={!selectedFood}
           onPress={handleAddToLog}
+          style={[styles.actionButton, !selectedFood && styles.actionButtonDisabled]}
         >
-          <Text className="text-center text-base font-bold uppercase tracking-wide text-cream">
-            Add to Log
-          </Text>
+          <Text style={styles.actionButtonText}>Add to Lunch</Text>
         </Pressable>
       </View>
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.background,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: palette.secondaryLabel,
+  },
+  largeTitle: {
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: "700",
+    color: palette.label,
+    paddingHorizontal: 4,
+  },
+  subtitle: {
+    marginTop: 2,
+    marginBottom: 14,
+    paddingHorizontal: 4,
+    fontSize: 15,
+    lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+  card: {
+    backgroundColor: palette.card,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+  },
+  foodRow: {
+    minHeight: 64,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 10,
+  },
+  foodRowDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.separator,
+  },
+  foodMain: {
+    flex: 1,
+  },
+  foodName: {
+    fontSize: 17,
+    lineHeight: 22,
+    color: palette.label,
+  },
+  foodMeta: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.secondaryLabel,
+  },
+  foodRight: {
+    alignItems: "flex-end",
+    minWidth: 64,
+  },
+  foodCalories: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
+  },
+  foodUnit: {
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "500",
+    color: palette.secondaryLabel,
+  },
+  selectedMark: {
+    fontSize: 18,
+    lineHeight: 22,
+    color: palette.tint,
+    fontWeight: "700",
+  },
+  actionBarContainer: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 16,
+    paddingTop: 10,
+    backgroundColor: "rgba(255,255,255,0.35)",
+    overflow: "hidden",
+  },
+  actionButton: {
+    borderRadius: 12,
+    minHeight: 50,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.tint,
+  },
+  actionButtonDisabled: {
+    backgroundColor: palette.tintDisabled,
+  },
+  actionButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.buttonText,
+  },
+});

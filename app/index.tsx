@@ -1,83 +1,62 @@
-import { Href, Link } from "expo-router";
-import { Pressable, ScrollView, Text, View, useColorScheme } from "react-native";
+import { useRouter } from "expo-router";
 import { useAccount } from "jazz-tools/expo";
+import {
+  Platform,
+  PlatformColor,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaloricAccount } from "../src/jazz/schema";
 
-type MacroCardProps = {
-  label: string;
-  value: string;
-  progress: `${number}%`;
-  isDark: boolean;
+const iosColor = (name: string, fallback: string) =>
+  Platform.OS === "ios" ? PlatformColor(name) : fallback;
+
+const palette = {
+  background: iosColor("systemGroupedBackground", "#F3F4F6"),
+  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
+  label: iosColor("label", "#111827"),
+  secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
+  tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
+  separator: iosColor("separator", "#E5E7EB"),
+  tint: iosColor("systemBlue", "#2563EB"),
 };
 
-type MealItemProps = {
-  name: string;
-  meta?: string;
-  calories: string;
-  isDark: boolean;
-};
-
-function MacroCard({ label, value, progress, isDark }: MacroCardProps) {
+function MacroRow({ label, value }: { label: string; value: string }) {
   return (
-    <View className="flex-1">
-      <Text className={`mb-1 text-[11px] font-bold uppercase ${isDark ? "text-moss" : "text-ink"}`}>{label}</Text>
-      <Text className={`mb-1.5 text-[20px] font-bold ${isDark ? "text-mint" : "text-ink"}`} style={{ fontVariant: ["tabular-nums"] }}>
-        {value}
-      </Text>
-      <View className={`relative h-1 ${isDark ? "bg-mint/15" : "bg-ink/10"}`}>
-        <View className={`absolute inset-y-0 left-0 ${isDark ? "bg-mint" : "bg-ink"}`} style={{ width: progress }} />
-      </View>
+    <View style={styles.row}>
+      <Text style={styles.rowLabel}>{label}</Text>
+      <Text style={styles.rowValue}>{value}</Text>
     </View>
   );
 }
 
-function MealItem({ name, meta, calories, isDark }: MealItemProps) {
+function MealRow({ name, meta, calories, isLast }: { name: string; meta?: string; calories: number; isLast: boolean }) {
   return (
-    <View className={`flex-row items-start justify-between border-b py-4 ${isDark ? "border-line" : "border-ink/10"}`}>
-      <View className="shrink pr-3">
-        <Text className={`mb-1 text-base font-semibold ${isDark ? "text-mint" : "text-ink"}`}>{name}</Text>
-        {meta ? <Text className={`text-xs font-medium ${isDark ? "text-moss" : "text-ink/40"}`}>{meta}</Text> : null}
+    <View style={[styles.row, !isLast && styles.rowWithDivider]}>
+      <View style={styles.rowMain}>
+        <Text style={styles.rowTitle}>{name}</Text>
+        {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
       </View>
-      <Text className={`text-base font-bold ${isDark ? "text-mint" : "text-ink"}`} style={{ fontVariant: ["tabular-nums"] }}>
-        {calories}
-      </Text>
-    </View>
-  );
-}
-
-function MealSectionHeader({ title, isDark, href }: { title: string; isDark: boolean; href?: Href }) {
-  const button = (
-    <Pressable className={`h-8 w-8 items-center justify-center rounded-full ${isDark ? "bg-mint" : "bg-ink"}`} accessibilityRole="button">
-      <Text className={`-mt-px text-xl font-light ${isDark ? "text-night" : "text-cream"}`}>+</Text>
-    </Pressable>
-  );
-
-  return (
-    <View className="mb-2 flex-row items-center justify-between pt-4">
-      <Text className={`text-xs font-bold uppercase ${isDark ? "text-moss" : "text-ink/40"}`}>{title}</Text>
-      {href ? (
-        <Link href={href} asChild>
-          {button}
-        </Link>
-      ) : (
-        button
-      )}
+      <Text style={styles.rowValue}>{calories.toLocaleString()}</Text>
     </View>
   );
 }
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const isDark = useColorScheme() === "dark";
+  const router = useRouter();
   const me = useAccount(CaloricAccount, {
     resolve: { root: { logs: { $each: { nutrition: true } } } },
   });
 
   if (!me.$isLoaded) {
     return (
-      <View className={`flex-1 items-center justify-center ${isDark ? "bg-night" : "bg-cream"}`}>
-        <Text className={`${isDark ? "text-mint" : "text-ink"}`}>Loading…</Text>
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading…</Text>
       </View>
     );
   }
@@ -102,53 +81,61 @@ export default function HomeScreen() {
   const progress = Math.max(0, Math.min(100, Math.round((caloriesConsumed / goal) * 100)));
 
   return (
-    <View className={`flex-1 ${isDark ? "bg-night" : "bg-cream"}`} style={{ paddingTop: insets.top }}>
-      <View className="mb-4 flex-row items-center justify-between px-6">
-        <Text className={`border-b-2 pb-0.5 text-sm font-bold uppercase ${isDark ? "border-mint text-mint" : "border-ink text-ink"}`}>
-          Today
-        </Text>
-        <Link href="/settings" asChild>
-          <Pressable accessibilityRole="button">
-            <Text className={`text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>Profile</Text>
+    <View style={styles.screen}>
+      <ScrollView
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[
+          styles.contentContainer,
+          {
+            paddingTop: insets.top + 4,
+            paddingBottom: insets.bottom + 24,
+          },
+        ]}
+      >
+        <Text style={styles.largeTitle}>Today</Text>
+
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Calories</Text>
+          <View style={styles.summaryValueRow}>
+            <Text style={styles.summaryValue}>{caloriesConsumed.toLocaleString()}</Text>
+            <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
+          </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${progress}%` }]} />
+          </View>
+        </View>
+
+        <Text style={styles.sectionTitle}>Macros</Text>
+        <View style={styles.card}>
+          <MacroRow label="Protein" value={`${protein}g`} />
+          <View style={styles.divider} />
+          <MacroRow label="Carbs" value={`${carbs}g`} />
+          <View style={styles.divider} />
+          <MacroRow label="Fat" value={`${fat}g`} />
+        </View>
+
+        <View style={styles.sectionHeaderRow}>
+          <Text style={styles.sectionTitle}>Lunch</Text>
+          <Pressable
+            accessibilityRole="button"
+            onPress={() => router.navigate("/log-food")}
+            style={styles.linkButton}
+          >
+            <Text style={styles.linkButtonText}>Add Food</Text>
           </Pressable>
-        </Link>
-      </View>
-
-      <ScrollView className="flex-1" contentContainerClassName="pb-4" showsVerticalScrollIndicator={false}>
-        <View className="mb-4 px-6">
-          <View className="flex-row items-end gap-2">
-            <Text className={`text-[82px] font-extrabold leading-[86px] ${isDark ? "text-mint" : "text-ink"}`} style={{ fontVariant: ["tabular-nums"] }}>
-              {caloriesConsumed.toLocaleString()}
-            </Text>
-            <Text className={`mb-2 text-2xl font-semibold ${isDark ? "text-moss" : "text-ink/40"}`} style={{ fontVariant: ["tabular-nums"] }}>
-              / {goal.toLocaleString()}
-            </Text>
-          </View>
-          <Text className={`mt-1 text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>Calories consumed</Text>
-
-          <View className={`mt-2 h-2 overflow-hidden ${isDark ? "bg-mint/15" : "bg-ink/10"}`}>
-            <View className={`h-full ${isDark ? "bg-mint" : "bg-ink"}`} style={{ width: `${progress}%` }} />
-          </View>
         </View>
 
-        <View className="mb-4 flex-row gap-3 px-6">
-          <MacroCard label="Protein" value={`${protein}g`} progress={`${Math.min(100, protein)}%`} isDark={isDark} />
-          <MacroCard label="Carbs" value={`${carbs}g`} progress={`${Math.min(100, carbs)}%`} isDark={isDark} />
-          <MacroCard label="Fat" value={`${fat}g`} progress={`${Math.min(100, fat)}%`} isDark={isDark} />
-        </View>
-
-        <View className="px-6">
-          <MealSectionHeader title="Lunch" isDark={isDark} href="/log-food" />
+        <View style={styles.card}>
           {lunchLogs.length === 0 ? (
-            <Text className={`py-4 text-sm ${isDark ? "text-moss" : "text-ink/40"}`}>No lunch entries yet.</Text>
+            <Text style={styles.emptyText}>No lunch entries yet.</Text>
           ) : (
-            lunchLogs.map((entry) => (
-              <MealItem
+            lunchLogs.map((entry, index) => (
+              <MealRow
                 key={entry.$jazz.id}
                 name={entry.foodName}
                 meta={[entry.brand, entry.serving].filter(Boolean).join(" • ")}
-                calories={String(entry.nutrition?.calories ?? 0)}
-                isDark={isDark}
+                calories={entry.nutrition?.calories ?? 0}
+                isLast={index === lunchLogs.length - 1}
               />
             ))
           )}
@@ -157,3 +144,153 @@ export default function HomeScreen() {
     </View>
   );
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  contentContainer: {
+    paddingHorizontal: 16,
+    gap: 12,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.background,
+  },
+  loadingText: {
+    fontSize: 16,
+    color: palette.secondaryLabel,
+  },
+  largeTitle: {
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: "700",
+    color: palette.label,
+    paddingHorizontal: 4,
+  },
+  summaryCard: {
+    backgroundColor: palette.card,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 16,
+  },
+  summaryLabel: {
+    fontSize: 15,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+  },
+  summaryValueRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 6,
+    marginTop: 8,
+  },
+  summaryValue: {
+    fontSize: 46,
+    lineHeight: 50,
+    fontWeight: "700",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
+  },
+  summaryGoal: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "500",
+    color: palette.secondaryLabel,
+    fontVariant: ["tabular-nums"],
+    marginBottom: 2,
+  },
+  progressTrack: {
+    marginTop: 12,
+    height: 6,
+    borderRadius: 3,
+    backgroundColor: palette.tertiaryLabel,
+    overflow: "hidden",
+  },
+  progressFill: {
+    height: "100%",
+    backgroundColor: palette.tint,
+  },
+  sectionHeaderRow: {
+    marginTop: 8,
+    paddingHorizontal: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  sectionTitle: {
+    paddingHorizontal: 4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  linkButton: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
+  },
+  linkButtonText: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "600",
+    color: palette.tint,
+  },
+  card: {
+    backgroundColor: palette.card,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+  },
+  row: {
+    minHeight: 52,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 8,
+  },
+  rowWithDivider: {
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: palette.separator,
+  },
+  rowMain: {
+    flex: 1,
+    paddingVertical: 10,
+  },
+  rowLabel: {
+    fontSize: 17,
+    lineHeight: 22,
+    color: palette.label,
+  },
+  rowTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    color: palette.label,
+  },
+  rowSubtitle: {
+    marginTop: 2,
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.secondaryLabel,
+  },
+  rowValue: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
+  },
+  divider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.separator,
+  },
+  emptyText: {
+    paddingVertical: 14,
+    fontSize: 15,
+    lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+});

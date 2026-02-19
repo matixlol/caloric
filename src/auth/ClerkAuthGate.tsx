@@ -9,12 +9,14 @@ import {
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
+  Platform,
+  PlatformColor,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   TextInput,
   View,
-  useColorScheme,
 } from "react-native";
 import { useAccount } from "jazz-tools/expo";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -27,7 +29,6 @@ type ClerkAuthGateProps = {
 };
 
 type AuthScreenProps = {
-  isDark: boolean;
   title: string;
   subtitle: string;
   children: ReactNode;
@@ -36,6 +37,22 @@ type AuthScreenProps = {
 type AuthMode = "sign-in" | "sign-up";
 type VerificationMode = "none" | "sign-in" | "sign-up";
 type SocialStrategy = "oauth_google";
+
+const iosColor = (name: string, fallback: string) =>
+  Platform.OS === "ios" ? PlatformColor(name) : fallback;
+
+const palette = {
+  background: iosColor("systemGroupedBackground", "#F3F4F6"),
+  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
+  label: iosColor("label", "#111827"),
+  secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
+  tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
+  separator: iosColor("separator", "#E5E7EB"),
+  tint: iosColor("systemBlue", "#2563EB"),
+  buttonDisabled: iosColor("systemGray3", "#D1D5DB"),
+  error: iosColor("systemRed", "#DC2626"),
+  white: iosColor("white", "#FFFFFF"),
+};
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
@@ -60,24 +77,59 @@ function getAuthErrorMessage(error: unknown) {
   return "Authentication failed.";
 }
 
-function AuthScreen({ isDark, title, subtitle, children }: AuthScreenProps) {
+function AuthScreen({ title, subtitle, children }: AuthScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
-    <View className={`flex-1 ${isDark ? "bg-night" : "bg-cream"}`} style={{ paddingTop: insets.top }}>
+    <View style={styles.screen}>
       <ScrollView
-        className="flex-1"
-        contentContainerClassName="flex-grow justify-center px-6 py-10"
+        contentInsetAdjustmentBehavior="automatic"
+        contentContainerStyle={[
+          styles.authContentContainer,
+          {
+            paddingTop: insets.top + 24,
+            paddingBottom: insets.bottom + 24,
+          },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
-        <View className="w-full self-center">
-          <Text className={`text-[46px] font-extrabold leading-[48px] ${isDark ? "text-mint" : "text-ink"}`}>{title}</Text>
-          <Text className={`mt-3 mb-8 text-base font-medium ${isDark ? "text-moss" : "text-ink/65"}`}>{subtitle}</Text>
-
-          <View className={`rounded-3xl border p-6 ${isDark ? "border-line bg-night" : "border-ink/10 bg-white"}`}>{children}</View>
-        </View>
+        <Text style={styles.authTitle}>{title}</Text>
+        <Text style={styles.authSubtitle}>{subtitle}</Text>
+        <View style={styles.authCard}>{children}</View>
       </ScrollView>
+    </View>
+  );
+}
+
+function LabeledInput({
+  label,
+  value,
+  onChangeText,
+  placeholder,
+  secureTextEntry,
+  keyboardType,
+}: {
+  label: string;
+  value: string;
+  onChangeText: (value: string) => void;
+  placeholder: string;
+  secureTextEntry?: boolean;
+  keyboardType?: "default" | "email-address" | "number-pad";
+}) {
+  return (
+    <View style={styles.inputGroup}>
+      <Text style={styles.inputLabel}>{label}</Text>
+      <TextInput
+        value={value}
+        onChangeText={onChangeText}
+        placeholder={placeholder}
+        placeholderTextColor={palette.tertiaryLabel}
+        style={styles.textInput}
+        secureTextEntry={secureTextEntry}
+        autoCapitalize="none"
+        keyboardType={keyboardType}
+      />
     </View>
   );
 }
@@ -89,7 +141,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
   const { isLoaded: signUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
   const me = useAccount(CaloricAccount, { resolve: { profile: true } });
-  const isDark = useColorScheme() === "dark";
 
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [verificationMode, setVerificationMode] = useState<VerificationMode>("none");
@@ -335,8 +386,8 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
   if (!authLoaded) {
     return (
-      <View className={`flex-1 items-center justify-center ${isDark ? "bg-night" : "bg-cream"}`}>
-        <ActivityIndicator size="large" color={isDark ? "#D9F2E2" : "#104028"} />
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={palette.tint} />
       </View>
     );
   }
@@ -344,122 +395,114 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   if (!isSignedIn) {
     const showingVerification = verificationMode !== "none";
     const isSigningIn = authMode === "sign-in";
+    const isPrimaryDisabled = showingVerification
+      ? busy || !codeInput.trim()
+      : busy || !emailIsValid || !passwordInput.trim();
 
     return (
       <AuthScreen
-        isDark={isDark}
-        title={showingVerification ? "VERIFY" : isSigningIn ? "LOGIN" : "SIGN UP"}
+        title={showingVerification ? "Verify" : isSigningIn ? "Sign In" : "Sign Up"}
         subtitle={
           showingVerification
-            ? "Enter the one-time code sent to continue."
+            ? "Enter the one-time code sent to your email."
             : isSigningIn
-              ? "Sign in to your account."
+              ? "Sign in to continue."
               : "Create an account to continue."
         }
       >
-        <View className="w-full">
-          {!showingVerification ? (
-            <View className="gap-5">
-              <View className="gap-2">
-                <Text className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-moss" : "text-ink/50"}`}>Email</Text>
-                <TextInput
-                  value={emailInput}
-                  onChangeText={setEmailInput}
-                  placeholder="you@company.com"
-                  placeholderTextColor={isDark ? "#93A785" : "#5D7A69"}
-                  className={`h-14 rounded-none border-2 px-5 text-[17px] font-semibold ${isDark ? "border-moss/60 bg-pine/70 text-mint" : "border-ink/25 bg-white text-ink"}`}
-                  autoCapitalize="none"
-                  keyboardType="email-address"
-                />
-              </View>
-
-              <View className="gap-2">
-                <Text className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-moss" : "text-ink/50"}`}>Password</Text>
-                <TextInput
-                  value={passwordInput}
-                  onChangeText={setPasswordInput}
-                  placeholder="••••••••"
-                  placeholderTextColor={isDark ? "#93A785" : "#5D7A69"}
-                  className={`h-14 rounded-none border-2 px-5 text-[17px] font-semibold ${isDark ? "border-moss/60 bg-pine/70 text-mint" : "border-ink/25 bg-white text-ink"}`}
-                  secureTextEntry
-                  autoCapitalize="none"
-                />
-              </View>
-            </View>
-          ) : (
-            <View className="gap-2">
-              <Text className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-moss" : "text-ink/50"}`}>Verification Code</Text>
-              <TextInput
-                value={codeInput}
-                onChangeText={setCodeInput}
-                placeholder="123456"
-                placeholderTextColor={isDark ? "#93A785" : "#5D7A69"}
-                className={`h-14 rounded-none border-2 px-5 text-[17px] font-semibold ${isDark ? "border-moss/60 bg-pine/70 text-mint" : "border-ink/25 bg-white text-ink"}`}
-                keyboardType="number-pad"
-                autoCapitalize="none"
-              />
-            </View>
-          )}
-
-          {error ? <Text className={`mt-3 text-sm ${isDark ? "text-red-300" : "text-red-700"}`}>{error}</Text> : null}
-          {info ? <Text className={`mt-3 text-sm ${isDark ? "text-moss" : "text-ink/65"}`}>{info}</Text> : null}
-
-          <View className="mt-6 gap-3">
-            {showingVerification ? (
-              <Pressable
-                className={`items-center rounded-none px-5 py-5 ${busy ? "opacity-60" : ""} ${isDark ? "bg-mint" : "bg-ink"}`}
-                disabled={busy || !codeInput.trim()}
-                onPress={verificationMode === "sign-up" ? handleSignUpVerification : handleSignInVerification}
-              >
-                <Text className={`text-base font-bold ${isDark ? "text-night" : "text-cream"}`}>Verify Code</Text>
-              </Pressable>
-            ) : (
-              <Pressable
-                className={`items-center rounded-none px-5 py-5 ${busy ? "opacity-60" : ""} ${isDark ? "bg-mint" : "bg-ink"}`}
-                disabled={busy || !emailIsValid || !passwordInput.trim()}
-                onPress={isSigningIn ? handleSignIn : handleSignUp}
-              >
-                <Text className={`text-base font-bold ${isDark ? "text-night" : "text-cream"}`}>{isSigningIn ? "Sign In" : "Create Account"}</Text>
-              </Pressable>
-            )}
-
-            {!showingVerification ? (
-              <>
-                <View className="flex-row items-center gap-3">
-                  <View className={`h-px flex-1 ${isDark ? "bg-line" : "bg-ink/10"}`} />
-                  <Text className={`text-[10px] font-bold uppercase ${isDark ? "text-moss" : "text-ink/40"}`}>Or continue with</Text>
-                  <View className={`h-px flex-1 ${isDark ? "bg-line" : "bg-ink/10"}`} />
-                </View>
-
-                <Pressable
-                  className={`items-center rounded-none border-2 px-5 py-4 ${busy ? "opacity-60" : ""} ${isDark ? "border-moss bg-night" : "border-ink/25 bg-white"}`}
-                  disabled={busy}
-                  onPress={() => handleSocialSignIn("oauth_google")}
-                >
-                  <Text className={`text-base font-semibold ${isDark ? "text-mint" : "text-ink"}`}>Continue with Google</Text>
-                </Pressable>
-              </>
-            ) : null}
-
-            <Pressable
-              className={`items-center rounded-none border-2 px-5 py-4 ${busy ? "opacity-60" : ""} ${isDark ? "border-moss bg-night" : "border-ink/25 bg-white"}`}
-              disabled={busy}
-              onPress={() => {
-                if (showingVerification) {
-                  setVerificationMode("none");
-                  setCodeInput("");
-                  resetMessages();
-                  return;
-                }
-
-                switchAuthMode(isSigningIn ? "sign-up" : "sign-in");
-              }}
-            >
-              <Text className={`text-base font-semibold ${isDark ? "text-mint" : "text-ink"}`}>
-                {showingVerification ? "Use Different Method" : isSigningIn ? "Need an account? Sign Up" : "Already have an account? Sign In"}
-              </Text>
-            </Pressable>
+        {!showingVerification ? (
+          <View style={styles.formStack}>
+            <LabeledInput
+              label="Email"
+              value={emailInput}
+              onChangeText={setEmailInput}
+              placeholder="you@company.com"
+              keyboardType="email-address"
+            />
+            <LabeledInput
+              label="Password"
+              value={passwordInput}
+              onChangeText={setPasswordInput}
+              placeholder="••••••••"
+              secureTextEntry
+            />
           </View>
+        ) : (
+          <LabeledInput
+            label="Verification Code"
+            value={codeInput}
+            onChangeText={setCodeInput}
+            placeholder="123456"
+            keyboardType="number-pad"
+          />
+        )}
+
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {info ? <Text style={styles.infoText}>{info}</Text> : null}
+
+        <View style={styles.actions}>
+          <Pressable
+            disabled={isPrimaryDisabled}
+            onPress={
+              showingVerification
+                ? verificationMode === "sign-up"
+                  ? handleSignUpVerification
+                  : handleSignInVerification
+                : isSigningIn
+                  ? handleSignIn
+                  : handleSignUp
+            }
+            style={[styles.primaryButton, isPrimaryDisabled && styles.primaryButtonDisabled]}
+          >
+            <Text style={styles.primaryButtonText}>
+              {showingVerification
+                ? "Verify Code"
+                : isSigningIn
+                  ? "Sign In"
+                  : "Create Account"}
+            </Text>
+          </Pressable>
+
+          {!showingVerification ? (
+            <>
+              <View style={styles.dividerRow}>
+                <View style={styles.dividerLine} />
+                <Text style={styles.dividerText}>or continue with</Text>
+                <View style={styles.dividerLine} />
+              </View>
+
+              <Pressable
+                disabled={busy}
+                onPress={() => handleSocialSignIn("oauth_google")}
+                style={styles.secondaryButton}
+              >
+                <Text style={styles.secondaryButtonText}>Continue with Google</Text>
+              </Pressable>
+            </>
+          ) : null}
+
+          <Pressable
+            disabled={busy}
+            onPress={() => {
+              if (showingVerification) {
+                setVerificationMode("none");
+                setCodeInput("");
+                resetMessages();
+                return;
+              }
+
+              switchAuthMode(isSigningIn ? "sign-up" : "sign-in");
+            }}
+            style={styles.tertiaryButton}
+          >
+            <Text style={styles.tertiaryButtonText}>
+              {showingVerification
+                ? "Use Different Method"
+                : isSigningIn
+                  ? "Need an account? Sign Up"
+                  : "Already have an account? Sign In"}
+            </Text>
+          </Pressable>
         </View>
       </AuthScreen>
     );
@@ -467,8 +510,8 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
   if (!me.$isLoaded) {
     return (
-      <View className={`flex-1 items-center justify-center ${isDark ? "bg-night" : "bg-cream"}`}>
-        <ActivityIndicator size="large" color={isDark ? "#D9F2E2" : "#104028"} />
+      <View style={styles.loadingContainer}>
+        <ActivityIndicator size="large" color={palette.tint} />
       </View>
     );
   }
@@ -476,34 +519,21 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   if (!currentEmail) {
     return (
       <AuthScreen
-        isDark={isDark}
-        title="ADD EMAIL"
+        title="Add Email"
         subtitle="Your account requires an email. This is stored on your public profile."
       >
-        <View className="w-full">
-          <View className="gap-2">
-            <Text className={`text-[11px] font-bold uppercase tracking-wide ${isDark ? "text-moss" : "text-ink/50"}`}>Email</Text>
-            <TextInput
-              value={emailInput}
-              onChangeText={setEmailInput}
-              placeholder="you@company.com"
-              placeholderTextColor={isDark ? "#93A785" : "#5D7A69"}
-              className={`h-14 rounded-none border-2 px-5 text-[17px] font-semibold ${isDark ? "border-moss/60 bg-pine/70 text-mint" : "border-ink/25 bg-white text-ink"}`}
-              autoCapitalize="none"
-              keyboardType="email-address"
-            />
-          </View>
-
-          {error ? <Text className={`mt-3 text-sm ${isDark ? "text-red-300" : "text-red-700"}`}>{error}</Text> : null}
-
-          <View className="mt-6">
-            <Pressable
-              className={`items-center rounded-none px-5 py-5 ${isDark ? "bg-mint" : "bg-ink"}`}
-              onPress={handleSaveEmail}
-            >
-              <Text className={`text-base font-bold ${isDark ? "text-night" : "text-cream"}`}>Save Email</Text>
-            </Pressable>
-          </View>
+        <LabeledInput
+          label="Email"
+          value={emailInput}
+          onChangeText={setEmailInput}
+          placeholder="you@company.com"
+          keyboardType="email-address"
+        />
+        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        <View style={styles.actions}>
+          <Pressable onPress={handleSaveEmail} style={styles.primaryButton}>
+            <Text style={styles.primaryButtonText}>Save Email</Text>
+          </Pressable>
         </View>
       </AuthScreen>
     );
@@ -511,3 +541,142 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
   return <>{children}</>;
 }
+
+const styles = StyleSheet.create({
+  screen: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
+  loadingContainer: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.background,
+  },
+  authContentContainer: {
+    flexGrow: 1,
+    justifyContent: "center",
+    paddingHorizontal: 20,
+  },
+  authTitle: {
+    fontSize: 34,
+    lineHeight: 41,
+    fontWeight: "700",
+    color: palette.label,
+  },
+  authSubtitle: {
+    marginTop: 6,
+    marginBottom: 16,
+    fontSize: 16,
+    lineHeight: 22,
+    color: palette.secondaryLabel,
+  },
+  authCard: {
+    borderRadius: 16,
+    padding: 16,
+    backgroundColor: palette.card,
+  },
+  formStack: {
+    gap: 12,
+  },
+  inputGroup: {
+    gap: 6,
+  },
+  inputLabel: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  textInput: {
+    minHeight: 48,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.separator,
+    backgroundColor: palette.white,
+    paddingHorizontal: 12,
+    fontSize: 17,
+    color: palette.label,
+  },
+  errorText: {
+    marginTop: 12,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.error,
+    fontWeight: "500",
+  },
+  infoText: {
+    marginTop: 12,
+    fontSize: 14,
+    lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+  actions: {
+    marginTop: 14,
+    gap: 10,
+  },
+  primaryButton: {
+    minHeight: 48,
+    borderRadius: 12,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.tint,
+  },
+  primaryButtonDisabled: {
+    backgroundColor: palette.buttonDisabled,
+  },
+  primaryButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.white,
+  },
+  dividerRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    marginTop: 4,
+  },
+  dividerLine: {
+    flex: 1,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.separator,
+  },
+  dividerText: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: palette.tertiaryLabel,
+    textTransform: "uppercase",
+    letterSpacing: 0.5,
+  },
+  secondaryButton: {
+    minHeight: 44,
+    borderRadius: 10,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.separator,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.white,
+  },
+  secondaryButtonText: {
+    fontSize: 16,
+    lineHeight: 21,
+    color: palette.label,
+    fontWeight: "500",
+  },
+  tertiaryButton: {
+    minHeight: 42,
+    borderRadius: 10,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: "transparent",
+  },
+  tertiaryButtonText: {
+    fontSize: 15,
+    lineHeight: 20,
+    color: palette.tint,
+    fontWeight: "500",
+  },
+});
