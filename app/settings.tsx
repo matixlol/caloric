@@ -97,7 +97,7 @@ export default function SettingsScreen() {
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
-  const fallbackEmail =
+  const clerkEmail =
     user?.primaryEmailAddress?.emailAddress ||
     user?.emailAddresses?.[0]?.emailAddress ||
     "No email found";
@@ -168,7 +168,7 @@ export default function SettingsScreen() {
     parsedCarbs !== loadedCarbs ||
     parsedFat !== loadedFat;
 
-  const profileEmail = me.profile.email || fallbackEmail;
+  const profileEmail = clerkEmail;
 
   const handleSave = () => {
     setSaveError(null);

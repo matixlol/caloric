@@ -1,7 +1,6 @@
 import {
   isClerkAPIResponseError,
   useAuth,
-  useSSO,
   useSignIn,
   useSignUp,
   useUser,
@@ -36,7 +35,6 @@ type AuthScreenProps = {
 
 type AuthMode = "sign-in" | "sign-up";
 type VerificationMode = "none" | "sign-in" | "sign-up";
-type SocialStrategy = "oauth_google";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -137,7 +135,6 @@ function LabeledInput({
 export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
-  const { startSSOFlow } = useSSO();
   const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
   const { isLoaded: signUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
   const me = useAccount(CaloricAccount, { resolve: { profile: true } });
@@ -145,7 +142,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [verificationMode, setVerificationMode] = useState<VerificationMode>("none");
   const [emailInput, setEmailInput] = useState("");
-  const [passwordInput, setPasswordInput] = useState("");
   const [codeInput, setCodeInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -192,18 +188,12 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
       return;
     }
 
-    if (!passwordInput.trim()) {
-      setError("Enter your password.");
-      return;
-    }
-
     resetMessages();
     setBusy(true);
 
     try {
       const signInAttempt = await signIn.create({
         identifier: email,
-        password: passwordInput,
       });
 
       if (signInAttempt.status === "complete" && signInAttempt.createdSessionId) {
@@ -211,24 +201,23 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
         return;
       }
 
-      if (signInAttempt.status === "needs_second_factor") {
-        const emailCodeSupported =
-          signInAttempt.supportedSecondFactors?.some(
-            (factor) => factor.strategy === "email_code",
-          ) ?? false;
+      const emailCodeFactor = signInAttempt.supportedFirstFactors?.find(
+        (factor) => factor.strategy === "email_code" && "emailAddressId" in factor,
+      );
 
-        if (!emailCodeSupported) {
-          setError("This account requires a second factor that is not supported in this screen.");
-          return;
-        }
-
-        await signInAttempt.prepareSecondFactor({ strategy: "email_code" });
-        setVerificationMode("sign-in");
-        setInfo("Enter the email verification code to complete sign in.");
+      if (!emailCodeFactor || !("emailAddressId" in emailCodeFactor)) {
+        setError("Email code sign in is not enabled for this account.");
         return;
       }
 
-      setError("Sign in could not be completed. Please try again.");
+      await signInAttempt.prepareFirstFactor({
+        strategy: "email_code",
+        emailAddressId: emailCodeFactor.emailAddressId,
+      });
+
+      setCodeInput("");
+      setVerificationMode("sign-in");
+      setInfo("We sent a verification code to your email.");
     } catch (signInError) {
       setError(getAuthErrorMessage(signInError));
     } finally {
@@ -251,13 +240,18 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
     setBusy(true);
 
     try {
-      const result = await signIn.attemptSecondFactor({
+      const result = await signIn.attemptFirstFactor({
         strategy: "email_code",
         code,
       });
 
       if (result.status === "complete" && result.createdSessionId) {
         await setSignInActive({ session: result.createdSessionId });
+        return;
+      }
+
+      if (result.status === "needs_second_factor") {
+        setError("This account requires an additional factor that is not supported here.");
         return;
       }
 
@@ -280,18 +274,12 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
       return;
     }
 
-    if (!passwordInput.trim()) {
-      setError("Enter a password.");
-      return;
-    }
-
     resetMessages();
     setBusy(true);
 
     try {
       const signUpAttempt = await signUp.create({
         emailAddress: email,
-        password: passwordInput,
       });
 
       if (signUpAttempt.status === "complete" && signUpAttempt.createdSessionId) {
@@ -300,6 +288,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
       }
 
       await signUpAttempt.prepareEmailAddressVerification({ strategy: "email_code" });
+      setCodeInput("");
       setVerificationMode("sign-up");
       setInfo("We sent a verification code to your email.");
     } catch (signUpError) {
@@ -357,33 +346,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
     me.profile.$jazz.set("email", normalizedEmail);
   };
 
-  const handleSocialSignIn = async (strategy: SocialStrategy) => {
-    resetMessages();
-    setBusy(true);
-
-    try {
-      const { createdSessionId, setActive, authSessionResult } = await startSSOFlow({
-        strategy,
-      });
-
-      if (createdSessionId && setActive) {
-        await setActive({ session: createdSessionId });
-        return;
-      }
-
-      if (authSessionResult?.type === "cancel") {
-        setInfo("Sign in was canceled.");
-        return;
-      }
-
-      setInfo("Continue in browser to finish sign in.");
-    } catch (socialError) {
-      setError(getAuthErrorMessage(socialError));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   if (!authLoaded) {
     return (
       <View style={styles.loadingContainer}>
@@ -397,7 +359,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
     const isSigningIn = authMode === "sign-in";
     const isPrimaryDisabled = showingVerification
       ? busy || !codeInput.trim()
-      : busy || !emailIsValid || !passwordInput.trim();
+      : busy || !emailIsValid;
 
     return (
       <AuthScreen
@@ -406,8 +368,8 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
           showingVerification
             ? "Enter the one-time code sent to your email."
             : isSigningIn
-              ? "Sign in to continue."
-              : "Create an account to continue."
+              ? "Sign in with a one-time email code."
+              : "Create an account with a one-time email code."
         }
       >
         {!showingVerification ? (
@@ -418,13 +380,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
               onChangeText={setEmailInput}
               placeholder="you@company.com"
               keyboardType="email-address"
-            />
-            <LabeledInput
-              label="Password"
-              value={passwordInput}
-              onChangeText={setPasswordInput}
-              placeholder="••••••••"
-              secureTextEntry
             />
           </View>
         ) : (
@@ -457,29 +412,9 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
             <Text style={styles.primaryButtonText}>
               {showingVerification
                 ? "Verify Code"
-                : isSigningIn
-                  ? "Sign In"
-                  : "Create Account"}
+                : "Send Code"}
             </Text>
           </Pressable>
-
-          {!showingVerification ? (
-            <>
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>or continue with</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              <Pressable
-                disabled={busy}
-                onPress={() => handleSocialSignIn("oauth_google")}
-                style={styles.secondaryButton}
-              >
-                <Text style={styles.secondaryButtonText}>Continue with Google</Text>
-              </Pressable>
-            </>
-          ) : null}
 
           <Pressable
             disabled={busy}
@@ -497,7 +432,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
           >
             <Text style={styles.tertiaryButtonText}>
               {showingVerification
-                ? "Use Different Method"
+                ? "Use Different Email"
                 : isSigningIn
                   ? "Need an account? Sign Up"
                   : "Already have an account? Sign In"}
@@ -632,39 +567,6 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: "600",
     color: "#FFFFFF",
-  },
-  dividerRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 10,
-    marginTop: 4,
-  },
-  dividerLine: {
-    flex: 1,
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: palette.separator,
-  },
-  dividerText: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: palette.tertiaryLabel,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  secondaryButton: {
-    minHeight: 44,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.separator,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.white,
-  },
-  secondaryButtonText: {
-    fontSize: 16,
-    lineHeight: 21,
-    color: palette.label,
-    fontWeight: "500",
   },
   tertiaryButton: {
     minHeight: 42,

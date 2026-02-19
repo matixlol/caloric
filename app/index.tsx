@@ -88,13 +88,18 @@ function MealSection({
       {/* Keep each meal body isolated so this can become a drop target later. */}
       <View style={styles.mealCard}>
         <View style={styles.mealHeader}>
-          <View>
+          <View style={styles.mealCaloriesRow}>
             <Text style={styles.mealCalories}>{calories.toLocaleString()}</Text>
-            <Text style={styles.mealCaloriesUnit}>kcal total</Text>
+            <Text style={styles.mealCaloriesUnit}>kcal</Text>
           </View>
 
-          <Pressable accessibilityRole="button" onPress={onAddFood} style={styles.linkButton}>
-            <Text style={styles.linkButtonText}>Add Food</Text>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Add food to ${label}`}
+            onPress={onAddFood}
+            style={styles.addIconButton}
+          >
+            <Text style={styles.addIconButtonText}>+</Text>
           </Pressable>
         </View>
 
@@ -426,27 +431,35 @@ const styles = StyleSheet.create({
   },
   mealCalories: {
     fontSize: 28,
-    lineHeight: 30,
+    lineHeight: 28,
     fontWeight: "700",
     color: palette.label,
     fontVariant: ["tabular-nums"],
   },
+  mealCaloriesRow: {
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 6,
+  },
   mealCaloriesUnit: {
-    marginTop: 1,
     fontSize: 11,
-    lineHeight: 14,
+    lineHeight: 11,
     fontWeight: "600",
     color: palette.secondaryLabel,
     textTransform: "uppercase",
     letterSpacing: 0.4,
   },
-  linkButton: {
-    paddingVertical: 8,
-    paddingHorizontal: 2,
+  addIconButton: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.background,
   },
-  linkButtonText: {
-    fontSize: 14,
-    lineHeight: 18,
+  addIconButtonText: {
+    fontSize: 22,
+    lineHeight: 24,
     fontWeight: "600",
     color: palette.tint,
   },
