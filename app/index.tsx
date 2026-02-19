@@ -10,6 +10,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { MEAL_TIMES, type MealKey, normalizeMeal } from "../src/meals";
 import { CaloricAccount } from "../src/jazz/schema";
 
 const iosColor = (name: string, fallback: string) =>
@@ -30,11 +31,28 @@ const DEFAULT_PROTEIN_PCT = 30;
 const DEFAULT_CARBS_PCT = 50;
 const DEFAULT_FAT_PCT = 20;
 
+type MealEntry = {
+  id: string;
+  name: string;
+  meta?: string;
+  calories: number;
+};
+
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
-function MealRow({ name, meta, calories, isLast }: { name: string; meta?: string; calories: number; isLast: boolean }) {
+function MealRow({
+  name,
+  meta,
+  calories,
+  isLast,
+}: {
+  name: string;
+  meta?: string;
+  calories: number;
+  isLast: boolean;
+}) {
   return (
     <View style={[styles.row, !isLast && styles.rowWithDivider]}>
       <View style={styles.rowMain}>
@@ -42,6 +60,58 @@ function MealRow({ name, meta, calories, isLast }: { name: string; meta?: string
         {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
       </View>
       <Text style={styles.rowValue}>{calories.toLocaleString()}</Text>
+    </View>
+  );
+}
+
+function MealSection({
+  label,
+  emptyCopy,
+  entries,
+  calories,
+  onAddFood,
+}: {
+  label: string;
+  emptyCopy: string;
+  entries: MealEntry[];
+  calories: number;
+  onAddFood: () => void;
+}) {
+  return (
+    <View style={styles.mealRow}>
+      <View style={styles.mealSideLabel}>
+        <Text numberOfLines={1} style={styles.mealSideLabelText}>
+          {label.toUpperCase()}
+        </Text>
+      </View>
+
+      {/* Keep each meal body isolated so this can become a drop target later. */}
+      <View style={styles.mealCard}>
+        <View style={styles.mealHeader}>
+          <View>
+            <Text style={styles.mealCalories}>{calories.toLocaleString()}</Text>
+            <Text style={styles.mealCaloriesUnit}>kcal total</Text>
+          </View>
+
+          <Pressable accessibilityRole="button" onPress={onAddFood} style={styles.linkButton}>
+            <Text style={styles.linkButtonText}>Add Food</Text>
+          </Pressable>
+        </View>
+
+        {entries.length === 0 ? (
+          <Text style={styles.emptyText}>{emptyCopy}</Text>
+        ) : (
+          entries.map((entry, index) => (
+            <MealRow
+              key={entry.id}
+              name={entry.name}
+              meta={entry.meta}
+              calories={entry.calories}
+              isLast={index === entries.length - 1}
+            />
+          ))
+        )}
+      </View>
     </View>
   );
 }
@@ -68,10 +138,6 @@ export default function HomeScreen() {
     )
     .sort((a, b) => b.createdAt - a.createdAt);
 
-  const lunchLogs = logs.filter(
-    (entry) => typeof entry.meal === "string" && entry.meal.toLowerCase() === "lunch",
-  );
-
   const caloriesConsumed = logs.reduce((sum, entry) => sum + (entry.nutrition?.calories ?? 0), 0);
   const protein = logs.reduce((sum, entry) => sum + (entry.nutrition?.protein ?? 0), 0);
   const carbs = logs.reduce((sum, entry) => sum + (entry.nutrition?.carbs ?? 0), 0);
@@ -91,6 +157,25 @@ export default function HomeScreen() {
   const carbsProgress = clampPercent((carbs / Math.max(carbsGoal, 1)) * 100);
   const fatProgress = clampPercent((fat / Math.max(fatGoal, 1)) * 100);
 
+  const logsByMeal: Record<MealKey, MealEntry[]> = {
+    breakfast: [],
+    lunch: [],
+    dinner: [],
+    snacks: [],
+  };
+
+  logs.forEach((entry) => {
+    const meal = normalizeMeal(entry.meal);
+    if (!meal) return;
+
+    logsByMeal[meal].push({
+      id: entry.$jazz.id,
+      name: entry.foodName,
+      meta: [entry.brand, entry.serving].filter(Boolean).join(" • "),
+      calories: entry.nutrition?.calories ?? 0,
+    });
+  });
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -98,7 +183,7 @@ export default function HomeScreen() {
         contentContainerStyle={[
           styles.contentContainer,
           {
-            paddingTop: insets.top + 4,
+            paddingTop: insets.top,
             paddingBottom: insets.bottom + 24,
           },
         ]}
@@ -151,31 +236,27 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        <View style={styles.sectionHeaderRow}>
-          <Text style={styles.sectionTitle}>Lunch</Text>
-          <Pressable
-            accessibilityRole="button"
-            onPress={() => router.navigate("/log-food")}
-            style={styles.linkButton}
-          >
-            <Text style={styles.linkButtonText}>Add Food</Text>
-          </Pressable>
-        </View>
+        <View style={styles.mealList}>
+          {MEAL_TIMES.map((meal) => {
+            const entries = logsByMeal[meal.key];
+            const calories = entries.reduce((sum, entry) => sum + entry.calories, 0);
 
-        <View style={styles.card}>
-          {lunchLogs.length === 0 ? (
-            <Text style={styles.emptyText}>No lunch entries yet.</Text>
-          ) : (
-            lunchLogs.map((entry, index) => (
-              <MealRow
-                key={entry.$jazz.id}
-                name={entry.foodName}
-                meta={[entry.brand, entry.serving].filter(Boolean).join(" • ")}
-                calories={entry.nutrition?.calories ?? 0}
-                isLast={index === lunchLogs.length - 1}
+            return (
+              <MealSection
+                key={meal.key}
+                label={meal.label}
+                emptyCopy={meal.emptyCopy}
+                entries={entries}
+                calories={calories}
+                onAddFood={() =>
+                  router.navigate({
+                    pathname: "/log-food",
+                    params: { meal: meal.key },
+                  })
+                }
               />
-            ))
-          )}
+            );
+          })}
         </View>
       </ScrollView>
     </View>
@@ -189,7 +270,7 @@ const styles = StyleSheet.create({
   },
   contentContainer: {
     paddingHorizontal: 16,
-    gap: 12,
+    gap: 10,
   },
   loadingContainer: {
     flex: 1,
@@ -206,7 +287,6 @@ const styles = StyleSheet.create({
     lineHeight: 41,
     fontWeight: "700",
     color: palette.label,
-    paddingHorizontal: 4,
   },
   summaryCard: {
     backgroundColor: palette.card,
@@ -301,35 +381,74 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: palette.tint,
   },
-  sectionHeaderRow: {
-    marginTop: 8,
-    paddingHorizontal: 4,
+  mealList: {
+    gap: 10,
+    paddingBottom: 12,
+    marginHorizontal: -10,
+  },
+  mealRow: {
+    flexDirection: "row",
+    alignItems: "stretch",
+    gap: 4,
+  },
+  mealSideLabel: {
+    width: 26,
+    position: "relative",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  mealSideLabelText: {
+    position: "absolute",
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "700",
+    color: palette.secondaryLabel,
+    letterSpacing: 1.6,
+    width: 96,
+    textAlign: "center",
+    transform: [{ rotate: "-90deg" }],
+  },
+  mealCard: {
+    flex: 1,
+    backgroundColor: palette.card,
+    borderRadius: 14,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: palette.separator,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+  },
+  mealHeader: {
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
+    marginBottom: 8,
   },
-  sectionTitle: {
-    paddingHorizontal: 4,
-    fontSize: 13,
-    lineHeight: 18,
+  mealCalories: {
+    fontSize: 28,
+    lineHeight: 30,
+    fontWeight: "700",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
+  },
+  mealCaloriesUnit: {
+    marginTop: 1,
+    fontSize: 11,
+    lineHeight: 14,
     fontWeight: "600",
     color: palette.secondaryLabel,
-    letterSpacing: 0,
+    textTransform: "uppercase",
+    letterSpacing: 0.4,
   },
   linkButton: {
-    paddingVertical: 6,
-    paddingHorizontal: 4,
+    paddingVertical: 8,
+    paddingHorizontal: 2,
   },
   linkButtonText: {
-    fontSize: 15,
-    lineHeight: 20,
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "600",
     color: palette.tint,
-  },
-  card: {
-    backgroundColor: palette.card,
-    borderRadius: 14,
-    paddingHorizontal: 14,
   },
   row: {
     minHeight: 52,

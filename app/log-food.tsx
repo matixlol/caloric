@@ -1,5 +1,5 @@
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
-import { useRouter } from "expo-router";
+import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import { useAccount } from "jazz-tools/expo";
 import {
@@ -12,6 +12,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { mealLabelFor, normalizeMeal } from "../src/meals";
 import { CaloricAccount } from "../src/jazz/schema";
 
 const iosColor = (name: string, fallback: string) =>
@@ -65,6 +66,7 @@ function FoodRow({
 export default function LogFoodScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const params = useLocalSearchParams<{ meal?: string | string[] }>();
   const me = useAccount(CaloricAccount, {
     resolve: { root: { foods: { $each: { nutrition: true } }, logs: true } },
   });
@@ -84,6 +86,8 @@ export default function LogFoodScreen() {
     (food): food is NonNullable<typeof food> & { $isLoaded: true } =>
       Boolean(food?.$isLoaded),
   );
+  const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
+  const selectedMealLabel = mealLabelFor(selectedMeal);
   const selectedFood = foods.find((food) => food.$jazz.id === selectedFoodId) || null;
 
   const handleAddToLog = () => {
@@ -94,7 +98,7 @@ export default function LogFoodScreen() {
     }
 
     me.root.logs?.$jazz.push({
-      meal: "lunch",
+      meal: selectedMeal,
       foodName: selectedFood.name,
       brand: selectedFood.brand,
       serving: selectedFood.serving,
@@ -129,7 +133,9 @@ export default function LogFoodScreen() {
         ]}
       >
         <Text style={styles.largeTitle}>Foods</Text>
-        <Text style={styles.subtitle}>Pick one item to add to lunch</Text>
+        <Text style={styles.subtitle}>
+          Pick one item to add to {selectedMealLabel.toLowerCase()}
+        </Text>
 
         <View style={styles.card}>
           {foods.map((food, index) => {
@@ -167,7 +173,7 @@ export default function LogFoodScreen() {
           onPress={handleAddToLog}
           style={[styles.actionButton, !selectedFood && styles.actionButtonDisabled]}
         >
-          <Text style={styles.actionButtonText}>Add to Lunch</Text>
+          <Text style={styles.actionButtonText}>Add to {selectedMealLabel}</Text>
         </Pressable>
       </View>
     </View>
