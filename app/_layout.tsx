@@ -59,20 +59,9 @@ export default function RootLayout() {
               selected: { color: iosColor("label", "#111827") },
             }}
           >
-            <NativeTabs.BottomAccessory>
-              <View style={styles.bottomAccessory}>
-                <Text style={styles.bottomAccessoryText}>Caloric</Text>
-              </View>
-            </NativeTabs.BottomAccessory>
-
             <NativeTabs.Trigger name="index">
               <NativeTabs.Trigger.Icon sf={{ default: "house", selected: "house.fill" }} md="home" />
               <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
-            </NativeTabs.Trigger>
-
-            <NativeTabs.Trigger name="log-food" role="search">
-              <NativeTabs.Trigger.Icon sf="magnifyingglass" md="search" />
-              <NativeTabs.Trigger.Label>Foods</NativeTabs.Trigger.Label>
             </NativeTabs.Trigger>
 
             <NativeTabs.Trigger name="settings">
