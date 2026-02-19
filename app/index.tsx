@@ -25,13 +25,13 @@ const palette = {
   tint: iosColor("systemBlue", "#2563EB"),
 };
 
-function MacroRow({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.row}>
-      <Text style={styles.rowLabel}>{label}</Text>
-      <Text style={styles.rowValue}>{value}</Text>
-    </View>
-  );
+const DEFAULT_CALORIE_GOAL = 2500;
+const DEFAULT_PROTEIN_PCT = 30;
+const DEFAULT_CARBS_PCT = 50;
+const DEFAULT_FAT_PCT = 20;
+
+function clampPercent(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
 }
 
 function MealRow({ name, meta, calories, isLast }: { name: string; meta?: string; calories: number; isLast: boolean }) {
@@ -77,8 +77,19 @@ export default function HomeScreen() {
   const carbs = logs.reduce((sum, entry) => sum + (entry.nutrition?.carbs ?? 0), 0);
   const fat = logs.reduce((sum, entry) => sum + (entry.nutrition?.fat ?? 0), 0);
 
-  const goal = me.root.calorieGoal || 2500;
-  const progress = Math.max(0, Math.min(100, Math.round((caloriesConsumed / goal) * 100)));
+  const goal = me.root.calorieGoal || DEFAULT_CALORIE_GOAL;
+  const proteinPct = me.root.macroProteinPct ?? DEFAULT_PROTEIN_PCT;
+  const carbsPct = me.root.macroCarbsPct ?? DEFAULT_CARBS_PCT;
+  const fatPct = me.root.macroFatPct ?? DEFAULT_FAT_PCT;
+  const calorieProgress = clampPercent((caloriesConsumed / goal) * 100);
+
+  const proteinGoal = Math.round((goal * (proteinPct / 100)) / 4);
+  const carbsGoal = Math.round((goal * (carbsPct / 100)) / 4);
+  const fatGoal = Math.round((goal * (fatPct / 100)) / 9);
+
+  const proteinProgress = clampPercent((protein / Math.max(proteinGoal, 1)) * 100);
+  const carbsProgress = clampPercent((carbs / Math.max(carbsGoal, 1)) * 100);
+  const fatProgress = clampPercent((fat / Math.max(fatGoal, 1)) * 100);
 
   return (
     <View style={styles.screen}>
@@ -101,17 +112,43 @@ export default function HomeScreen() {
             <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
           </View>
           <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${progress}%` }]} />
+            <View style={[styles.progressFill, { width: `${calorieProgress}%` }]} />
           </View>
-        </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.macroColumns}>
+            <View style={styles.macroColumn}>
+              <Text style={styles.macroLabel}>Protein</Text>
+              <Text style={styles.macroValue}>
+                {Math.round(protein)}g
+                <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
+              </Text>
+              <View style={styles.macroTrack}>
+                <View style={[styles.macroFill, { width: `${proteinProgress}%` }]} />
+              </View>
+            </View>
 
-        <Text style={styles.sectionTitle}>Macros</Text>
-        <View style={styles.card}>
-          <MacroRow label="Protein" value={`${protein}g`} />
-          <View style={styles.divider} />
-          <MacroRow label="Carbs" value={`${carbs}g`} />
-          <View style={styles.divider} />
-          <MacroRow label="Fat" value={`${fat}g`} />
+            <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+              <Text style={styles.macroLabel}>Carbs</Text>
+              <Text style={styles.macroValue}>
+                {Math.round(carbs)}g
+                <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
+              </Text>
+              <View style={styles.macroTrack}>
+                <View style={[styles.macroFill, { width: `${carbsProgress}%` }]} />
+              </View>
+            </View>
+
+            <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+              <Text style={styles.macroLabel}>Fat</Text>
+              <Text style={styles.macroValue}>
+                {Math.round(fat)}g
+                <Text style={styles.macroGoal}> / {fatGoal}g</Text>
+              </Text>
+              <View style={styles.macroTrack}>
+                <View style={[styles.macroFill, { width: `${fatProgress}%` }]} />
+              </View>
+            </View>
+          </View>
         </View>
 
         <View style={styles.sectionHeaderRow}>
@@ -214,6 +251,56 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: palette.tint,
   },
+  summaryDivider: {
+    marginTop: 14,
+    marginBottom: 14,
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: palette.separator,
+  },
+  macroColumns: {
+    flexDirection: "row",
+  },
+  macroColumn: {
+    flex: 1,
+    gap: 6,
+  },
+  macroColumnDivider: {
+    borderLeftWidth: StyleSheet.hairlineWidth,
+    borderLeftColor: palette.separator,
+    paddingLeft: 12,
+    marginLeft: 12,
+  },
+  macroLabel: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+    letterSpacing: 0,
+  },
+  macroValue: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
+  },
+  macroGoal: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "500",
+    color: palette.secondaryLabel,
+  },
+  macroTrack: {
+    marginTop: 2,
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: palette.tertiaryLabel,
+    overflow: "hidden",
+  },
+  macroFill: {
+    height: "100%",
+    backgroundColor: palette.tint,
+  },
   sectionHeaderRow: {
     marginTop: 8,
     paddingHorizontal: 4,
@@ -227,8 +314,7 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "600",
     color: palette.secondaryLabel,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
+    letterSpacing: 0,
   },
   linkButton: {
     paddingVertical: 6,
@@ -260,11 +346,6 @@ const styles = StyleSheet.create({
     flex: 1,
     paddingVertical: 10,
   },
-  rowLabel: {
-    fontSize: 17,
-    lineHeight: 22,
-    color: palette.label,
-  },
   rowTitle: {
     fontSize: 17,
     lineHeight: 22,
@@ -282,10 +363,6 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: palette.label,
     fontVariant: ["tabular-nums"],
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: palette.separator,
   },
   emptyText: {
     paddingVertical: 14,
