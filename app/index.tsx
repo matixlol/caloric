@@ -1,6 +1,8 @@
 import { Href, Link } from "expo-router";
 import { Pressable, ScrollView, Text, View, useColorScheme } from "react-native";
+import { useAccount } from "jazz-tools/expo";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { CaloricAccount } from "../src/jazz/schema";
 
 type MacroCardProps = {
   label: string;
@@ -19,13 +21,8 @@ type MealItemProps = {
 function MacroCard({ label, value, progress, isDark }: MacroCardProps) {
   return (
     <View className="flex-1">
-      <Text className={`mb-1 text-[11px] font-bold uppercase ${isDark ? "text-moss" : "text-ink"}`}>
-        {label}
-      </Text>
-      <Text
-        className={`mb-1.5 text-[20px] font-bold ${isDark ? "text-mint" : "text-ink"}`}
-        style={{ fontVariant: ["tabular-nums"] }}
-      >
+      <Text className={`mb-1 text-[11px] font-bold uppercase ${isDark ? "text-moss" : "text-ink"}`}>{label}</Text>
+      <Text className={`mb-1.5 text-[20px] font-bold ${isDark ? "text-mint" : "text-ink"}`} style={{ fontVariant: ["tabular-nums"] }}>
         {value}
       </Text>
       <View className={`relative h-1 ${isDark ? "bg-mint/15" : "bg-ink/10"}`}>
@@ -51,10 +48,7 @@ function MealItem({ name, meta, calories, isDark }: MealItemProps) {
 
 function MealSectionHeader({ title, isDark, href }: { title: string; isDark: boolean; href?: Href }) {
   const button = (
-    <Pressable
-      className={`h-8 w-8 items-center justify-center rounded-full ${isDark ? "bg-mint" : "bg-ink"}`}
-      accessibilityRole="button"
-    >
+    <Pressable className={`h-8 w-8 items-center justify-center rounded-full ${isDark ? "bg-mint" : "bg-ink"}`} accessibilityRole="button">
       <Text className={`-mt-px text-xl font-light ${isDark ? "text-night" : "text-cream"}`}>+</Text>
     </Pressable>
   );
@@ -76,71 +70,78 @@ function MealSectionHeader({ title, isDark, href }: { title: string; isDark: boo
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const isDark = useColorScheme() === "dark";
+  const me = useAccount(CaloricAccount, { resolve: { root: { logs: true } } });
+
+  if (!me.$isLoaded) {
+    return (
+      <View className={`flex-1 items-center justify-center ${isDark ? "bg-night" : "bg-cream"}`}>
+        <Text className={`${isDark ? "text-mint" : "text-ink"}`}>Loading…</Text>
+      </View>
+    );
+  }
+
+  const logs = (me.root.logs ?? []).filter(Boolean).sort((a, b) => b.createdAt - a.createdAt);
+  const lunchLogs = logs.filter((entry) => entry.meal.toLowerCase() === "lunch");
+
+  const caloriesConsumed = logs.reduce((sum, entry) => sum + (entry.nutrition?.calories ?? 0), 0);
+  const protein = logs.reduce((sum, entry) => sum + (entry.nutrition?.protein ?? 0), 0);
+  const carbs = logs.reduce((sum, entry) => sum + (entry.nutrition?.carbs ?? 0), 0);
+  const fat = logs.reduce((sum, entry) => sum + (entry.nutrition?.fat ?? 0), 0);
+
+  const goal = me.root.calorieGoal || 2500;
+  const progress = Math.max(0, Math.min(100, Math.round((caloriesConsumed / goal) * 100)));
 
   return (
     <View className={`flex-1 ${isDark ? "bg-night" : "bg-cream"}`} style={{ paddingTop: insets.top }}>
       <View className="mb-4 flex-row items-center justify-between px-6">
         <Text className={`border-b-2 pb-0.5 text-sm font-bold uppercase ${isDark ? "border-mint text-mint" : "border-ink text-ink"}`}>
-          TODAY, 24 OCT
+          Today
         </Text>
         <Link href="/settings" asChild>
           <Pressable accessibilityRole="button">
-            <Text className={`text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>PROFILE</Text>
+            <Text className={`text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>Profile</Text>
           </Pressable>
         </Link>
       </View>
 
-      <ScrollView
-        className="flex-1"
-        contentContainerClassName="pb-4"
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView className="flex-1" contentContainerClassName="pb-4" showsVerticalScrollIndicator={false}>
         <View className="mb-4 px-6">
           <View className="flex-row items-end gap-2">
-            <Text
-              className={`text-[82px] font-extrabold leading-[86px] ${isDark ? "text-mint" : "text-ink"}`}
-              style={{ fontVariant: ["tabular-nums"] }}
-            >
-              1,240
+            <Text className={`text-[82px] font-extrabold leading-[86px] ${isDark ? "text-mint" : "text-ink"}`} style={{ fontVariant: ["tabular-nums"] }}>
+              {caloriesConsumed.toLocaleString()}
             </Text>
             <Text className={`mb-2 text-2xl font-semibold ${isDark ? "text-moss" : "text-ink/40"}`} style={{ fontVariant: ["tabular-nums"] }}>
-              / 2,500
+              / {goal.toLocaleString()}
             </Text>
           </View>
-          <Text className={`mt-1 text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>
-            CALORIES REMAINING
-          </Text>
+          <Text className={`mt-1 text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>Calories consumed</Text>
 
           <View className={`mt-2 h-2 overflow-hidden ${isDark ? "bg-mint/15" : "bg-ink/10"}`}>
-            <View className={`h-full w-[50.4%] ${isDark ? "bg-mint" : "bg-ink"}`} />
+            <View className={`h-full ${isDark ? "bg-mint" : "bg-ink"}`} style={{ width: `${progress}%` }} />
           </View>
         </View>
 
         <View className="mb-4 flex-row gap-3 px-6">
-          <MacroCard label="PROTEIN" value="82g" progress="65%" isDark={isDark} />
-          <MacroCard label="CARBS" value="145g" progress="42%" isDark={isDark} />
-          <MacroCard label="FAT" value="35g" progress="28%" isDark={isDark} />
+          <MacroCard label="Protein" value={`${protein}g`} progress={`${Math.min(100, protein)}%`} isDark={isDark} />
+          <MacroCard label="Carbs" value={`${carbs}g`} progress={`${Math.min(100, carbs)}%`} isDark={isDark} />
+          <MacroCard label="Fat" value={`${fat}g`} progress={`${Math.min(100, fat)}%`} isDark={isDark} />
         </View>
 
         <View className="px-6">
-          <MealSectionHeader title="LUNCH" isDark={isDark} href="/log-food" />
-          <MealItem
-            name="Grilled Chicken Salad"
-            meta="High Protein • No Dressing"
-            calories="450"
-            isDark={isDark}
-          />
-          <MealItem name="Iced Americano" meta="Black" calories="15" isDark={isDark} />
-
-          <MealSectionHeader title="BREAKFAST" isDark={isDark} />
-          <MealItem
-            name="Oatmeal & Berries"
-            meta="Almond Milk • Blueberries"
-            calories="320"
-            isDark={isDark}
-          />
-          <MealItem name="Boiled Egg" meta="Large" calories="78" isDark={isDark} />
-          <MealItem name="Black Coffee" calories="5" isDark={isDark} />
+          <MealSectionHeader title="Lunch" isDark={isDark} href="/log-food" />
+          {lunchLogs.length === 0 ? (
+            <Text className={`py-4 text-sm ${isDark ? "text-moss" : "text-ink/40"}`}>No lunch entries yet.</Text>
+          ) : (
+            lunchLogs.map((entry) => (
+              <MealItem
+                key={entry.$jazz.id}
+                name={entry.foodName}
+                meta={[entry.brand, entry.serving].filter(Boolean).join(" • ")}
+                calories={String(entry.nutrition?.calories ?? 0)}
+                isDark={isDark}
+              />
+            ))
+          )}
         </View>
       </ScrollView>
     </View>
