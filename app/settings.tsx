@@ -1,8 +1,9 @@
-import { useUser } from "@clerk/clerk-expo";
+import { useClerk, useUser } from "@clerk/clerk-expo";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { useEffect, useState } from "react";
 import { useAccount } from "jazz-tools/expo";
 import {
+  Alert,
   Platform,
   PlatformColor,
   Pressable,
@@ -82,6 +83,7 @@ function FormRow({
 
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
+  const clerk = useClerk();
   const { user } = useUser();
   const me = useAccount(CaloricAccount, { resolve: { profile: true, root: true } });
   const [goalInput, setGoalInput] = useState("");
@@ -90,6 +92,8 @@ export default function SettingsScreen() {
   const [fatInput, setFatInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
+  const [signOutError, setSignOutError] = useState<string | null>(null);
+  const [isSigningOut, setIsSigningOut] = useState(false);
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
@@ -188,6 +192,43 @@ export default function SettingsScreen() {
     setSaveSuccess("Saved successfully.");
   };
 
+  const handleSignOut = async () => {
+    if (isSigningOut) {
+      return;
+    }
+
+    setSignOutError(null);
+    setIsSigningOut(true);
+
+    try {
+      await clerk.signOut();
+    } catch (error) {
+      setSignOutError(error instanceof Error ? error.message : "Could not sign out. Try again.");
+    } finally {
+      setIsSigningOut(false);
+    }
+  };
+
+  const confirmSignOut = () => {
+    if (isSigningOut) {
+      return;
+    }
+
+    Alert.alert("Sign out?", "You will need to sign in again to access your account.", [
+      {
+        text: "Cancel",
+        style: "cancel",
+      },
+      {
+        text: "Sign Out",
+        style: "destructive",
+        onPress: () => {
+          void handleSignOut();
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={styles.screen}>
       <ScrollView
@@ -209,7 +250,20 @@ export default function SettingsScreen() {
             <Text style={styles.formRowLabel}>Signed in as</Text>
             <Text style={styles.accountValue}>{profileEmail}</Text>
           </View>
+          <View style={styles.divider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+            onPress={confirmSignOut}
+            disabled={isSigningOut}
+            style={[styles.signOutButton, isSigningOut && styles.signOutButtonDisabled]}
+          >
+            <Text style={[styles.signOutButtonText, isSigningOut && styles.signOutButtonTextDisabled]}>
+              {isSigningOut ? "Signing Out..." : "Sign Out"}
+            </Text>
+          </Pressable>
         </View>
+        {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
 
         <Text style={styles.sectionTitle}>Goals</Text>
         <View style={styles.card}>
@@ -347,6 +401,23 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontSize: 15,
     lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+  signOutButton: {
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  signOutButtonDisabled: {
+    opacity: 0.5,
+  },
+  signOutButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.error,
+  },
+  signOutButtonTextDisabled: {
     color: palette.secondaryLabel,
   },
   formValueWrap: {

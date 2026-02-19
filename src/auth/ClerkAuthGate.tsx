@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 22,
     fontWeight: "600",
-    color: palette.white,
+    color: "#FFFFFF",
   },
   dividerRow: {
     flexDirection: "row",
