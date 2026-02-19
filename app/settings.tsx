@@ -6,17 +6,6 @@ function SectionTitle({ title }: { title: string }) {
   return <Text className="mb-6 mt-8 text-xs font-bold uppercase tracking-wide text-ink/40">{title}</Text>;
 }
 
-function ToggleRow({ label, on }: { label: string; on: boolean }) {
-  return (
-    <View className="flex-row items-center justify-between border-b border-ink/10 py-4">
-      <Text className="text-base font-semibold text-ink">{label}</Text>
-      <View className={`h-6 w-11 rounded-full ${on ? "bg-ink" : "bg-ink/10"}`}>
-        <View className={`absolute top-1 h-4 w-4 rounded-full bg-cream ${on ? "right-1" : "left-1"}`} />
-      </View>
-    </View>
-  );
-}
-
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -66,9 +55,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <SectionTitle title="Preferences" />
-        <ToggleRow label="Meal Reminders" on />
-        <ToggleRow label="Show Fiber" on />
       </ScrollView>
 
       <View className="bg-cream px-6 pb-6 pt-6" style={{ paddingBottom: insets.bottom + 20 }}>
