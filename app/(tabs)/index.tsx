@@ -465,11 +465,10 @@ const styles = StyleSheet.create({
   },
   mealCard: {
     flex: 1,
+    marginLeft: 14,
     backgroundColor: palette.card,
     borderRadius: 14,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: palette.separator,
     paddingHorizontal: 12,
     paddingVertical: 12,
   },
