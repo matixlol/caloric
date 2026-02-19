@@ -2,6 +2,7 @@ import { db } from "./db";
 import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
 import { config } from "./config";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
+import { and, desc, eq } from "drizzle-orm";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -10,6 +11,21 @@ type SearchItem = {
     id?: string | number;
     version?: string | number;
   };
+};
+
+type StoredSearchResponse = {
+  id: number;
+  mfpStatus: number;
+  mfpUrl: string;
+  responseJson: unknown | null;
+  responseText: string | null;
+};
+
+type StoredDetailResponse = {
+  mfpStatus: number;
+  mfpUrl: string;
+  responseJson: unknown | null;
+  responseText: string | null;
 };
 
 function json(data: JsonValue, status = 200): Response {
@@ -43,6 +59,109 @@ function parseBoolean(value: string | null, fallback: boolean): boolean {
     return false;
   }
   return fallback;
+}
+
+function toSearchPayload(record: StoredSearchResponse): {
+  status: number;
+  url: string;
+  data: unknown | null;
+  text: string | null;
+} {
+  return {
+    status: record.mfpStatus,
+    url: record.mfpUrl,
+    data: record.responseJson,
+    text: record.responseText,
+  };
+}
+
+function toDetailPayload(
+  key: { foodId: string; version: string },
+  record: StoredDetailResponse,
+): {
+  foodId: string;
+  version: string;
+  status: number;
+  data: unknown | null;
+  text: string | null;
+} {
+  return {
+    foodId: key.foodId,
+    version: key.version,
+    status: record.mfpStatus,
+    data: record.responseJson,
+    text: record.responseText,
+  };
+}
+
+async function findCachedSearch(params: {
+  query: string;
+  offset: number;
+  maxItems: number;
+  countryCode: string;
+  resourceType: string;
+}): Promise<StoredSearchResponse | null> {
+  const [cachedSearch] = await db
+    .select({
+      id: mfpSearchResponses.id,
+      mfpStatus: mfpSearchResponses.mfpStatus,
+      mfpUrl: mfpSearchResponses.mfpUrl,
+      responseJson: mfpSearchResponses.responseJson,
+      responseText: mfpSearchResponses.responseText,
+    })
+    .from(mfpSearchResponses)
+    .where(
+      and(
+        eq(mfpSearchResponses.query, params.query),
+        eq(mfpSearchResponses.offset, params.offset),
+        eq(mfpSearchResponses.maxItems, params.maxItems),
+        eq(mfpSearchResponses.countryCode, params.countryCode),
+        eq(mfpSearchResponses.resourceType, params.resourceType),
+      ),
+    )
+    .orderBy(desc(mfpSearchResponses.createdAt), desc(mfpSearchResponses.id))
+    .limit(1);
+
+  return cachedSearch ?? null;
+}
+
+async function findCachedDetail(foodId: string, version: string): Promise<StoredDetailResponse | null> {
+  const [cachedDetail] = await db
+    .select({
+      mfpStatus: mfpFoodDetailResponses.mfpStatus,
+      mfpUrl: mfpFoodDetailResponses.mfpUrl,
+      responseJson: mfpFoodDetailResponses.responseJson,
+      responseText: mfpFoodDetailResponses.responseText,
+    })
+    .from(mfpFoodDetailResponses)
+    .where(and(eq(mfpFoodDetailResponses.foodId, foodId), eq(mfpFoodDetailResponses.version, version)))
+    .orderBy(desc(mfpFoodDetailResponses.createdAt), desc(mfpFoodDetailResponses.id))
+    .limit(1);
+
+  return cachedDetail ?? null;
+}
+
+async function saveDetailForSearch(params: {
+  searchResponseId: number;
+  foodId: string;
+  version: string;
+  mfpUrl: string;
+  mfpStatus: number;
+  responseJson: unknown | null;
+  responseText: string | null;
+}): Promise<void> {
+  await db
+    .insert(mfpFoodDetailResponses)
+    .values({
+      searchResponseId: params.searchResponseId,
+      foodId: params.foodId,
+      version: params.version,
+      mfpUrl: params.mfpUrl,
+      mfpStatus: params.mfpStatus,
+      responseJson: params.responseJson,
+      responseText: params.responseText,
+    })
+    .onConflictDoNothing();
 }
 
 async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
@@ -124,105 +243,127 @@ const server = Bun.serve({
     const includeDetails = parseBoolean(url.searchParams.get("includeDetails"), true);
 
     try {
-      const searchResponse = await searchNutrition({
+      const searchParams = {
         query,
         offset,
         maxItems,
         countryCode,
         resourceType,
-      });
+      };
 
-      const [savedSearch] = await db
-        .insert(mfpSearchResponses)
-        .values({
-          query,
-          offset,
-          maxItems,
-          countryCode,
-          resourceType,
-          mfpUrl: searchResponse.url,
-          mfpStatus: searchResponse.status,
-          responseJson: searchResponse.json,
-          responseText: searchResponse.text,
-        })
-        .returning({ id: mfpSearchResponses.id });
+      const cachedSearch = await findCachedSearch(searchParams);
 
-      if (!includeDetails || !searchResponse.json) {
+      let searchResponseId = 0;
+      let searchPayload: {
+        status: number;
+        url: string;
+        data: unknown | null;
+        text: string | null;
+      };
+
+      if (cachedSearch) {
+        searchResponseId = cachedSearch.id;
+        searchPayload = toSearchPayload(cachedSearch);
+      } else {
+        const searchResponse = await searchNutrition(searchParams);
+        const [savedSearch] = await db
+          .insert(mfpSearchResponses)
+          .values({
+            query,
+            offset,
+            maxItems,
+            countryCode,
+            resourceType,
+            mfpUrl: searchResponse.url,
+            mfpStatus: searchResponse.status,
+            responseJson: searchResponse.json,
+            responseText: searchResponse.text,
+          })
+          .returning({ id: mfpSearchResponses.id });
+
+        searchResponseId = savedSearch.id;
+        searchPayload = {
+          status: searchResponse.status,
+          url: searchResponse.url,
+          data: searchResponse.json,
+          text: searchResponse.text,
+        };
+      }
+
+      if (!includeDetails || !searchPayload.data) {
         return json({
-          searchResponseId: savedSearch.id,
-          search: {
-            status: searchResponse.status,
-            url: searchResponse.url,
-            data: searchResponse.json,
-            text: searchResponse.text,
-          },
+          searchResponseId,
+          search: searchPayload,
           detailCount: 0,
           details: [],
         });
       }
 
-      const detailKeys = extractDetailKeys(searchResponse.json);
+      const detailKeys = extractDetailKeys(searchPayload.data);
 
       const detailTasks = detailKeys.map((key) => async () => {
+        const cachedDetail = await findCachedDetail(key.foodId, key.version);
+        if (cachedDetail) {
+          await saveDetailForSearch({
+            searchResponseId,
+            foodId: key.foodId,
+            version: key.version,
+            mfpUrl: cachedDetail.mfpUrl,
+            mfpStatus: cachedDetail.mfpStatus,
+            responseJson: cachedDetail.responseJson,
+            responseText: cachedDetail.responseText,
+          });
+
+          return toDetailPayload(key, cachedDetail);
+        }
+
         try {
           const detailResponse = await fetchFoodDetail(key.foodId, key.version);
 
-          await db
-            .insert(mfpFoodDetailResponses)
-            .values({
-              searchResponseId: savedSearch.id,
-              foodId: key.foodId,
-              version: key.version,
-              mfpUrl: detailResponse.url,
-              mfpStatus: detailResponse.status,
-              responseJson: detailResponse.json,
-              responseText: detailResponse.text,
-            })
-            .onConflictDoNothing();
-
-          return {
+          await saveDetailForSearch({
+            searchResponseId,
             foodId: key.foodId,
             version: key.version,
-            status: detailResponse.status,
-            data: detailResponse.json,
-            text: detailResponse.text,
-          };
+            mfpUrl: detailResponse.url,
+            mfpStatus: detailResponse.status,
+            responseJson: detailResponse.json,
+            responseText: detailResponse.text,
+          });
+
+          return toDetailPayload(key, {
+            mfpStatus: detailResponse.status,
+            mfpUrl: detailResponse.url,
+            responseJson: detailResponse.json,
+            responseText: detailResponse.text,
+          });
         } catch (error) {
           const message = error instanceof Error ? error.message : String(error);
+          const fallbackUrl = `${config.mfpBaseUrl}/api/services/foods/${key.foodId}?version=${key.version}`;
 
-          await db
-            .insert(mfpFoodDetailResponses)
-            .values({
-              searchResponseId: savedSearch.id,
-              foodId: key.foodId,
-              version: key.version,
-              mfpUrl: `${config.mfpBaseUrl}/api/services/foods/${key.foodId}?version=${key.version}`,
-              mfpStatus: 0,
-              responseJson: null,
-              responseText: message,
-            })
-            .onConflictDoNothing();
-
-          return {
+          await saveDetailForSearch({
+            searchResponseId,
             foodId: key.foodId,
             version: key.version,
-            status: 0,
-            data: null,
-            text: message,
-          };
+            mfpUrl: fallbackUrl,
+            mfpStatus: 0,
+            responseJson: null,
+            responseText: message,
+          });
+
+          return toDetailPayload(key, {
+            mfpStatus: 0,
+            mfpUrl: fallbackUrl,
+            responseJson: null,
+            responseText: message,
+          });
         }
       });
 
       const details = await runWithConcurrency(detailTasks, config.detailConcurrency);
 
       return json({
-        searchResponseId: savedSearch.id,
-        search: {
-          status: searchResponse.status,
-          url: searchResponse.url,
-          data: searchResponse.json,
-          text: searchResponse.text,
-        },
+        searchResponseId,
+        search: searchPayload,
         detailCount: details.length,
         details,
       });

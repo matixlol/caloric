@@ -15,10 +15,12 @@ Bun microservice that proxies MyFitnessPal search/detail APIs and persists every
     - `includeDetails` (default `true`)
 
 `/search` does this:
-1. Calls MyFitnessPal `/api/nutrition`
-2. Saves the full search response in `mfp_search_responses`
-3. If `includeDetails=true`, fetches each item detail from `/api/services/foods/{id}?version={version}` (parallelized)
-4. Saves each detail response in `mfp_food_detail_responses`
+1. Looks up the latest cached search response for the exact request tuple (`query`, `offset`, `maxItems`, `countryCode`, `resourceType`)
+2. If not cached, calls MyFitnessPal `/api/nutrition` and saves the response in `mfp_search_responses`
+3. If `includeDetails=true`, resolves each food detail by:
+   - reusing the latest cached detail for (`foodId`, `version`) when available
+   - fetching upstream only for detail keys not already cached
+4. Saves resolved detail payloads in `mfp_food_detail_responses` for the current `searchResponseId`
 
 ## Environment
 
