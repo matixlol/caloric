@@ -1,3 +1,4 @@
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useAccount } from "jazz-tools/expo";
 import {
@@ -9,6 +10,7 @@ import {
   Text,
   View,
 } from "react-native";
+import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { CaloricAccount } from "../../src/jazz/schema";
@@ -24,6 +26,8 @@ const palette = {
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
+  destructive: iosColor("systemRed", "#DC2626"),
+  destructiveText: "#FFFFFF",
 };
 
 const DEFAULT_CALORIE_GOAL = 2500;
@@ -43,24 +47,48 @@ function clampPercent(value: number) {
 }
 
 function MealRow({
+  id,
   name,
   meta,
   calories,
   isLast,
+  onDelete,
 }: {
+  id: string;
   name: string;
   meta?: string;
   calories: number;
   isLast: boolean;
+  onDelete: (id: string) => void;
 }) {
   return (
-    <View style={[styles.row, !isLast && styles.rowWithDivider]}>
-      <View style={styles.rowMain}>
-        <Text style={styles.rowTitle}>{name}</Text>
-        {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
+    <Swipeable
+      containerStyle={styles.rowSwipeContainer}
+      childrenContainerStyle={styles.rowSwipeChildren}
+      friction={2}
+      overshootRight={false}
+      renderRightActions={() => (
+        <View style={styles.rightActionsContainer}>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Delete ${name}`}
+            onPress={() => onDelete(id)}
+            style={styles.deleteAction}
+          >
+            <Ionicons color={palette.destructiveText} name="trash-outline" size={20} />
+          </Pressable>
+        </View>
+      )}
+      rightThreshold={40}
+    >
+      <View style={[styles.row, !isLast && styles.rowWithDivider]}>
+        <View style={styles.rowMain}>
+          <Text style={styles.rowTitle}>{name}</Text>
+          {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
+        </View>
+        <Text style={styles.rowValue}>{calories.toLocaleString()}</Text>
       </View>
-      <Text style={styles.rowValue}>{calories.toLocaleString()}</Text>
-    </View>
+    </Swipeable>
   );
 }
 
@@ -70,12 +98,14 @@ function MealSection({
   entries,
   calories,
   onAddFood,
+  onDeleteEntry,
 }: {
   label: string;
   emptyCopy: string;
   entries: MealEntry[];
   calories: number;
   onAddFood: () => void;
+  onDeleteEntry: (entryId: string) => void;
 }) {
   return (
     <View style={styles.mealRow}>
@@ -109,10 +139,12 @@ function MealSection({
           entries.map((entry, index) => (
             <MealRow
               key={entry.id}
+              id={entry.id}
               name={entry.name}
               meta={entry.meta}
               calories={entry.calories}
               isLast={index === entries.length - 1}
+              onDelete={onDeleteEntry}
             />
           ))
         )}
@@ -180,6 +212,19 @@ export default function HomeScreen() {
       calories: entry.nutrition?.calories ?? 0,
     });
   });
+
+  const handleDeleteEntry = (entryId: string) => {
+    if (!me.root.logs) {
+      return;
+    }
+
+    const index = me.root.logs.findIndex((entry) => entry?.$isLoaded && entry.$jazz.id === entryId);
+    if (index === -1) {
+      return;
+    }
+
+    me.root.logs.$jazz.splice(index, 1);
+  };
 
   return (
     <View style={styles.screen}>
@@ -259,6 +304,7 @@ export default function HomeScreen() {
                     params: { meal: meal.key },
                   })
                 }
+                onDeleteEntry={handleDeleteEntry}
               />
             );
           })}
@@ -469,10 +515,22 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     gap: 8,
+    paddingRight: 12,
   },
   rowWithDivider: {
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: palette.separator,
+  },
+  rowSwipeContainer: {
+    overflow: "hidden",
+  },
+  rowSwipeChildren: {
+    backgroundColor: palette.card,
+  },
+  rightActionsContainer: {
+    width: 76,
+    justifyContent: "center",
+    alignItems: "stretch",
   },
   rowMain: {
     flex: 1,
@@ -495,6 +553,12 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: palette.label,
     fontVariant: ["tabular-nums"],
+  },
+  deleteAction: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.destructive,
   },
   emptyText: {
     paddingVertical: 14,

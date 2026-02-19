@@ -4,6 +4,7 @@ import { Stack } from "expo-router";
 import { JazzExpoProviderWithClerk } from "jazz-tools/expo";
 import { type ReactNode } from "react";
 import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { CaloricAccount } from "../src/jazz/schema";
@@ -52,17 +53,22 @@ export default function RootLayout() {
   }
 
   return (
-    <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
-      <JazzProvider>
-        <ClerkAuthGate>
-          <AppNavigator />
-        </ClerkAuthGate>
-      </JazzProvider>
-    </ClerkProvider>
+    <GestureHandlerRootView style={styles.gestureRoot}>
+      <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
+        <JazzProvider>
+          <ClerkAuthGate>
+            <AppNavigator />
+          </ClerkAuthGate>
+        </JazzProvider>
+      </ClerkProvider>
+    </GestureHandlerRootView>
   );
 }
 
 const styles = StyleSheet.create({
+  gestureRoot: {
+    flex: 1,
+  },
   missingKeyContainer: {
     flex: 1,
     alignItems: "center",
