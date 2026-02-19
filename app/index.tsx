@@ -1,3 +1,4 @@
+import { Href, Link } from "expo-router";
 import { Pressable, ScrollView, Text, View, useColorScheme } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -48,13 +49,26 @@ function MealItem({ name, meta, calories, isDark }: MealItemProps) {
   );
 }
 
-function MealSectionHeader({ title, isDark }: { title: string; isDark: boolean }) {
+function MealSectionHeader({ title, isDark, href }: { title: string; isDark: boolean; href?: Href }) {
+  const button = (
+    <Pressable
+      className={`h-8 w-8 items-center justify-center rounded-full ${isDark ? "bg-mint" : "bg-ink"}`}
+      accessibilityRole="button"
+    >
+      <Text className={`-mt-px text-xl font-light ${isDark ? "text-night" : "text-cream"}`}>+</Text>
+    </Pressable>
+  );
+
   return (
     <View className="mb-2 flex-row items-center justify-between pt-4">
       <Text className={`text-xs font-bold uppercase ${isDark ? "text-moss" : "text-ink/40"}`}>{title}</Text>
-      <Pressable className={`h-8 w-8 items-center justify-center rounded-full ${isDark ? "bg-mint" : "bg-ink"}`} accessibilityRole="button">
-        <Text className={`-mt-px text-xl font-light ${isDark ? "text-night" : "text-cream"}`}>+</Text>
-      </Pressable>
+      {href ? (
+        <Link href={href} asChild>
+          {button}
+        </Link>
+      ) : (
+        button
+      )}
     </View>
   );
 }
@@ -69,7 +83,11 @@ export default function HomeScreen() {
         <Text className={`border-b-2 pb-0.5 text-sm font-bold uppercase ${isDark ? "border-mint text-mint" : "border-ink text-ink"}`}>
           TODAY, 24 OCT
         </Text>
-        <Text className={`text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>PROFILE</Text>
+        <Link href="/settings" asChild>
+          <Pressable accessibilityRole="button">
+            <Text className={`text-sm font-bold uppercase ${isDark ? "text-mint" : "text-ink"}`}>PROFILE</Text>
+          </Pressable>
+        </Link>
       </View>
 
       <ScrollView
@@ -105,7 +123,7 @@ export default function HomeScreen() {
         </View>
 
         <View className="px-6">
-          <MealSectionHeader title="LUNCH" isDark={isDark} />
+          <MealSectionHeader title="LUNCH" isDark={isDark} href="/log-food" />
           <MealItem
             name="Grilled Chicken Salad"
             meta="High Protein • No Dressing"
