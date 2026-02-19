@@ -46,10 +46,6 @@ function parseWholeNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function clamp(value: number, min: number, max: number) {
-  return Math.max(min, Math.min(max, value));
-}
-
 function FormRow({
   label,
   value,
@@ -145,17 +141,22 @@ export default function SettingsScreen() {
   const parsedFat = parseWholeNumber(fatInput);
   const macroTotal = (parsedProtein ?? 0) + (parsedCarbs ?? 0) + (parsedFat ?? 0);
 
-  let validationError: string | null = null;
+  let goalValidationError: string | null = null;
+  let macroValidationError: string | null = null;
 
   if (!parsedGoal || parsedGoal < MIN_CALORIE_GOAL || parsedGoal > MAX_CALORIE_GOAL) {
-    validationError = `Daily calorie goal must be between ${MIN_CALORIE_GOAL} and ${MAX_CALORIE_GOAL}.`;
-  } else if (parsedProtein === null || parsedCarbs === null || parsedFat === null) {
-    validationError = "Macro ratios must be whole numbers.";
-  } else if (parsedProtein > 100 || parsedCarbs > 100 || parsedFat > 100) {
-    validationError = "Each macro ratio must be between 0 and 100.";
-  } else if (macroTotal !== 100) {
-    validationError = "Macro ratios must add up to 100%.";
+    goalValidationError = `Daily calorie goal must be between ${MIN_CALORIE_GOAL} and ${MAX_CALORIE_GOAL}.`;
   }
+
+  if (parsedProtein === null || parsedCarbs === null || parsedFat === null) {
+    macroValidationError = "Macro ratios must be whole numbers.";
+  } else if (parsedProtein > 100 || parsedCarbs > 100 || parsedFat > 100) {
+    macroValidationError = "Each macro ratio must be between 0 and 100.";
+  } else if (macroTotal !== 100) {
+    macroValidationError = "Macro ratios must add up to 100%.";
+  }
+
+  const validationError = goalValidationError || macroValidationError;
 
   const hasChanges =
     parsedGoal !== loadedGoal ||
@@ -164,8 +165,6 @@ export default function SettingsScreen() {
     parsedFat !== loadedFat;
 
   const profileEmail = me.profile.email || fallbackEmail;
-  const previewGoal = parsedGoal ?? loadedGoal;
-  const goalProgress = clamp(((previewGoal - 1200) / (4000 - 1200)) * 100, 0, 100);
 
   const handleSave = () => {
     setSaveError(null);
@@ -178,7 +177,7 @@ export default function SettingsScreen() {
       parsedCarbs === null ||
       parsedFat === null
     ) {
-      setSaveError(validationError || "Enter valid values before saving.");
+      setSaveError(goalValidationError);
       return;
     }
 
@@ -221,9 +220,6 @@ export default function SettingsScreen() {
             accessibilityLabel="Daily calorie goal"
             maxLength={5}
           />
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${goalProgress}%` }]} />
-          </View>
         </View>
 
         <Text style={styles.sectionTitle}>Macro Ratios</Text>
@@ -262,6 +258,7 @@ export default function SettingsScreen() {
             </Text>
           </View>
         </View>
+        {macroValidationError ? <Text style={styles.sectionErrorText}>{macroValidationError}</Text> : null}
       </ScrollView>
 
       <View style={[styles.actionBarContainer, { paddingBottom: insets.bottom + 12 }]}>
@@ -282,7 +279,9 @@ export default function SettingsScreen() {
           disabled={!hasChanges}
           style={[styles.saveButton, !hasChanges && styles.saveButtonDisabled]}
         >
-          <Text style={styles.saveButtonText}>Save Changes</Text>
+          <Text style={[styles.saveButtonText, !hasChanges && styles.saveButtonTextDisabled]}>
+            Save Changes
+          </Text>
         </Pressable>
       </View>
     </View>
@@ -376,18 +375,6 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: palette.separator,
   },
-  progressTrack: {
-    marginTop: 2,
-    marginBottom: 12,
-    height: 6,
-    borderRadius: 3,
-    backgroundColor: palette.tertiaryLabel,
-    overflow: "hidden",
-  },
-  progressFill: {
-    height: "100%",
-    backgroundColor: palette.tint,
-  },
   totalValue: {
     fontSize: 17,
     lineHeight: 22,
@@ -421,6 +408,17 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     fontWeight: "600",
     color: palette.white,
+  },
+  saveButtonTextDisabled: {
+    color: palette.secondaryLabel,
+  },
+  sectionErrorText: {
+    paddingHorizontal: 4,
+    marginTop: -4,
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.error,
   },
   errorText: {
     marginBottom: 6,
