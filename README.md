@@ -13,9 +13,11 @@ Create `.env.local` with:
 ```bash
 EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your-clerk-publishable-key
 EXPO_PUBLIC_JAZZ_API_KEY=your-jazz-api-key
+EXPO_PUBLIC_BACKEND_URL=https://backend.caloric.mati.lol
 ```
 
 You can create a publishable key in the [Clerk Dashboard](https://dashboard.clerk.com/).
+`EXPO_PUBLIC_BACKEND_URL` is optional and defaults to `https://backend.caloric.mati.lol` in the app.
 
 ## Get started
 
