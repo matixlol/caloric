@@ -435,18 +435,22 @@ const styles = StyleSheet.create({
   mealList: {
     gap: 10,
     paddingBottom: 12,
-    marginHorizontal: -10,
   },
   mealRow: {
+    position: "relative",
     flexDirection: "row",
     alignItems: "stretch",
-    gap: 4,
   },
   mealSideLabel: {
+    position: "absolute",
+    left: -12,
+    top: 0,
+    bottom: 0,
     width: 26,
-    position: "relative",
     alignItems: "center",
     justifyContent: "center",
+    zIndex: 1,
+    elevation: 1,
   },
   mealSideLabelText: {
     position: "absolute",
