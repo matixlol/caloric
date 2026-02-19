@@ -2,51 +2,20 @@
 
 This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
 
-## Passkey Auth on `caloric.mati.lol`
+## Clerk Auth + Jazz
 
-This project is configured for Jazz passkeys using:
-
-- `EXPO_PUBLIC_JAZZ_RP_ID=caloric.mati.lol`
-- iOS associated domain `webcredentials:caloric.mati.lol`
-- Cloudflare Worker route for:
-  - `/.well-known/apple-app-site-association`
-  - `/.well-known/assetlinks.json`
-
-### One-time Cloudflare setup
-
-1. Authenticate Wrangler:
-
-   ```bash
-   npx wrangler login
-   npx wrangler whoami
-   ```
-
-2. Set passkey metadata vars in `cloudflare/passkeys/wrangler.jsonc`:
-
-   ```bash
-   APPLE_TEAM_ID
-   IOS_BUNDLE_ID
-   ANDROID_PACKAGE_NAME
-   ANDROID_SHA256_CERT_FINGERPRINTS
-   ```
-
-   `ANDROID_SHA256_CERT_FINGERPRINTS` supports one or more comma-separated SHA256 cert fingerprints.
-   Use your release signing cert fingerprint for production Android passkeys.
-
-3. Deploy Worker + static files:
-
-   ```bash
-   npm run cf:deploy
-   ```
+This project now uses Clerk for user login and `JazzExpoProviderWithClerk` for Jazz account auth.
 
 ### Local env
 
 Create `.env.local` with:
 
 ```bash
+EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your-clerk-publishable-key
 EXPO_PUBLIC_JAZZ_API_KEY=your-jazz-api-key
-EXPO_PUBLIC_JAZZ_RP_ID=caloric.mati.lol
 ```
+
+You can create a publishable key in the [Clerk Dashboard](https://dashboard.clerk.com/).
 
 ## Get started
 

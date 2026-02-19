@@ -1,24 +1,50 @@
+import { ClerkProvider, useClerk } from "@clerk/clerk-expo";
+import { tokenCache } from "@clerk/clerk-expo/token-cache";
 import { Stack } from "expo-router";
-import { JazzExpoProvider, setPasskeyModule, type PasskeyModule } from "jazz-tools/expo";
-import { Passkey } from "react-native-passkey";
+import { JazzExpoProviderWithClerk } from "jazz-tools/expo";
+import { type ReactNode } from "react";
+import { Text, View } from "react-native";
 import "../global.css";
-import { PasskeyAuthGate } from "../src/auth/PasskeyAuthGate";
+import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { CaloricAccount } from "../src/jazz/schema";
 
 const jazzApiKey = process.env.EXPO_PUBLIC_JAZZ_API_KEY?.trim() || "you@example.com";
-const jazzRpId = process.env.EXPO_PUBLIC_JAZZ_RP_ID?.trim() || "";
+const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
 
-setPasskeyModule(Passkey as unknown as PasskeyModule);
+function JazzProvider({ children }: { children: ReactNode }) {
+  const clerk = useClerk();
 
-export default function RootLayout() {
   return (
-    <JazzExpoProvider
+    <JazzExpoProviderWithClerk
+      clerk={clerk}
       sync={{ peer: `wss://cloud.jazz.tools/?key=${encodeURIComponent(jazzApiKey)}`, when: "always" }}
       AccountSchema={CaloricAccount}
     >
-      <PasskeyAuthGate appName="Caloric" rpId={jazzRpId}>
-        <Stack screenOptions={{ headerShown: false }} />
-      </PasskeyAuthGate>
-    </JazzExpoProvider>
+      {children}
+    </JazzExpoProviderWithClerk>
+  );
+}
+
+function MissingClerkKeyScreen() {
+  return (
+    <View className="flex-1 items-center justify-center bg-cream px-6">
+      <Text className="text-center text-lg font-semibold text-ink">Set EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY to enable login.</Text>
+    </View>
+  );
+}
+
+export default function RootLayout() {
+  if (!clerkPublishableKey) {
+    return <MissingClerkKeyScreen />;
+  }
+
+  return (
+    <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
+      <JazzProvider>
+        <ClerkAuthGate>
+          <Stack screenOptions={{ headerShown: false }} />
+        </ClerkAuthGate>
+      </JazzProvider>
+    </ClerkProvider>
   );
 }

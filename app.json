@@ -11,9 +11,6 @@
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "lol.mati.caloric",
-      "associatedDomains": [
-        "webcredentials:caloric.mati.lol"
-      ],
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false
       }
