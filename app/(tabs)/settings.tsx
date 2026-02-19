@@ -1,9 +1,10 @@
 import { useClerk, useUser } from "@clerk/clerk-expo";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAccount } from "jazz-tools/expo";
 import {
   Alert,
+  PanResponder,
   Platform,
   PlatformColor,
   Pressable,
@@ -38,13 +39,42 @@ const palette = {
   success: iosColor("systemGreen", "#16A34A"),
   error: iosColor("systemRed", "#DC2626"),
   white: "#FFFFFF",
+  macroProtein: "#2563EB",
+  macroCarbs: "#F59E0B",
+  macroFat: "#14B8A6",
 };
+
+const MACRO_DIVISIONS = 10;
+
+function clamp(value: number, min: number, max: number) {
+  return Math.min(Math.max(value, min), max);
+}
 
 function parseWholeNumber(value: string) {
   const normalized = value.replace(/[^0-9]/g, "");
   if (!normalized) return null;
   const parsed = Number.parseInt(normalized, 10);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeMacroRatios(
+  proteinRaw?: number,
+  carbsRaw?: number,
+  fatRaw?: number,
+) {
+  const protein = clamp(Math.round(proteinRaw ?? DEFAULT_PROTEIN_PCT), 0, 100);
+  const carbs = clamp(Math.round(carbsRaw ?? DEFAULT_CARBS_PCT), 0, 100);
+  const fat = clamp(Math.round(fatRaw ?? DEFAULT_FAT_PCT), 0, 100);
+
+  if (protein + carbs + fat !== 100) {
+    return {
+      protein: DEFAULT_PROTEIN_PCT,
+      carbs: DEFAULT_CARBS_PCT,
+      fat: DEFAULT_FAT_PCT,
+    };
+  }
+
+  return { protein, carbs, fat };
 }
 
 function FormRow({
@@ -87,15 +117,33 @@ export default function SettingsScreen() {
   const { user } = useUser();
   const me = useAccount(CaloricAccount, { resolve: { profile: true, root: true } });
   const [goalInput, setGoalInput] = useState("");
-  const [proteinInput, setProteinInput] = useState("");
-  const [carbsInput, setCarbsInput] = useState("");
-  const [fatInput, setFatInput] = useState("");
+  const [macroSplitA, setMacroSplitA] = useState(DEFAULT_PROTEIN_PCT);
+  const [macroSplitB, setMacroSplitB] = useState(DEFAULT_PROTEIN_PCT + DEFAULT_CARBS_PCT);
+  const [macroTrackWidth, setMacroTrackWidth] = useState(0);
+  const [activeHandle, setActiveHandle] = useState<"first" | "second" | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+
+  const macroTrackWidthRef = useRef(macroTrackWidth);
+  const macroSplitARef = useRef(macroSplitA);
+  const macroSplitBRef = useRef(macroSplitB);
+  const dragStartRef = useRef({ splitA: macroSplitA, splitB: macroSplitB });
+
+  useEffect(() => {
+    macroTrackWidthRef.current = macroTrackWidth;
+  }, [macroTrackWidth]);
+
+  useEffect(() => {
+    macroSplitARef.current = macroSplitA;
+  }, [macroSplitA]);
+
+  useEffect(() => {
+    macroSplitBRef.current = macroSplitB;
+  }, [macroSplitB]);
 
   const clerkEmail =
     user?.primaryEmailAddress?.emailAddress ||
@@ -109,22 +157,85 @@ export default function SettingsScreen() {
   useEffect(() => {
     if (!me.$isLoaded) return;
 
+    const normalizedMacros = normalizeMacroRatios(syncedProtein, syncedCarbs, syncedFat);
+
     setGoalInput(String(syncedGoal ?? DEFAULT_CALORIE_GOAL));
-    setProteinInput(String(syncedProtein ?? DEFAULT_PROTEIN_PCT));
-    setCarbsInput(String(syncedCarbs ?? DEFAULT_CARBS_PCT));
-    setFatInput(String(syncedFat ?? DEFAULT_FAT_PCT));
-  }, [
-    me.$isLoaded,
-    syncedGoal,
-    syncedProtein,
-    syncedCarbs,
-    syncedFat,
-  ]);
+    setMacroSplitA(normalizedMacros.protein);
+    setMacroSplitB(normalizedMacros.protein + normalizedMacros.carbs);
+  }, [me.$isLoaded, syncedGoal, syncedProtein, syncedCarbs, syncedFat]);
 
   useEffect(() => {
     setSaveError(null);
     setSaveSuccess(null);
-  }, [goalInput, proteinInput, carbsInput, fatInput]);
+  }, [goalInput, macroSplitA, macroSplitB]);
+
+  const firstHandleResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragStartRef.current = {
+          splitA: macroSplitARef.current,
+          splitB: macroSplitBRef.current,
+        };
+        setActiveHandle("first");
+      },
+      onPanResponderMove: (_evt, gestureState) => {
+        if (macroTrackWidthRef.current <= 0) {
+          return;
+        }
+
+        const deltaPct = (gestureState.dx / macroTrackWidthRef.current) * 100;
+        const nextSplitA = clamp(
+          Math.round(dragStartRef.current.splitA + deltaPct),
+          0,
+          dragStartRef.current.splitB,
+        );
+
+        setMacroSplitA(nextSplitA);
+      },
+      onPanResponderRelease: () => {
+        setActiveHandle(null);
+      },
+      onPanResponderTerminate: () => {
+        setActiveHandle(null);
+      },
+    }),
+  ).current;
+
+  const secondHandleResponder = useRef(
+    PanResponder.create({
+      onStartShouldSetPanResponder: () => true,
+      onMoveShouldSetPanResponder: () => true,
+      onPanResponderGrant: () => {
+        dragStartRef.current = {
+          splitA: macroSplitARef.current,
+          splitB: macroSplitBRef.current,
+        };
+        setActiveHandle("second");
+      },
+      onPanResponderMove: (_evt, gestureState) => {
+        if (macroTrackWidthRef.current <= 0) {
+          return;
+        }
+
+        const deltaPct = (gestureState.dx / macroTrackWidthRef.current) * 100;
+        const nextSplitB = clamp(
+          Math.round(dragStartRef.current.splitB + deltaPct),
+          dragStartRef.current.splitA,
+          100,
+        );
+
+        setMacroSplitB(nextSplitB);
+      },
+      onPanResponderRelease: () => {
+        setActiveHandle(null);
+      },
+      onPanResponderTerminate: () => {
+        setActiveHandle(null);
+      },
+    }),
+  ).current;
 
   if (!me.$isLoaded) {
     return (
@@ -135,38 +246,31 @@ export default function SettingsScreen() {
   }
 
   const loadedGoal = me.root.calorieGoal ?? DEFAULT_CALORIE_GOAL;
-  const loadedProtein = me.root.macroProteinPct ?? DEFAULT_PROTEIN_PCT;
-  const loadedCarbs = me.root.macroCarbsPct ?? DEFAULT_CARBS_PCT;
-  const loadedFat = me.root.macroFatPct ?? DEFAULT_FAT_PCT;
+  const loadedMacros = normalizeMacroRatios(
+    me.root.macroProteinPct,
+    me.root.macroCarbsPct,
+    me.root.macroFatPct,
+  );
+
+  const proteinPct = macroSplitA;
+  const carbsPct = macroSplitB - macroSplitA;
+  const fatPct = 100 - macroSplitB;
 
   const parsedGoal = parseWholeNumber(goalInput);
-  const parsedProtein = parseWholeNumber(proteinInput);
-  const parsedCarbs = parseWholeNumber(carbsInput);
-  const parsedFat = parseWholeNumber(fatInput);
-  const macroTotal = (parsedProtein ?? 0) + (parsedCarbs ?? 0) + (parsedFat ?? 0);
 
   let goalValidationError: string | null = null;
-  let macroValidationError: string | null = null;
 
   if (!parsedGoal || parsedGoal < MIN_CALORIE_GOAL || parsedGoal > MAX_CALORIE_GOAL) {
     goalValidationError = `Daily calorie goal must be between ${MIN_CALORIE_GOAL} and ${MAX_CALORIE_GOAL}.`;
   }
 
-  if (parsedProtein === null || parsedCarbs === null || parsedFat === null) {
-    macroValidationError = "Macro ratios must be whole numbers.";
-  } else if (parsedProtein > 100 || parsedCarbs > 100 || parsedFat > 100) {
-    macroValidationError = "Each macro ratio must be between 0 and 100.";
-  } else if (macroTotal !== 100) {
-    macroValidationError = "Macro ratios must add up to 100%.";
-  }
-
-  const validationError = goalValidationError || macroValidationError;
+  const validationError = goalValidationError;
 
   const hasChanges =
     parsedGoal !== loadedGoal ||
-    parsedProtein !== loadedProtein ||
-    parsedCarbs !== loadedCarbs ||
-    parsedFat !== loadedFat;
+    proteinPct !== loadedMacros.protein ||
+    carbsPct !== loadedMacros.carbs ||
+    fatPct !== loadedMacros.fat;
 
   const profileEmail = clerkEmail;
 
@@ -174,21 +278,15 @@ export default function SettingsScreen() {
     setSaveError(null);
     setSaveSuccess(null);
 
-    if (
-      validationError ||
-      parsedGoal === null ||
-      parsedProtein === null ||
-      parsedCarbs === null ||
-      parsedFat === null
-    ) {
-      setSaveError(goalValidationError);
+    if (validationError || parsedGoal === null) {
+      setSaveError(validationError);
       return;
     }
 
     me.root.$jazz.set("calorieGoal", parsedGoal);
-    me.root.$jazz.set("macroProteinPct", parsedProtein);
-    me.root.$jazz.set("macroCarbsPct", parsedCarbs);
-    me.root.$jazz.set("macroFatPct", parsedFat);
+    me.root.$jazz.set("macroProteinPct", proteinPct);
+    me.root.$jazz.set("macroCarbsPct", carbsPct);
+    me.root.$jazz.set("macroFatPct", fatPct);
     setSaveSuccess("Saved successfully.");
   };
 
@@ -228,6 +326,9 @@ export default function SettingsScreen() {
       },
     ]);
   };
+
+  const firstDividerLeft = (macroTrackWidth * proteinPct) / 100;
+  const secondDividerLeft = (macroTrackWidth * (proteinPct + carbsPct)) / 100;
 
   return (
     <View style={styles.screen}>
@@ -278,41 +379,82 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionTitle}>Macro Ratios</Text>
         <View style={styles.card}>
-          <FormRow
-            label="Protein"
-            value={proteinInput}
-            onChange={setProteinInput}
-            suffix="%"
-            accessibilityLabel="Protein macro ratio"
-            maxLength={3}
-          />
-          <View style={styles.divider} />
-          <FormRow
-            label="Carbs"
-            value={carbsInput}
-            onChange={setCarbsInput}
-            suffix="%"
-            accessibilityLabel="Carbs macro ratio"
-            maxLength={3}
-          />
-          <View style={styles.divider} />
-          <FormRow
-            label="Fat"
-            value={fatInput}
-            onChange={setFatInput}
-            suffix="%"
-            accessibilityLabel="Fat macro ratio"
-            maxLength={3}
-          />
-          <View style={styles.divider} />
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Total</Text>
-            <Text style={[styles.totalValue, macroTotal !== 100 && styles.errorText]}>
-              {macroTotal}%
-            </Text>
+          <View style={styles.macroLegendRow}>
+            <View style={styles.macroLegendItem}>
+              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroProtein }]} />
+              <Text style={styles.macroLegendText}>Protein {proteinPct}%</Text>
+            </View>
+            <View style={styles.macroLegendItem}>
+              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroCarbs }]} />
+              <Text style={styles.macroLegendText}>Carbs {carbsPct}%</Text>
+            </View>
+            <View style={styles.macroLegendItem}>
+              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroFat }]} />
+              <Text style={styles.macroLegendText}>Fat {fatPct}%</Text>
+            </View>
           </View>
+
+          <View
+            style={styles.macroSliderWrap}
+            onLayout={(event) => {
+              setMacroTrackWidth(event.nativeEvent.layout.width);
+            }}
+          >
+            <View style={styles.macroSliderTrack}>
+              <View style={[styles.macroSection, styles.macroProteinSection, { width: `${proteinPct}%` }]} />
+              <View
+                style={[
+                  styles.macroSection,
+                  styles.macroCarbsSection,
+                  { left: `${proteinPct}%`, width: `${carbsPct}%` },
+                ]}
+              />
+              <View
+                style={[
+                  styles.macroSection,
+                  styles.macroFatSection,
+                  { left: `${proteinPct + carbsPct}%`, width: `${fatPct}%` },
+                ]}
+              />
+
+              <View pointerEvents="none" style={styles.macroDivisionOverlay}>
+                {Array.from({ length: MACRO_DIVISIONS - 1 }).map((_, index) => (
+                  <View
+                    key={index}
+                    style={[
+                      styles.macroDivision,
+                      {
+                        left: `${((index + 1) / MACRO_DIVISIONS) * 100}%`,
+                      },
+                    ]}
+                  />
+                ))}
+              </View>
+
+              <View style={[styles.macroHandleContainer, { left: firstDividerLeft }]}>
+                <View
+                  {...firstHandleResponder.panHandlers}
+                  accessibilityLabel="Adjust protein and carbs split"
+                  style={[styles.macroHandle, activeHandle === "first" && styles.macroHandleActive]}
+                >
+                  <View style={styles.macroHandleGrip} />
+                </View>
+              </View>
+
+              <View style={[styles.macroHandleContainer, { left: secondDividerLeft }]}>
+                <View
+                  {...secondHandleResponder.panHandlers}
+                  accessibilityLabel="Adjust carbs and fat split"
+                  style={[styles.macroHandle, activeHandle === "second" && styles.macroHandleActive]}
+                >
+                  <View style={styles.macroHandleGrip} />
+                </View>
+              </View>
+            </View>
+          </View>
+
+          <Text style={styles.macroHelpText}>Drag the two dividers to resize each macro section.</Text>
         </View>
-        {macroValidationError ? <Text style={styles.sectionErrorText}>{macroValidationError}</Text> : null}
       </ScrollView>
 
       <View style={[styles.actionBarContainer, { paddingBottom: insets.bottom + 12 }]}>
@@ -382,7 +524,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.card,
     borderRadius: 14,
     paddingHorizontal: 14,
-    paddingVertical: 2,
+    paddingVertical: 10,
   },
   formRow: {
     minHeight: 52,
@@ -446,12 +588,101 @@ const styles = StyleSheet.create({
     height: StyleSheet.hairlineWidth,
     backgroundColor: palette.separator,
   },
-  totalValue: {
-    fontSize: 17,
-    lineHeight: 22,
+  macroLegendRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+    marginBottom: 12,
+  },
+  macroLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  macroLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  macroLegendText: {
+    fontSize: 14,
+    lineHeight: 18,
     fontWeight: "600",
     color: palette.secondaryLabel,
     fontVariant: ["tabular-nums"],
+  },
+  macroSliderWrap: {
+    marginVertical: 8,
+  },
+  macroSliderTrack: {
+    height: 44,
+    borderRadius: 14,
+    backgroundColor: iosColor("quaternarySystemFill", "#E5E7EB"),
+    overflow: "visible",
+    position: "relative",
+  },
+  macroSection: {
+    position: "absolute",
+    top: 0,
+    bottom: 0,
+  },
+  macroProteinSection: {
+    left: 0,
+    backgroundColor: palette.macroProtein,
+    borderTopLeftRadius: 14,
+    borderBottomLeftRadius: 14,
+  },
+  macroCarbsSection: {
+    backgroundColor: palette.macroCarbs,
+  },
+  macroFatSection: {
+    backgroundColor: palette.macroFat,
+    borderTopRightRadius: 14,
+    borderBottomRightRadius: 14,
+  },
+  macroDivisionOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  macroDivision: {
+    position: "absolute",
+    top: 7,
+    bottom: 7,
+    width: StyleSheet.hairlineWidth,
+    marginLeft: -0.5,
+    backgroundColor: "rgba(255,255,255,0.8)",
+  },
+  macroHandleContainer: {
+    position: "absolute",
+    top: -8,
+    bottom: -8,
+    width: 0,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  macroHandle: {
+    width: 26,
+    height: 60,
+    borderRadius: 13,
+    borderWidth: 2,
+    borderColor: "rgba(17,24,39,0.16)",
+    backgroundColor: "rgba(255,255,255,0.94)",
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  macroHandleActive: {
+    borderColor: palette.tint,
+  },
+  macroHandleGrip: {
+    width: 3,
+    height: 24,
+    borderRadius: 2,
+    backgroundColor: "rgba(17,24,39,0.35)",
+  },
+  macroHelpText: {
+    marginTop: 8,
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.tertiaryLabel,
   },
   actionBarContainer: {
     position: "absolute",
