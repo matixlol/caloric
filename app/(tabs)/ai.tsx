@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAccount } from "jazz-tools/expo";
 import {
   Platform,
@@ -971,22 +972,20 @@ export default function AILogScreen() {
             maxLength={600}
             editable={hasApiKey && status === "ready"}
           />
-          <View style={styles.composerActions}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={!hasApiKey || status !== "ready" || input.trim().length === 0}
-              onPress={() => {
-                void submitMessage();
-              }}
-              style={[
-                styles.sendButton,
-                (!hasApiKey || status !== "ready" || input.trim().length === 0) &&
-                  styles.buttonDisabled,
-              ]}
-            >
-              <Text style={styles.sendButtonText}>Send</Text>
-            </Pressable>
-          </View>
+          <Pressable
+            accessibilityRole="button"
+            disabled={!hasApiKey || status !== "ready" || input.trim().length === 0}
+            onPress={() => {
+              void submitMessage();
+            }}
+            style={[
+              styles.sendButton,
+              (!hasApiKey || status !== "ready" || input.trim().length === 0) &&
+                styles.buttonDisabled,
+            ]}
+          >
+            <Ionicons name="send" size={18} color={palette.buttonText} />
+          </Pressable>
         </View>
       </View>
     </View>
@@ -1192,38 +1191,31 @@ const styles = StyleSheet.create({
   composerCard: {
     backgroundColor: palette.card,
     borderRadius: 14,
-    padding: 10,
-    gap: 8,
+    padding: 6,
+    paddingLeft: 10,
+    flexDirection: "row",
+    alignItems: "flex-end",
+    gap: 6,
   },
   input: {
-    minHeight: 44,
+    flex: 1,
+    minHeight: 36,
     maxHeight: 140,
     borderRadius: 10,
-    backgroundColor: palette.background,
+    backgroundColor: palette.card,
     color: palette.label,
-    paddingHorizontal: 10,
-    paddingVertical: 10,
+    paddingHorizontal: 6,
+    paddingVertical: 8,
     fontSize: 16,
     lineHeight: 20,
   },
-  composerActions: {
-    flexDirection: "row",
-    justifyContent: "flex-end",
-    gap: 8,
-  },
   sendButton: {
-    minHeight: 40,
-    borderRadius: 10,
-    paddingHorizontal: 14,
+    width: 34,
+    height: 34,
+    borderRadius: 17,
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: palette.tint,
-  },
-  sendButtonText: {
-    color: palette.buttonText,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
   },
   buttonDisabled: {
     backgroundColor: palette.tintDisabled,
