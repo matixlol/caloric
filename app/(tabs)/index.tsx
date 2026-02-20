@@ -1,20 +1,21 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useAccount } from "jazz-tools/expo";
-import { useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
+  type LayoutChangeEvent,
   Platform,
   PlatformColor,
   Pressable,
-  ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
+import DraggableFlatList, { type RenderItemParams } from "react-native-draggable-flatlist";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { formatPortionLabel, sanitizePortion } from "../../src/portion";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
+import { formatPortionLabel, sanitizePortion } from "../../src/portion";
 import { CaloricAccount } from "../../src/jazz/schema";
 
 const iosColor = (name: string, fallback: string) =>
@@ -37,12 +38,41 @@ const DEFAULT_PROTEIN_PCT = 30;
 const DEFAULT_CARBS_PCT = 50;
 const DEFAULT_FAT_PCT = 20;
 
+const HEADER_HEIGHT_ESTIMATE = 74;
+const ENTRY_HEIGHT_ESTIMATE = 54;
+const EMPTY_HEIGHT_ESTIMATE = 60;
+
 type MealEntry = {
   id: string;
   name: string;
   meta?: string;
   calories: number;
 };
+
+type MealHeaderItem = {
+  type: "header";
+  key: string;
+  meal: MealKey;
+  label: string;
+  calories: number;
+  isFirst: boolean;
+};
+
+type MealEntryItem = {
+  type: "entry";
+  key: string;
+  meal: MealKey;
+  entry: MealEntry;
+};
+
+type MealEmptyItem = {
+  type: "empty";
+  key: string;
+  meal: MealKey;
+  copy: string;
+};
+
+type MealListItem = MealHeaderItem | MealEntryItem | MealEmptyItem;
 
 function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
@@ -57,22 +87,32 @@ function formatGrams(value: number) {
   return Number.isInteger(rounded) ? `${rounded.toFixed(0)}g` : `${rounded.toFixed(1)}g`;
 }
 
+function estimateItemHeight(item: MealListItem) {
+  if (item.type === "header") return HEADER_HEIGHT_ESTIMATE;
+  if (item.type === "entry") return ENTRY_HEIGHT_ESTIMATE;
+  return EMPTY_HEIGHT_ESTIMATE;
+}
+
 function MealRow({
   id,
   name,
   meta,
   calories,
   isLast,
+  isActive,
   onDelete,
   onPress,
+  onDrag,
 }: {
   id: string;
   name: string;
   meta?: string;
   calories: number;
   isLast: boolean;
+  isActive: boolean;
   onDelete: (id: string) => void;
   onPress: (id: string) => void;
+  onDrag: () => void;
 }) {
   return (
     <Swipeable
@@ -97,6 +137,9 @@ function MealRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Edit ${name}`}
+        delayLongPress={170}
+        disabled={isActive}
+        onLongPress={onDrag}
         onPress={() => onPress(id)}
         style={[styles.rowPressable, !isLast && styles.rowWithDivider]}
       >
@@ -109,70 +152,6 @@ function MealRow({
         </View>
       </Pressable>
     </Swipeable>
-  );
-}
-
-function MealSection({
-  label,
-  emptyCopy,
-  entries,
-  calories,
-  onAddFood,
-  onDeleteEntry,
-  onSelectEntry,
-}: {
-  label: string;
-  emptyCopy: string;
-  entries: MealEntry[];
-  calories: number;
-  onAddFood: () => void;
-  onDeleteEntry: (entryId: string) => void;
-  onSelectEntry: (entryId: string) => void;
-}) {
-  return (
-    <View style={styles.mealRow}>
-      <View style={styles.mealSideLabel}>
-        <Text numberOfLines={1} style={styles.mealSideLabelText}>
-          {label.toUpperCase()}
-        </Text>
-      </View>
-
-      {/* Keep each meal body isolated so this can become a drop target later. */}
-      <View style={styles.mealCard}>
-        <View style={styles.mealHeader}>
-          <View style={styles.mealCaloriesRow}>
-            <Text style={styles.mealCalories}>{formatCalories(calories)}</Text>
-            <Text style={styles.mealCaloriesUnit}>kcal</Text>
-          </View>
-
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Add food to ${label}`}
-            onPress={onAddFood}
-            style={styles.addIconButton}
-          >
-            <Text style={styles.addIconButtonText}>+</Text>
-          </Pressable>
-        </View>
-
-        {entries.length === 0 ? (
-          <Text style={styles.emptyText}>{emptyCopy}</Text>
-        ) : (
-          entries.map((entry, index) => (
-            <MealRow
-              key={entry.id}
-              id={entry.id}
-              name={entry.name}
-              meta={entry.meta}
-              calories={entry.calories}
-              isLast={index === entries.length - 1}
-              onDelete={onDeleteEntry}
-              onPress={onSelectEntry}
-            />
-          ))
-        )}
-      </View>
-    </View>
   );
 }
 
@@ -189,13 +168,133 @@ export default function HomeScreen() {
       return [];
     }
 
-    return (logsValue ?? [])
-      .filter(
-        (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } =>
-          Boolean(entry?.$isLoaded),
-      )
-      .sort((a, b) => a.createdAt - b.createdAt);
+    return (logsValue ?? []).filter(
+      (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } => Boolean(entry?.$isLoaded),
+    );
   }, [logsValue, me.$isLoaded]);
+
+  const logsByMeal = useMemo<Record<MealKey, MealEntry[]>>(() => {
+    const grouped: Record<MealKey, MealEntry[]> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snacks: [],
+    };
+
+    logs.forEach((entry) => {
+      const meal = normalizeMeal(entry.meal);
+      if (!meal) return;
+
+      const portion = sanitizePortion(entry.portion);
+
+      grouped[meal].push({
+        id: entry.$jazz.id,
+        name: entry.foodName,
+        meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
+        calories: (entry.nutrition?.calories ?? 0) * portion,
+      });
+    });
+
+    return grouped;
+  }, [logs]);
+
+  const mealListItems = useMemo<MealListItem[]>(() => {
+    const items: MealListItem[] = [];
+
+    MEAL_TIMES.forEach((meal, mealIndex) => {
+      const entries = logsByMeal[meal.key];
+      const calories = entries.reduce((sum, entry) => sum + entry.calories, 0);
+
+      items.push({
+        type: "header",
+        key: `header-${meal.key}`,
+        meal: meal.key,
+        label: meal.label,
+        calories,
+        isFirst: mealIndex === 0,
+      });
+
+      if (entries.length === 0) {
+        items.push({
+          type: "empty",
+          key: `empty-${meal.key}`,
+          meal: meal.key,
+          copy: meal.emptyCopy,
+        });
+        return;
+      }
+
+      entries.forEach((entry) => {
+        items.push({
+          type: "entry",
+          key: `entry-${entry.id}`,
+          meal: meal.key,
+          entry,
+        });
+      });
+    });
+
+    return items;
+  }, [logsByMeal]);
+
+  const [dragItems, setDragItems] = useState<MealListItem[]>(mealListItems);
+
+  useEffect(() => {
+    setDragItems(mealListItems);
+  }, [mealListItems]);
+
+  const [itemHeights, setItemHeights] = useState<Record<string, number>>({});
+
+  const sectionHeights = useMemo<Record<MealKey, number>>(() => {
+    const heights: Record<MealKey, number> = {
+      breakfast: 0,
+      lunch: 0,
+      dinner: 0,
+      snacks: 0,
+    };
+
+    let activeMeal: MealKey = "breakfast";
+
+    dragItems.forEach((item) => {
+      if (item.type === "header") {
+        activeMeal = item.meal;
+      }
+
+      const measuredHeight = itemHeights[item.key] ?? estimateItemHeight(item);
+      heights[activeMeal] += measuredHeight;
+    });
+
+    return heights;
+  }, [dragItems, itemHeights]);
+
+  const entryIsLastByKey = useMemo<Record<string, boolean>>(() => {
+    const isLastByKey: Record<string, boolean> = {};
+
+    for (let index = 0; index < dragItems.length; index += 1) {
+      const item = dragItems[index];
+      if (item.type !== "entry") {
+        continue;
+      }
+
+      let isLast = true;
+
+      for (let nextIndex = index + 1; nextIndex < dragItems.length; nextIndex += 1) {
+        const next = dragItems[nextIndex];
+        if (next.type === "header") {
+          break;
+        }
+
+        if (next.type === "entry") {
+          isLast = false;
+          break;
+        }
+      }
+
+      isLastByKey[item.key] = isLast;
+    }
+
+    return isLastByKey;
+  }, [dragItems]);
 
   if (!me.$isLoaded) {
     return (
@@ -204,6 +303,8 @@ export default function HomeScreen() {
       </View>
     );
   }
+
+  const rootLogs = me.root.logs;
 
   const caloriesConsumed = logs.reduce(
     (sum, entry) => sum + (entry.nutrition?.calories ?? 0) * sanitizePortion(entry.portion),
@@ -236,38 +337,30 @@ export default function HomeScreen() {
   const carbsProgress = clampPercent((carbs / Math.max(carbsGoal, 1)) * 100);
   const fatProgress = clampPercent((fat / Math.max(fatGoal, 1)) * 100);
 
-  const logsByMeal: Record<MealKey, MealEntry[]> = {
-    breakfast: [],
-    lunch: [],
-    dinner: [],
-    snacks: [],
+  const recordItemHeight = (itemKey: string, event: LayoutChangeEvent) => {
+    const next = event.nativeEvent.layout.height;
+
+    setItemHeights((prev) => {
+      const current = prev[itemKey] ?? 0;
+      if (Math.abs(current - next) < 0.5) {
+        return prev;
+      }
+
+      return { ...prev, [itemKey]: next };
+    });
   };
 
-  logs.forEach((entry) => {
-    const meal = normalizeMeal(entry.meal);
-    if (!meal) return;
-
-    const portion = sanitizePortion(entry.portion);
-
-    logsByMeal[meal].push({
-      id: entry.$jazz.id,
-      name: entry.foodName,
-      meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
-      calories: (entry.nutrition?.calories ?? 0) * portion,
-    });
-  });
-
   const handleDeleteEntry = (entryId: string) => {
-    if (!me.root.logs) {
+    if (!rootLogs) {
       return;
     }
 
-    const index = me.root.logs.findIndex((entry) => entry?.$isLoaded && entry.$jazz.id === entryId);
+    const index = rootLogs.findIndex((entry) => entry?.$isLoaded && entry.$jazz.id === entryId);
     if (index === -1) {
       return;
     }
 
-    me.root.logs.$jazz.splice(index, 1);
+    rootLogs.$jazz.splice(index, 1);
   };
 
   const handleOpenEntry = (entryId: string) => {
@@ -277,9 +370,204 @@ export default function HomeScreen() {
     });
   };
 
+  const persistDraggedOrder = (orderedItems: MealListItem[]) => {
+    if (!rootLogs || logs.length === 0) {
+      return;
+    }
+
+    const entryIdsByMeal: Record<MealKey, string[]> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snacks: [],
+    };
+
+    let activeMeal: MealKey = "breakfast";
+
+    orderedItems.forEach((item) => {
+      if (item.type === "header") {
+        activeMeal = item.meal;
+        return;
+      }
+
+      if (item.type === "entry") {
+        entryIdsByMeal[activeMeal].push(item.entry.id);
+      }
+    });
+
+    const seenEntryIds = new Set<string>();
+
+    (Object.keys(entryIdsByMeal) as MealKey[]).forEach((meal) => {
+      entryIdsByMeal[meal].forEach((id) => {
+        seenEntryIds.add(id);
+      });
+    });
+
+    logs.forEach((entry) => {
+      if (seenEntryIds.has(entry.$jazz.id)) {
+        return;
+      }
+
+      const normalizedMeal = normalizeMeal(entry.meal) ?? "lunch";
+      entryIdsByMeal[normalizedMeal].push(entry.$jazz.id);
+    });
+
+    const logsById = new Map(logs.map((entry) => [entry.$jazz.id, entry] as const));
+    const reordered: typeof logs = [];
+
+    MEAL_TIMES.forEach((mealTime) => {
+      entryIdsByMeal[mealTime.key].forEach((entryId) => {
+        const entry = logsById.get(entryId);
+        if (!entry) {
+          return;
+        }
+
+        if (normalizeMeal(entry.meal) !== mealTime.key) {
+          entry.$jazz.set("meal", mealTime.key);
+        }
+
+        reordered.push(entry);
+      });
+    });
+
+    if (reordered.length !== logs.length) {
+      return;
+    }
+
+    rootLogs.$jazz.splice(0, rootLogs.length, ...reordered);
+  };
+
+  const listHeader = (
+    <View style={styles.listHeader}>
+      <Text style={styles.largeTitle}>Today</Text>
+
+      <View style={styles.summaryCard}>
+        <Text style={styles.summaryLabel}>Calories</Text>
+        <View style={styles.summaryValueRow}>
+          <Text style={styles.summaryValue}>{formatCalories(caloriesConsumed)}</Text>
+          <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
+        </View>
+        <View style={styles.progressTrack}>
+          <View style={[styles.progressFill, { width: `${calorieProgress}%` }]} />
+        </View>
+        <View style={styles.summaryDivider} />
+        <View style={styles.macroColumns}>
+          <View style={styles.macroColumn}>
+            <Text style={styles.macroLabel}>Protein</Text>
+            <Text style={styles.macroValue}>
+              {formatGrams(protein)}
+              <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
+            </Text>
+            <View style={styles.macroTrack}>
+              <View style={[styles.macroFill, { width: `${proteinProgress}%` }]} />
+            </View>
+          </View>
+
+          <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+            <Text style={styles.macroLabel}>Carbs</Text>
+            <Text style={styles.macroValue}>
+              {formatGrams(carbs)}
+              <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
+            </Text>
+            <View style={styles.macroTrack}>
+              <View style={[styles.macroFill, { width: `${carbsProgress}%` }]} />
+            </View>
+          </View>
+
+          <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+            <Text style={styles.macroLabel}>Fat</Text>
+            <Text style={styles.macroValue}>
+              {formatGrams(fat)}
+              <Text style={styles.macroGoal}> / {fatGoal}g</Text>
+            </Text>
+            <View style={styles.macroTrack}>
+              <View style={[styles.macroFill, { width: `${fatProgress}%` }]} />
+            </View>
+          </View>
+        </View>
+      </View>
+    </View>
+  );
+
+  const renderItem = ({ item, drag, isActive }: RenderItemParams<MealListItem>) => {
+    if (item.type === "header") {
+      return (
+        <View onLayout={(event) => recordItemHeight(item.key, event)} style={styles.mealRow}>
+          <View
+            pointerEvents="none"
+            style={[styles.mealSideLabel, { height: Math.max(sectionHeights[item.meal], 48) }]}
+          >
+            <Text numberOfLines={1} style={styles.mealSideLabelText}>
+              {item.label.toUpperCase()}
+            </Text>
+          </View>
+
+          <View style={[styles.mealHeaderCard, !item.isFirst && styles.mealHeaderCardSpaced]}>
+            <View style={styles.mealHeader}>
+              <View style={styles.mealCaloriesRow}>
+                <Text style={styles.mealCalories}>{formatCalories(item.calories)}</Text>
+                <Text style={styles.mealCaloriesUnit}>kcal</Text>
+              </View>
+
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`Add food to ${item.label}`}
+                onPress={() =>
+                  router.navigate({
+                    pathname: "/log-food",
+                    params: { meal: item.meal },
+                  })
+                }
+                style={styles.addIconButton}
+              >
+                <Text style={styles.addIconButtonText}>+</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      );
+    }
+
+    if (item.type === "empty") {
+      return (
+        <View
+          onLayout={(event) => recordItemHeight(item.key, event)}
+          style={[styles.mealBodyCard, styles.mealBodyCardLast]}
+        >
+          <Text style={styles.emptyText}>{item.copy}</Text>
+        </View>
+      );
+    }
+
+    const isLast = entryIsLastByKey[item.key] ?? true;
+
+    return (
+      <View
+        onLayout={(event) => recordItemHeight(item.key, event)}
+        style={[styles.mealBodyCard, isLast && styles.mealBodyCardLast]}
+      >
+        <MealRow
+          id={item.entry.id}
+          name={item.entry.name}
+          meta={item.entry.meta}
+          calories={item.entry.calories}
+          isLast={isLast}
+          isActive={isActive}
+          onDelete={handleDeleteEntry}
+          onPress={handleOpenEntry}
+          onDrag={drag}
+        />
+      </View>
+    );
+  };
+
   return (
     <View style={styles.screen}>
-      <ScrollView
+      <DraggableFlatList
+        activationDistance={8}
+        autoscrollSpeed={120}
+        autoscrollThreshold={80}
+        containerStyle={styles.listContainer}
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[
           styles.contentContainer,
@@ -288,80 +576,15 @@ export default function HomeScreen() {
             paddingBottom: insets.bottom + 24,
           },
         ]}
-      >
-        <Text style={styles.largeTitle}>Today</Text>
-
-        <View style={styles.summaryCard}>
-          <Text style={styles.summaryLabel}>Calories</Text>
-          <View style={styles.summaryValueRow}>
-            <Text style={styles.summaryValue}>{formatCalories(caloriesConsumed)}</Text>
-            <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
-          </View>
-          <View style={styles.progressTrack}>
-            <View style={[styles.progressFill, { width: `${calorieProgress}%` }]} />
-          </View>
-          <View style={styles.summaryDivider} />
-          <View style={styles.macroColumns}>
-            <View style={styles.macroColumn}>
-              <Text style={styles.macroLabel}>Protein</Text>
-              <Text style={styles.macroValue}>
-                {formatGrams(protein)}
-                <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
-              </Text>
-              <View style={styles.macroTrack}>
-                <View style={[styles.macroFill, { width: `${proteinProgress}%` }]} />
-              </View>
-            </View>
-
-            <View style={[styles.macroColumn, styles.macroColumnDivider]}>
-              <Text style={styles.macroLabel}>Carbs</Text>
-              <Text style={styles.macroValue}>
-                {formatGrams(carbs)}
-                <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
-              </Text>
-              <View style={styles.macroTrack}>
-                <View style={[styles.macroFill, { width: `${carbsProgress}%` }]} />
-              </View>
-            </View>
-
-            <View style={[styles.macroColumn, styles.macroColumnDivider]}>
-              <Text style={styles.macroLabel}>Fat</Text>
-              <Text style={styles.macroValue}>
-                {formatGrams(fat)}
-                <Text style={styles.macroGoal}> / {fatGoal}g</Text>
-              </Text>
-              <View style={styles.macroTrack}>
-                <View style={[styles.macroFill, { width: `${fatProgress}%` }]} />
-              </View>
-            </View>
-          </View>
-        </View>
-
-        <View style={styles.mealList}>
-          {MEAL_TIMES.map((meal) => {
-            const entries = logsByMeal[meal.key];
-            const calories = entries.reduce((sum, entry) => sum + entry.calories, 0);
-
-            return (
-              <MealSection
-                key={meal.key}
-                label={meal.label}
-                emptyCopy={meal.emptyCopy}
-                entries={entries}
-                calories={calories}
-                onAddFood={() =>
-                  router.navigate({
-                    pathname: "/log-food",
-                    params: { meal: meal.key },
-                  })
-                }
-                onDeleteEntry={handleDeleteEntry}
-                onSelectEntry={handleOpenEntry}
-              />
-            );
-          })}
-        </View>
-      </ScrollView>
+        data={dragItems}
+        keyExtractor={(item) => item.key}
+        ListHeaderComponent={listHeader}
+        onDragEnd={({ data }) => {
+          setDragItems(data);
+          persistDraggedOrder(data);
+        }}
+        renderItem={renderItem}
+      />
     </View>
   );
 }
@@ -371,9 +594,16 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
+  listContainer: {
+    flex: 1,
+    backgroundColor: palette.background,
+  },
   contentContainer: {
     paddingHorizontal: 16,
+  },
+  listHeader: {
     gap: 10,
+    marginBottom: 10,
   },
   loadingContainer: {
     flex: 1,
@@ -484,10 +714,6 @@ const styles = StyleSheet.create({
     height: "100%",
     backgroundColor: palette.tint,
   },
-  mealList: {
-    gap: 10,
-    paddingBottom: 12,
-  },
   mealRow: {
     position: "relative",
     flexDirection: "row",
@@ -497,7 +723,6 @@ const styles = StyleSheet.create({
     position: "absolute",
     left: -12,
     top: 0,
-    bottom: 0,
     width: 26,
     alignItems: "center",
     justifyContent: "center",
@@ -515,14 +740,28 @@ const styles = StyleSheet.create({
     textAlign: "center",
     transform: [{ rotate: "-90deg" }],
   },
-  mealCard: {
+  mealHeaderCard: {
     flex: 1,
     marginLeft: 14,
     backgroundColor: palette.card,
-    borderRadius: 14,
-    overflow: "hidden",
+    borderTopLeftRadius: 14,
+    borderTopRightRadius: 14,
     paddingHorizontal: 12,
-    paddingVertical: 12,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  mealHeaderCardSpaced: {
+    marginTop: 10,
+  },
+  mealBodyCard: {
+    marginLeft: 14,
+    backgroundColor: palette.card,
+    paddingHorizontal: 12,
+  },
+  mealBodyCardLast: {
+    borderBottomLeftRadius: 14,
+    borderBottomRightRadius: 14,
+    overflow: "hidden",
   },
   mealHeader: {
     flexDirection: "row",
