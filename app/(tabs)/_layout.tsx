@@ -20,6 +20,14 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
+      <NativeTabs.Trigger name="ai">
+        <NativeTabs.Trigger.Icon
+          sf={{ default: "sparkles", selected: "sparkles" }}
+          md="auto_awesome"
+        />
+        <NativeTabs.Trigger.Label>AI Log</NativeTabs.Trigger.Label>
+      </NativeTabs.Trigger>
+
       <NativeTabs.Trigger name="settings">
         <NativeTabs.Trigger.Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} md="settings" />
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
