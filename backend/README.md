@@ -13,6 +13,31 @@ Bun microservice that proxies MyFitnessPal search/detail APIs and persists every
     - `countryCode` (default `US`)
     - `resourceType` (default `foods`)
     - `includeDetails` (default `true`)
+- `POST /ai/session`
+  - body:
+    - `userId` (required)
+  - returns:
+    - `sessionId`
+    - `status` (`ready`)
+- `POST /ai/turn`
+  - body:
+    - `sessionId` (required)
+    - `userId` (required, must match session owner)
+    - `action` (required)
+      - user message:
+        - `type: "user-message"`
+        - `message`
+      - approval decision:
+        - `type: "approval"`
+        - `toolCallId`
+        - `suggestionId`
+        - `approved`
+  - returns:
+    - `status` (`ready` or `awaiting-approval`)
+    - `events` (`assistant`, `search`, `approval`)
+
+`/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
+OpenRouter tracking fields are sent as `user` (client user id) and `session_id` (backend session id).
 
 `/search` does this:
 1. Looks up the latest cached search response for the exact request tuple (`query`, `offset`, `maxItems`, `countryCode`, `resourceType`)
@@ -28,6 +53,7 @@ Copy `.env.example` to `.env` and set:
 
 - `DATABASE_URL`
 - `MFP_AUTHORIZATION`
+- `OPENROUTER_API_KEY`
 
 Optional:
 
@@ -36,6 +62,8 @@ Optional:
 - `MFP_BASE_URL`
 - `MFP_DETAIL_CONCURRENCY`
 - `MFP_REQUEST_TIMEOUT_MS`
+- `OPENROUTER_MODEL`
+- `OPENROUTER_PROVIDER_ONLY`
 
 ## Run
 

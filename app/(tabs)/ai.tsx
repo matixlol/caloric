@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { useAuth } from "@clerk/clerk-expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAccount } from "jazz-tools/expo";
 import {
@@ -13,11 +14,13 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
-import { z } from "zod";
-import { type SearchFood, searchFoods } from "../../src/food-search";
 import { CaloricAccount } from "../../src/jazz/schema";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
-import { formatPortionLabel, sanitizePortion } from "../../src/portion";
+import { formatPortionLabel } from "../../src/portion";
+
+const BACKEND_BASE_URL =
+  (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
+  "https://backend.caloric.mati.lol";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -37,32 +40,7 @@ const palette = {
   success: iosColor("systemGreen", "#16A34A"),
 };
 
-const model = "moonshotai/kimi-k2-0905";
-const systemPrompt = [
-  "You are Caloric's food logging assistant.",
-  "Always call searchFoods before suggesting a food entry.",
-  "searchFoods returns local result IDs. Only reference those IDs later.",
-  "Never send or edit nutrition/name/brand/serving in approval requests.",
-  "When ready, call requestFoodApprovals once with one or more suggestions.",
-  "Only set resultId, meal, portion, and reason in each suggestion.",
-  "Portion should be in quarter increments (0.25).",
-  "If the user rejects suggestions, explain briefly and search again.",
-].join(" ");
-
-const mealSchema = z.enum(["breakfast", "lunch", "dinner", "snacks"]);
-const searchFoodsInputSchema = z.object({
-  query: z.string().min(2),
-  limit: z.number().int().min(1).max(10).default(6),
-});
-const approvalSuggestionSchema = z.object({
-  resultId: z.string().min(1),
-  meal: mealSchema.default("lunch"),
-  portion: z.number().min(0.25).default(1),
-  reason: z.string().min(1),
-});
-const approvalInputSchema = z.object({
-  suggestions: z.array(approvalSuggestionSchema).min(1).max(8),
-});
+type Meal = "breakfast" | "lunch" | "dinner" | "snacks";
 
 type ApprovalOutput = {
   approved: boolean;
@@ -70,6 +48,33 @@ type ApprovalOutput = {
 };
 
 type ChatStatus = "ready" | "streaming" | "awaiting-approval";
+
+type SearchResultFood = {
+  resultId: string;
+  name: string;
+  brand?: string;
+  serving?: string;
+  nutrition?: {
+    calories?: number;
+    protein?: number;
+    carbs?: number;
+    fat?: number;
+    fiber?: number;
+    sugars?: number;
+    sodiumMg?: number;
+    potassiumMg?: number;
+  };
+};
+
+type ResolvedApprovalSuggestion = {
+  suggestionId: string;
+  resultId: string;
+  meal: Meal;
+  portion: number;
+  reason: string;
+  food: SearchResultFood;
+  output?: ApprovalOutput;
+};
 
 type TextUIMessage = {
   id: string;
@@ -84,24 +89,6 @@ type SearchUIMessage = {
   foods: SearchResultFood[];
 };
 
-type SearchResultFood = {
-  resultId: string;
-  name: string;
-  brand?: string;
-  serving?: string;
-  nutrition?: SearchFood["nutrition"];
-};
-
-type ResolvedApprovalSuggestion = {
-  suggestionId: string;
-  resultId: string;
-  meal: z.infer<typeof mealSchema>;
-  portion: number;
-  reason: string;
-  food: SearchResultFood;
-  output?: ApprovalOutput;
-};
-
 type ApprovalUIMessage = {
   id: string;
   kind: "approval";
@@ -111,103 +98,36 @@ type ApprovalUIMessage = {
 
 type UIMessage = TextUIMessage | SearchUIMessage | ApprovalUIMessage;
 
-type OpenRouterToolCall = {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
-};
-
-type OpenRouterMessage = {
-  role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
-  tool_calls?: OpenRouterToolCall[];
-  tool_call_id?: string;
-};
-
-type OpenRouterToolCallDelta = {
-  index?: number;
-  id?: string;
-  type?: "function";
-  function?: {
-    name?: string;
-    arguments?: string;
-  };
-};
-
-type OpenRouterSsePayload = {
-  choices?: {
-    delta?: {
-      content?: string;
-      tool_calls?: OpenRouterToolCallDelta[];
+type AgentEvent =
+  | {
+      kind: "assistant";
+      text: string;
+    }
+  | {
+      kind: "search";
+      foods: SearchResultFood[];
+    }
+  | {
+      kind: "approval";
+      toolCallId: string;
+      suggestions: ResolvedApprovalSuggestion[];
     };
-    finish_reason?: string | null;
-  }[];
-};
 
-const openRouterTools = [
-  {
-    type: "function",
-    function: {
-      name: "searchFoods",
-      description: "Search foods in the app food database.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "User query for food search.",
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 10,
-            description: "Max number of foods to return.",
-          },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "requestFoodApprovals",
-      description:
-        "Request user approval for one or more selected food entries using local result IDs from searchFoods.",
-      parameters: {
-        type: "object",
-        properties: {
-          suggestions: {
-            type: "array",
-            minItems: 1,
-            maxItems: 8,
-            items: {
-              type: "object",
-              properties: {
-                resultId: { type: "string" },
-                meal: {
-                  type: "string",
-                  enum: ["breakfast", "lunch", "dinner", "snacks"],
-                },
-                portion: { type: "number", minimum: 0.25 },
-                reason: { type: "string" },
-              },
-              required: ["resultId", "meal", "portion", "reason"],
-            },
-          },
-        },
-        required: ["suggestions"],
-      },
-    },
-  },
-] as const;
+type AgentAction =
+  | {
+      type: "user-message";
+      message: string;
+    }
+  | {
+      type: "approval";
+      toolCallId: string;
+      suggestionId: string;
+      approved: boolean;
+    };
 
 const createMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
-function cloneNutrition(nutrition: SearchFood["nutrition"]) {
+function cloneNutrition(nutrition: SearchResultFood["nutrition"]) {
   if (!nutrition) {
     return undefined;
   }
@@ -232,46 +152,29 @@ function formatCalories(value: number | undefined): string {
   return Math.round(value).toLocaleString();
 }
 
-function parseToolArguments(raw: string): unknown {
-  if (!raw || !raw.trim()) {
-    return {};
-  }
-
-  return JSON.parse(raw);
-}
-
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
   }
 
-  return "Something went wrong while talking to OpenRouter.";
+  return "Something went wrong while talking to the backend AI service.";
 }
 
 export default function AILogScreen() {
   const insets = useSafeAreaInsets();
+  const { userId } = useAuth();
   const me = useAccount(CaloricAccount, {
     resolve: { root: { logs: true } },
   });
 
-  const openRouterApiKey = process.env.EXPO_PUBLIC_OPENROUTER_API_KEY?.trim() ?? "";
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [status, setStatus] = useState<ChatStatus>("ready");
   const [error, setError] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
 
-  const hasApiKey = openRouterApiKey.length > 0;
   const isStreaming = status === "streaming";
-
-  const conversationRef = useRef<OpenRouterMessage[]>([
-    {
-      role: "system",
-      content: systemPrompt,
-    },
-  ]);
-  const searchResultCounterRef = useRef(1);
-  const searchResultsByLocalIdRef = useRef(new Map<string, SearchResultFood>());
+  const sessionIdRef = useRef<string | null>(null);
   const pendingApprovalsRef = useRef(new Map<string, ResolvedApprovalSuggestion[]>());
   const loopRunningRef = useRef(false);
 
@@ -297,315 +200,164 @@ export default function AILogScreen() {
     });
   };
 
-  const streamAssistantTurn = async (assistantMessageId: string) => {
-    const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+  const ensureSessionId = async (currentUserId: string): Promise<string> => {
+    if (sessionIdRef.current) {
+      return sessionIdRef.current;
+    }
+
+    const response = await fetch(`${BACKEND_BASE_URL}/ai/session`, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${openRouterApiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ userId: currentUserId }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          sessionId?: unknown;
+          error?: unknown;
+        }
+      | null;
+
+    if (!response.ok) {
+      const message =
+        typeof payload?.error === "string"
+          ? payload.error
+          : `Could not start AI session (${response.status}).`;
+      throw new Error(message);
+    }
+
+    const sessionId =
+      typeof payload?.sessionId === "string" && payload.sessionId.trim()
+        ? payload.sessionId.trim()
+        : "";
+
+    if (!sessionId) {
+      throw new Error("Backend did not return a valid AI session id.");
+    }
+
+    sessionIdRef.current = sessionId;
+    return sessionId;
+  };
+
+  const requestTurn = async (
+    currentUserId: string,
+    action: AgentAction,
+    retry = true,
+  ): Promise<{ status: ChatStatus; events: AgentEvent[] }> => {
+    const sessionId = await ensureSessionId(currentUserId);
+
+    const response = await fetch(`${BACKEND_BASE_URL}/ai/turn`, {
+      method: "POST",
+      headers: {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
-        model,
-        stream: true,
-        provider: {
-          only: ["groq"],
-          allow_fallbacks: false,
-        },
-        tool_choice: "auto",
-        tools: openRouterTools,
-        messages: conversationRef.current,
+        sessionId,
+        userId: currentUserId,
+        action,
       }),
     });
 
+    const payload = (await response.json().catch(() => null)) as
+      | {
+          status?: unknown;
+          events?: unknown;
+          error?: unknown;
+          message?: unknown;
+        }
+      | null;
+
     if (!response.ok) {
-      const body = await response.text().catch(() => "");
-      const bodySuffix = body ? `: ${body.slice(0, 280)}` : "";
-      throw new Error(`OpenRouter request failed (${response.status})${bodySuffix}`);
+      if (response.status === 403 && retry) {
+        sessionIdRef.current = null;
+        return requestTurn(currentUserId, action, false);
+      }
+
+      const backendMessage =
+        typeof payload?.message === "string"
+          ? payload.message
+          : typeof payload?.error === "string"
+            ? payload.error
+            : `AI request failed (${response.status}).`;
+      throw new Error(backendMessage);
     }
 
-    let assistantText = "";
-    const toolCallsByIndex = new Map<number, OpenRouterToolCall>();
+    const nextStatus =
+      payload?.status === "awaiting-approval" || payload?.status === "ready"
+        ? payload.status
+        : "ready";
 
-    const appendAssistantChunk = (chunk: string) => {
-      if (!chunk) {
-        return;
-      }
-
-      assistantText += chunk;
-      setMessages((current) =>
-        current.map((message) =>
-          message.kind === "text" && message.id === assistantMessageId
-            ? {
-                ...message,
-                text: message.text + chunk,
-              }
-            : message,
-        ),
-      );
-    };
-
-    const mergeToolCallDelta = (deltaCall: OpenRouterToolCallDelta) => {
-      const index = typeof deltaCall.index === "number" ? deltaCall.index : 0;
-      const existing = toolCallsByIndex.get(index) ?? {
-        id: "",
-        type: "function",
-        function: {
-          name: "",
-          arguments: "",
-        },
-      };
-
-      const nextCall: OpenRouterToolCall = {
-        id: deltaCall.id ?? existing.id,
-        type: "function",
-        function: {
-          name: existing.function.name + (deltaCall.function?.name ?? ""),
-          arguments: existing.function.arguments + (deltaCall.function?.arguments ?? ""),
-        },
-      };
-
-      toolCallsByIndex.set(index, nextCall);
-    };
-
-    const processLine = (rawLine: string) => {
-      const line = rawLine.trim();
-      if (!line.startsWith("data:")) {
-        return false;
-      }
-
-      const data = line.slice(5).trim();
-      if (!data) {
-        return false;
-      }
-
-      if (data === "[DONE]") {
-        return true;
-      }
-
-      try {
-        const parsed = JSON.parse(data) as OpenRouterSsePayload;
-        const choice = parsed.choices?.[0];
-        const delta = choice?.delta;
-
-        if (typeof delta?.content === "string") {
-          appendAssistantChunk(delta.content);
-        }
-
-        if (Array.isArray(delta?.tool_calls)) {
-          for (const deltaCall of delta.tool_calls) {
-            mergeToolCallDelta(deltaCall);
-          }
-        }
-      } catch {
-        // Ignore malformed lines and continue parsing stream.
-      }
-
-      return false;
-    };
-
-    if (response.body) {
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let done = false;
-
-      while (!done) {
-        const { value, done: streamDone } = await reader.read();
-
-        if (streamDone) {
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-
-        let lineEnd = buffer.indexOf("\n");
-        while (lineEnd !== -1) {
-          const line = buffer.slice(0, lineEnd);
-          buffer = buffer.slice(lineEnd + 1);
-
-          if (processLine(line)) {
-            done = true;
-            break;
-          }
-
-          lineEnd = buffer.indexOf("\n");
-        }
-      }
-
-      if (!done && buffer.trim()) {
-        processLine(buffer);
-      }
-    } else {
-      const fullText = await response.text();
-      for (const line of fullText.split("\n")) {
-        if (processLine(line)) {
-          break;
-        }
-      }
-    }
-
-    const toolCalls = [...toolCallsByIndex.entries()]
-      .sort((a, b) => a[0] - b[0])
-      .map(([, toolCall]) => toolCall)
-      .filter((toolCall) => toolCall.id && toolCall.function.name);
+    const events = Array.isArray(payload?.events) ? (payload.events as AgentEvent[]) : [];
 
     return {
-      assistantText,
-      toolCalls,
+      status: nextStatus,
+      events,
     };
   };
 
-  const runToolCall = async (toolCall: OpenRouterToolCall) => {
-    let rawArguments: unknown;
-    try {
-      rawArguments = parseToolArguments(toolCall.function.arguments);
-    } catch {
-      return {
-        pauseForApproval: false,
-        output: {
-          error: "Tool arguments were invalid JSON.",
-        },
-      };
+  const applyAgentEvents = (events: AgentEvent[]) => {
+    if (events.length === 0) {
+      return;
     }
 
-    if (toolCall.function.name === "searchFoods") {
-      const parsed = searchFoodsInputSchema.safeParse(rawArguments);
-      if (!parsed.success) {
-        return {
-          pauseForApproval: false,
-          output: {
-            error: "Invalid searchFoods input.",
-          },
-        };
+    for (const event of events) {
+      if (event.kind === "approval") {
+        pendingApprovalsRef.current.set(event.toolCallId, event.suggestions);
       }
+    }
 
-      const limit = parsed.data.limit;
-      const foods = await searchFoods(parsed.data.query, {
-        maxItems: Math.min(20, Math.max(limit * 2, 8)),
-      });
-      const topFoods = foods.slice(0, limit);
-      const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
-        const resultId = `r${searchResultCounterRef.current}`;
-        searchResultCounterRef.current += 1;
-        const mappedFood: SearchResultFood = {
-          resultId,
-          name: food.name,
-          brand: food.brand,
-          serving: food.serving,
-          nutrition: cloneNutrition(food.nutrition),
-        };
-        searchResultsByLocalIdRef.current.set(resultId, mappedFood);
-        return mappedFood;
-      });
+    setMessages((current) => {
+      const next = [...current];
 
-      setMessages((current) => [
-        ...current,
-        {
+      for (const event of events) {
+        if (event.kind === "assistant") {
+          if (!event.text.trim()) {
+            continue;
+          }
+
+          next.push({
+            id: createMessageId(),
+            kind: "text",
+            role: "assistant",
+            text: event.text,
+          });
+          continue;
+        }
+
+        if (event.kind === "search") {
+          if (event.foods.length === 0) {
+            continue;
+          }
+
+          next.push({
+            id: createMessageId(),
+            kind: "search",
+            foods: event.foods,
+          });
+          continue;
+        }
+
+        next.push({
           id: createMessageId(),
-          kind: "search",
-          foods: foodsWithResultIds,
-        },
-      ]);
-
-      return {
-        pauseForApproval: false,
-        output: {
-          foods: foodsWithResultIds,
-        },
-      };
-    }
-
-    if (toolCall.function.name === "requestFoodApprovals") {
-      const parsed = approvalInputSchema.safeParse(rawArguments);
-      if (!parsed.success) {
-        return {
-          pauseForApproval: false,
-          output: {
-            error: "Invalid requestFoodApprovals input.",
-          },
-        };
-      }
-
-      const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
-      const unknownResultIds: string[] = [];
-      const seenSuggestions = new Set<string>();
-
-      for (const suggestion of parsed.data.suggestions) {
-        const resultId = suggestion.resultId.trim();
-        const food = searchResultsByLocalIdRef.current.get(resultId);
-        if (!food) {
-          unknownResultIds.push(resultId || "(empty)");
-          continue;
-        }
-
-        const meal = normalizeMeal(suggestion.meal) ?? "lunch";
-        const portion = sanitizePortion(suggestion.portion);
-        const reason = suggestion.reason.trim();
-        if (!reason) {
-          continue;
-        }
-
-        const duplicateKey = `${resultId}|${meal}|${portion}`;
-        if (seenSuggestions.has(duplicateKey)) {
-          continue;
-        }
-        seenSuggestions.add(duplicateKey);
-
-        resolvedSuggestions.push({
-          suggestionId: createMessageId(),
-          resultId,
-          meal,
-          portion,
-          reason,
-          food,
+          kind: "approval",
+          toolCallId: event.toolCallId,
+          suggestions: event.suggestions,
         });
       }
 
-      if (unknownResultIds.length > 0) {
-        return {
-          pauseForApproval: false,
-          output: {
-            error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
-          },
-        };
-      }
-
-      if (resolvedSuggestions.length === 0) {
-        return {
-          pauseForApproval: false,
-          output: {
-            error: "No valid suggestions to approve.",
-          },
-        };
-      }
-
-      pendingApprovalsRef.current.set(toolCall.id, resolvedSuggestions);
-      setMessages((current) => [
-        ...current,
-        {
-          id: createMessageId(),
-          kind: "approval",
-          toolCallId: toolCall.id,
-          suggestions: resolvedSuggestions,
-        },
-      ]);
-
-      return {
-        pauseForApproval: true,
-        output: null,
-      };
-    }
-
-    return {
-      pauseForApproval: false,
-      output: {
-        error: `Unknown tool: ${toolCall.function.name}`,
-      },
-    };
+      return next;
+    });
   };
 
-  const runAssistantLoop = async () => {
+  const runAssistantAction = async (action: AgentAction) => {
     if (loopRunningRef.current) {
+      return;
+    }
+
+    if (!userId) {
+      setError("Missing authenticated user id. Sign in again and retry.");
       return;
     }
 
@@ -613,67 +365,13 @@ export default function AILogScreen() {
     let nextStatus: ChatStatus = "ready";
 
     try {
-      for (let step = 0; step < 8; step += 1) {
-        setStatus("streaming");
-
-        const assistantMessageId = createMessageId();
-        setMessages((current) => [
-          ...current,
-          {
-            id: assistantMessageId,
-            kind: "text",
-            role: "assistant",
-            text: "",
-          },
-        ]);
-
-        const turn = await streamAssistantTurn(assistantMessageId);
-
-        if (!turn.assistantText.trim()) {
-          setMessages((current) =>
-            current.filter(
-              (message) =>
-                !(
-                  message.kind === "text" &&
-                  message.id === assistantMessageId &&
-                  message.role === "assistant" &&
-                  !message.text.trim()
-                ),
-            ),
-          );
-        }
-
-        conversationRef.current.push({
-          role: "assistant",
-          content: turn.assistantText.trim() ? turn.assistantText : null,
-          ...(turn.toolCalls.length > 0 ? { tool_calls: turn.toolCalls } : {}),
-        });
-
-        if (turn.toolCalls.length === 0) {
-          nextStatus = "ready";
-          return;
-        }
-
-        for (const toolCall of turn.toolCalls) {
-          const toolResult = await runToolCall(toolCall);
-
-          if (toolResult.pauseForApproval) {
-            nextStatus = "awaiting-approval";
-            return;
-          }
-
-          conversationRef.current.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(toolResult.output ?? {}),
-          });
-        }
-      }
-
-      nextStatus = "ready";
+      setStatus("streaming");
+      const result = await requestTurn(userId, action);
+      applyAgentEvents(result.events);
+      nextStatus = result.status;
     } catch (loopError) {
       setError(getErrorMessage(loopError));
-      nextStatus = "ready";
+      nextStatus = pendingApprovalsRef.current.size > 0 ? "awaiting-approval" : "ready";
     } finally {
       loopRunningRef.current = false;
       setStatus(nextStatus);
@@ -682,7 +380,7 @@ export default function AILogScreen() {
 
   const submitMessage = async () => {
     const trimmed = input.trim();
-    if (!trimmed || !hasApiKey || status !== "ready") {
+    if (!trimmed || !userId || status !== "ready") {
       return;
     }
 
@@ -699,12 +397,10 @@ export default function AILogScreen() {
       },
     ]);
 
-    conversationRef.current.push({
-      role: "user",
-      content: trimmed,
+    await runAssistantAction({
+      type: "user-message",
+      message: trimmed,
     });
-
-    await runAssistantLoop();
   };
 
   const respondToApproval = async (toolCallId: string, suggestionId: string, approved: boolean) => {
@@ -736,6 +432,7 @@ export default function AILogScreen() {
       approved,
       reason: approved ? undefined : "User rejected this suggestion.",
     };
+
     const nextSuggestions = pendingSuggestions.map((suggestion, index) =>
       index === targetIndex
         ? {
@@ -756,31 +453,19 @@ export default function AILogScreen() {
       ),
     );
 
-    const allResolved = nextSuggestions.every((suggestion) => Boolean(suggestion.output));
-    if (!allResolved) {
+    if (nextSuggestions.every((suggestion) => Boolean(suggestion.output))) {
+      pendingApprovalsRef.current.delete(toolCallId);
+    } else {
       pendingApprovalsRef.current.set(toolCallId, nextSuggestions);
-      setStatus("awaiting-approval");
-      return;
     }
 
-    pendingApprovalsRef.current.delete(toolCallId);
-    conversationRef.current.push({
-      role: "tool",
-      tool_call_id: toolCallId,
-      content: JSON.stringify({
-        decisions: nextSuggestions.map((suggestion) => ({
-          suggestionId: suggestion.suggestionId,
-          resultId: suggestion.resultId,
-          meal: suggestion.meal,
-          portion: suggestion.portion,
-          approved: suggestion.output?.approved ?? false,
-          reason: suggestion.output?.reason,
-        })),
-      }),
-    });
-
     setError(null);
-    await runAssistantLoop();
+    await runAssistantAction({
+      type: "approval",
+      toolCallId,
+      suggestionId,
+      approved,
+    });
   };
 
   if (!me.$isLoaded) {
@@ -813,10 +498,10 @@ export default function AILogScreen() {
           Ask for foods, review suggestions, then approve each one to add to your log.
         </Text>
 
-        {!hasApiKey ? (
+        {!userId ? (
           <View style={styles.warningCard}>
             <Text style={styles.warningText}>
-              Add `EXPO_PUBLIC_OPENROUTER_API_KEY` to your `.env` file to enable AI logging.
+              Sign in to enable AI logging.
             </Text>
           </View>
         ) : null}
@@ -970,18 +655,17 @@ export default function AILogScreen() {
             style={styles.input}
             multiline
             maxLength={600}
-            editable={hasApiKey && status === "ready"}
+            editable={Boolean(userId) && status === "ready"}
           />
           <Pressable
             accessibilityRole="button"
-            disabled={!hasApiKey || status !== "ready" || input.trim().length === 0}
+            disabled={!userId || status !== "ready" || input.trim().length === 0}
             onPress={() => {
               void submitMessage();
             }}
             style={[
               styles.sendButton,
-              (!hasApiKey || status !== "ready" || input.trim().length === 0) &&
-                styles.buttonDisabled,
+              (!userId || status !== "ready" || input.trim().length === 0) && styles.buttonDisabled,
             ]}
           >
             <Ionicons name="send" size={18} color={palette.buttonText} />

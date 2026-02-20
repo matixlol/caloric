@@ -26,4 +26,7 @@ export const config = {
   mfpCookie: Bun.env.MFP_COOKIE,
   detailConcurrency: Math.max(1, getNumberEnv("MFP_DETAIL_CONCURRENCY", 10)),
   requestTimeoutMs: Math.max(1000, getNumberEnv("MFP_REQUEST_TIMEOUT_MS", 20_000)),
+  openRouterApiKey: getRequiredEnv("OPENROUTER_API_KEY"),
+  openRouterModel: Bun.env.OPENROUTER_MODEL ?? "moonshotai/kimi-k2-0905",
+  openRouterProviderOnly: Bun.env.OPENROUTER_PROVIDER_ONLY ?? "groq",
 };

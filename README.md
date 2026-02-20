@@ -88,5 +88,7 @@ Base URL: `https://backend.caloric.mati.lol`
 - Health check: `GET https://backend.caloric.mati.lol/health`
 - Search only: `GET https://backend.caloric.mati.lol/search?query=banana&maxItems=3&includeDetails=false`
 - Search + detail payloads: `GET https://backend.caloric.mati.lol/search?query=banana&maxItems=1&includeDetails=true`
+- Start AI session: `POST https://backend.caloric.mati.lol/ai/session` with `{ "userId": "..." }`
+- Run AI turn: `POST https://backend.caloric.mati.lol/ai/turn` with `{ "sessionId": "...", "userId": "...", "action": { ... } }`
 
 Note: there is no separate public detail endpoint right now; detail records are returned in the `details` array on `/search` when `includeDetails=true`.
