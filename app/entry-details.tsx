@@ -23,7 +23,12 @@ const palette = {
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
+  macroProtein: "#2563EB",
+  macroCarbs: "#F59E0B",
+  macroFat: "#14B8A6",
 };
+
+const MIN_MACRO_SECTION_SHARE = 0.2;
 
 function formatCalories(value: number) {
   return Math.round(value).toLocaleString();
@@ -32,6 +37,54 @@ function formatCalories(value: number) {
 function formatGrams(value: number) {
   const rounded = Math.round(value * 10) / 10;
   return Number.isInteger(rounded) ? `${rounded.toFixed(0)}g` : `${rounded.toFixed(1)}g`;
+}
+
+function buildMacroSectionShares(calories: number[]) {
+  const positiveCalories = calories.map((value) => Math.max(0, value));
+  const total = positiveCalories.reduce((sum, value) => sum + value, 0);
+
+  if (total <= 0) {
+    return positiveCalories.map(() => 1 / positiveCalories.length);
+  }
+
+  const baseShares = positiveCalories.map((value) => value / total);
+  const smallIndexes = baseShares
+    .map((share, index) => ({ share, index }))
+    .filter(({ share }) => share < MIN_MACRO_SECTION_SHARE)
+    .map(({ index }) => index);
+
+  if (smallIndexes.length === 0) {
+    return baseShares;
+  }
+
+  const largeIndexes = baseShares
+    .map((share, index) => ({ share, index }))
+    .filter(({ share }) => share >= MIN_MACRO_SECTION_SHARE)
+    .map(({ index }) => index);
+
+  if (largeIndexes.length === 0) {
+    return baseShares.map(() => 1 / baseShares.length);
+  }
+
+  const deficit = smallIndexes.reduce(
+    (sum, index) => sum + (MIN_MACRO_SECTION_SHARE - baseShares[index]),
+    0,
+  );
+  const available = largeIndexes.reduce((sum, index) => sum + baseShares[index], 0);
+
+  if (available <= 0 || deficit >= available) {
+    return baseShares.map(() => 1 / baseShares.length);
+  }
+
+  const adjustedShares = [...baseShares];
+  smallIndexes.forEach((index) => {
+    adjustedShares[index] = MIN_MACRO_SECTION_SHARE;
+  });
+  largeIndexes.forEach((index) => {
+    adjustedShares[index] = baseShares[index] - (deficit * baseShares[index]) / available;
+  });
+
+  return adjustedShares;
 }
 
 export default function EntryDetailsScreen() {
@@ -80,6 +133,10 @@ export default function EntryDetailsScreen() {
   const protein = (entry.nutrition?.protein ?? 0) * portion;
   const carbs = (entry.nutrition?.carbs ?? 0) * portion;
   const fat = (entry.nutrition?.fat ?? 0) * portion;
+  const proteinCalories = protein * 4;
+  const carbsCalories = carbs * 4;
+  const fatCalories = fat * 9;
+  const macroSectionShares = buildMacroSectionShares([proteinCalories, carbsCalories, fatCalories]);
   const meal = normalizeMeal(entry.meal);
   const mealLabel = meal ? mealLabelFor(meal) : entry.meal;
   const meta = [mealLabel, entry.brand, entry.serving].filter(Boolean).join(" • ");
@@ -154,17 +211,65 @@ export default function EntryDetailsScreen() {
             <Text style={styles.nutritionKey}>Calories</Text>
             <Text style={styles.nutritionValue}>{`${formatCalories(calories)} kcal`}</Text>
           </View>
-          <View style={styles.nutritionRow}>
-            <Text style={styles.nutritionKey}>Protein</Text>
-            <Text style={styles.nutritionValue}>{formatGrams(protein)}</Text>
+          <View style={styles.macroLegendRow}>
+            <View style={styles.macroLegendItem}>
+              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroProtein }]} />
+              <Text style={styles.macroLegendText}>Protein</Text>
+            </View>
+            <View style={styles.macroLegendItem}>
+              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroCarbs }]} />
+              <Text style={styles.macroLegendText}>Carbs</Text>
+            </View>
+            <View style={styles.macroLegendItem}>
+              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroFat }]} />
+              <Text style={styles.macroLegendText}>Fat</Text>
+            </View>
           </View>
-          <View style={styles.nutritionRow}>
-            <Text style={styles.nutritionKey}>Carbs</Text>
-            <Text style={styles.nutritionValue}>{formatGrams(carbs)}</Text>
-          </View>
-          <View style={styles.nutritionRow}>
-            <Text style={styles.nutritionKey}>Fat</Text>
-            <Text style={styles.nutritionValue}>{formatGrams(fat)}</Text>
+          <View style={styles.macroSectionTrack}>
+            <View
+              style={[
+                styles.macroSection,
+                styles.macroProteinSection,
+                { flexBasis: 0, flexGrow: macroSectionShares[0], flexShrink: 1 },
+              ]}
+            >
+              <Text style={[styles.macroSectionValue, styles.macroSectionTextLight]}>
+                {formatGrams(protein)}
+              </Text>
+              <Text style={[styles.macroSectionCalories, styles.macroSectionSubTextLight]}>
+                {`${formatCalories(proteinCalories)} kcal`}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.macroSection,
+                styles.macroCarbsSection,
+                { flexBasis: 0, flexGrow: macroSectionShares[1], flexShrink: 1 },
+              ]}
+            >
+              <Text style={[styles.macroSectionValue, styles.macroSectionTextDark]}>
+                {formatGrams(carbs)}
+              </Text>
+              <Text style={[styles.macroSectionCalories, styles.macroSectionSubTextDark]}>
+                {`${formatCalories(carbsCalories)} kcal`}
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.macroSection,
+                styles.macroFatSection,
+                { flexBasis: 0, flexGrow: macroSectionShares[2], flexShrink: 1 },
+              ]}
+            >
+              <Text style={[styles.macroSectionValue, styles.macroSectionTextLight]}>
+                {formatGrams(fat)}
+              </Text>
+              <Text style={[styles.macroSectionCalories, styles.macroSectionSubTextLight]}>
+                {`${formatCalories(fatCalories)} kcal`}
+              </Text>
+            </View>
           </View>
         </View>
 
@@ -288,8 +393,29 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: palette.card,
     paddingHorizontal: 12,
-    paddingVertical: 10,
-    gap: 8,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  macroLegendRow: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: 10,
+  },
+  macroLegendItem: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+  },
+  macroLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  macroLegendText: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
   },
   nutritionRow: {
     flexDirection: "row",
@@ -308,6 +434,51 @@ const styles = StyleSheet.create({
     fontWeight: "600",
     color: palette.label,
     fontVariant: ["tabular-nums"],
+  },
+  macroSectionTrack: {
+    minHeight: 102,
+    borderRadius: 14,
+    overflow: "hidden",
+    flexDirection: "row",
+    backgroundColor: iosColor("quaternarySystemFill", "#E5E7EB"),
+  },
+  macroSection: {
+    paddingHorizontal: 8,
+    paddingVertical: 10,
+    justifyContent: "center",
+    gap: 2,
+  },
+  macroProteinSection: {
+    backgroundColor: palette.macroProtein,
+  },
+  macroCarbsSection: {
+    backgroundColor: palette.macroCarbs,
+  },
+  macroFatSection: {
+    backgroundColor: palette.macroFat,
+  },
+  macroSectionValue: {
+    fontSize: 18,
+    lineHeight: 22,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  macroSectionCalories: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontVariant: ["tabular-nums"],
+  },
+  macroSectionTextLight: {
+    color: "#FFFFFF",
+  },
+  macroSectionTextDark: {
+    color: "#111827",
+  },
+  macroSectionSubTextLight: {
+    color: "rgba(255,255,255,0.86)",
+  },
+  macroSectionSubTextDark: {
+    color: "rgba(17,24,39,0.72)",
   },
   doneButton: {
     marginTop: 4,
