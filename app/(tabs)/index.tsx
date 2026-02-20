@@ -1,6 +1,7 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useAccount } from "jazz-tools/expo";
+import { useMemo } from "react";
 import {
   Platform,
   PlatformColor,
@@ -12,6 +13,7 @@ import {
 } from "react-native";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { formatPortionLabel, sanitizePortion } from "../../src/portion";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { CaloricAccount } from "../../src/jazz/schema";
 
@@ -46,6 +48,15 @@ function clampPercent(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
 
+function formatCalories(value: number) {
+  return Math.round(value).toLocaleString();
+}
+
+function formatGrams(value: number) {
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded.toFixed(0)}g` : `${rounded.toFixed(1)}g`;
+}
+
 function MealRow({
   id,
   name,
@@ -53,6 +64,7 @@ function MealRow({
   calories,
   isLast,
   onDelete,
+  onPress,
 }: {
   id: string;
   name: string;
@@ -60,6 +72,7 @@ function MealRow({
   calories: number;
   isLast: boolean;
   onDelete: (id: string) => void;
+  onPress: (id: string) => void;
 }) {
   return (
     <Swipeable
@@ -81,13 +94,20 @@ function MealRow({
       )}
       rightThreshold={40}
     >
-      <View style={[styles.row, !isLast && styles.rowWithDivider]}>
-        <View style={styles.rowMain}>
-          <Text style={styles.rowTitle}>{name}</Text>
-          {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Edit ${name}`}
+        onPress={() => onPress(id)}
+        style={[styles.rowPressable, !isLast && styles.rowWithDivider]}
+      >
+        <View style={styles.row}>
+          <View style={styles.rowMain}>
+            <Text style={styles.rowTitle}>{name}</Text>
+            {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
+          </View>
+          <Text style={styles.rowValue}>{formatCalories(calories)}</Text>
         </View>
-        <Text style={styles.rowValue}>{calories.toLocaleString()}</Text>
-      </View>
+      </Pressable>
     </Swipeable>
   );
 }
@@ -99,6 +119,7 @@ function MealSection({
   calories,
   onAddFood,
   onDeleteEntry,
+  onSelectEntry,
 }: {
   label: string;
   emptyCopy: string;
@@ -106,6 +127,7 @@ function MealSection({
   calories: number;
   onAddFood: () => void;
   onDeleteEntry: (entryId: string) => void;
+  onSelectEntry: (entryId: string) => void;
 }) {
   return (
     <View style={styles.mealRow}>
@@ -119,7 +141,7 @@ function MealSection({
       <View style={styles.mealCard}>
         <View style={styles.mealHeader}>
           <View style={styles.mealCaloriesRow}>
-            <Text style={styles.mealCalories}>{calories.toLocaleString()}</Text>
+            <Text style={styles.mealCalories}>{formatCalories(calories)}</Text>
             <Text style={styles.mealCaloriesUnit}>kcal</Text>
           </View>
 
@@ -145,6 +167,7 @@ function MealSection({
               calories={entry.calories}
               isLast={index === entries.length - 1}
               onDelete={onDeleteEntry}
+              onPress={onSelectEntry}
             />
           ))
         )}
@@ -159,26 +182,45 @@ export default function HomeScreen() {
   const me = useAccount(CaloricAccount, {
     resolve: { root: { logs: { $each: { nutrition: true } } } },
   });
+  const logsValue = me.$isLoaded ? me.root.logs : undefined;
+
+  const logs = useMemo(() => {
+    if (!me.$isLoaded) {
+      return [];
+    }
+
+    return (logsValue ?? [])
+      .filter(
+        (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } =>
+          Boolean(entry?.$isLoaded),
+      )
+      .sort((a, b) => a.createdAt - b.createdAt);
+  }, [logsValue, me.$isLoaded]);
 
   if (!me.$isLoaded) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading…</Text>
+        <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
 
-  const logs = (me.root.logs ?? [])
-    .filter(
-      (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } =>
-        Boolean(entry?.$isLoaded),
-    )
-    .sort((a, b) => a.createdAt - b.createdAt);
-
-  const caloriesConsumed = logs.reduce((sum, entry) => sum + (entry.nutrition?.calories ?? 0), 0);
-  const protein = logs.reduce((sum, entry) => sum + (entry.nutrition?.protein ?? 0), 0);
-  const carbs = logs.reduce((sum, entry) => sum + (entry.nutrition?.carbs ?? 0), 0);
-  const fat = logs.reduce((sum, entry) => sum + (entry.nutrition?.fat ?? 0), 0);
+  const caloriesConsumed = logs.reduce(
+    (sum, entry) => sum + (entry.nutrition?.calories ?? 0) * sanitizePortion(entry.portion),
+    0,
+  );
+  const protein = logs.reduce(
+    (sum, entry) => sum + (entry.nutrition?.protein ?? 0) * sanitizePortion(entry.portion),
+    0,
+  );
+  const carbs = logs.reduce(
+    (sum, entry) => sum + (entry.nutrition?.carbs ?? 0) * sanitizePortion(entry.portion),
+    0,
+  );
+  const fat = logs.reduce(
+    (sum, entry) => sum + (entry.nutrition?.fat ?? 0) * sanitizePortion(entry.portion),
+    0,
+  );
 
   const goal = me.root.calorieGoal || DEFAULT_CALORIE_GOAL;
   const proteinPct = me.root.macroProteinPct ?? DEFAULT_PROTEIN_PCT;
@@ -205,11 +247,13 @@ export default function HomeScreen() {
     const meal = normalizeMeal(entry.meal);
     if (!meal) return;
 
+    const portion = sanitizePortion(entry.portion);
+
     logsByMeal[meal].push({
       id: entry.$jazz.id,
       name: entry.foodName,
-      meta: [entry.brand, entry.serving].filter(Boolean).join(" • "),
-      calories: entry.nutrition?.calories ?? 0,
+      meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
+      calories: (entry.nutrition?.calories ?? 0) * portion,
     });
   });
 
@@ -224,6 +268,13 @@ export default function HomeScreen() {
     }
 
     me.root.logs.$jazz.splice(index, 1);
+  };
+
+  const handleOpenEntry = (entryId: string) => {
+    router.push({
+      pathname: "/entry-details",
+      params: { entryId },
+    });
   };
 
   return (
@@ -243,7 +294,7 @@ export default function HomeScreen() {
         <View style={styles.summaryCard}>
           <Text style={styles.summaryLabel}>Calories</Text>
           <View style={styles.summaryValueRow}>
-            <Text style={styles.summaryValue}>{caloriesConsumed.toLocaleString()}</Text>
+            <Text style={styles.summaryValue}>{formatCalories(caloriesConsumed)}</Text>
             <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
           </View>
           <View style={styles.progressTrack}>
@@ -254,7 +305,7 @@ export default function HomeScreen() {
             <View style={styles.macroColumn}>
               <Text style={styles.macroLabel}>Protein</Text>
               <Text style={styles.macroValue}>
-                {Math.round(protein)}g
+                {formatGrams(protein)}
                 <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
               </Text>
               <View style={styles.macroTrack}>
@@ -265,7 +316,7 @@ export default function HomeScreen() {
             <View style={[styles.macroColumn, styles.macroColumnDivider]}>
               <Text style={styles.macroLabel}>Carbs</Text>
               <Text style={styles.macroValue}>
-                {Math.round(carbs)}g
+                {formatGrams(carbs)}
                 <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
               </Text>
               <View style={styles.macroTrack}>
@@ -276,7 +327,7 @@ export default function HomeScreen() {
             <View style={[styles.macroColumn, styles.macroColumnDivider]}>
               <Text style={styles.macroLabel}>Fat</Text>
               <Text style={styles.macroValue}>
-                {Math.round(fat)}g
+                {formatGrams(fat)}
                 <Text style={styles.macroGoal}> / {fatGoal}g</Text>
               </Text>
               <View style={styles.macroTrack}>
@@ -305,6 +356,7 @@ export default function HomeScreen() {
                   })
                 }
                 onDeleteEntry={handleDeleteEntry}
+                onSelectEntry={handleOpenEntry}
               />
             );
           })}
@@ -511,6 +563,9 @@ const styles = StyleSheet.create({
     lineHeight: 24,
     fontWeight: "600",
     color: palette.tint,
+  },
+  rowPressable: {
+    backgroundColor: palette.card,
   },
   row: {
     minHeight: 52,

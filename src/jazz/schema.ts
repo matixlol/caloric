@@ -23,6 +23,7 @@ const FoodLogEntry = co.map({
   foodName: z.string(),
   brand: z.optional(z.string()),
   serving: z.optional(z.string()),
+  portion: z.number(),
   nutrition: co.optional(NutritionInfo),
   createdAt: z.number(),
 });

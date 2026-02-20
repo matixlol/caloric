@@ -420,6 +420,7 @@ export default function LogFoodScreen() {
       foodName: selectedFood.name,
       brand: selectedFood.brand,
       serving: selectedFood.serving,
+      portion: 1,
       nutrition: selectedFood.nutrition
         ? {
             calories: selectedFood.nutrition.calories,

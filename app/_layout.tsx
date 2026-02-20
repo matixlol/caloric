@@ -43,6 +43,12 @@ function AppNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="log-food" options={{ presentation: "modal" }} />
+      <Stack.Screen
+        name="entry-details"
+        options={{
+          presentation: "pageSheet",
+        }}
+      />
     </Stack>
   );
 }
