@@ -11,6 +11,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { StreamdownRN } from "streamdown-rn";
 import { z } from "zod";
 import { type SearchFood, searchFoods } from "../../src/food-search";
 import { CaloricAccount } from "../../src/jazz/schema";
@@ -834,6 +835,10 @@ export default function AILogScreen() {
         ) : null}
 
         {messages.map((message) => {
+          const isLastMessage = messages[messages.length - 1]?.id === message.id;
+          const isActiveAssistantStream =
+            message.kind === "text" && message.role === "assistant" && isStreaming && isLastMessage;
+
           if (message.kind === "text") {
             const isUser = message.role === "user";
             const text = message.text.trim();
@@ -844,7 +849,17 @@ export default function AILogScreen() {
                 style={[styles.messageBubble, isUser ? styles.userBubble : styles.assistantBubble]}
               >
                 {text ? (
-                  <Text style={[styles.messageText, isUser && styles.userMessageText]}>{message.text}</Text>
+                  isUser ? (
+                    <Text style={[styles.messageText, styles.userMessageText]}>{message.text}</Text>
+                  ) : (
+                    <StreamdownRN
+                      theme="light"
+                      isComplete={!isActiveAssistantStream}
+                      style={styles.assistantMarkdown}
+                    >
+                      {message.text}
+                    </StreamdownRN>
+                  )
                 ) : (
                   <Text style={styles.typingText}>Thinking...</Text>
                 )}
@@ -1068,6 +1083,11 @@ const styles = StyleSheet.create({
   },
   userMessageText: {
     color: palette.buttonText,
+  },
+  assistantMarkdown: {
+    flex: 0,
+    width: "100%",
+    marginBottom: -12,
   },
   typingText: {
     fontSize: 14,
