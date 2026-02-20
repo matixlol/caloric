@@ -15,6 +15,7 @@ import { z } from "zod";
 import { type SearchFood, searchFoods } from "../../src/food-search";
 import { CaloricAccount } from "../../src/jazz/schema";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
+import { formatPortionLabel, sanitizePortion } from "../../src/portion";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -26,6 +27,7 @@ const palette = {
   assistantBubble: iosColor("secondarySystemFill", "#E5E7EB"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
+  separator: iosColor("separator", "#D1D5DB"),
   buttonText: "#FFFFFF",
   tint: "#2563EB",
   tintDisabled: "#9CA3AF",
@@ -37,9 +39,12 @@ const model = "moonshotai/kimi-k2-0905";
 const systemPrompt = [
   "You are Caloric's food logging assistant.",
   "Always call searchFoods before suggesting a food entry.",
-  "Never invent nutrition values. Use only values returned by searchFoods.",
-  "After selecting the best candidate, call requestFoodApproval exactly once.",
-  "If the user rejects the suggestion, explain briefly and search again.",
+  "searchFoods returns local result IDs. Only reference those IDs later.",
+  "Never send or edit nutrition/name/brand/serving in approval requests.",
+  "When ready, call requestFoodApprovals once with one or more suggestions.",
+  "Only set resultId, meal, portion, and reason in each suggestion.",
+  "Portion should be in quarter increments (0.25).",
+  "If the user rejects suggestions, explain briefly and search again.",
 ].join(" ");
 
 const mealSchema = z.enum(["breakfast", "lunch", "dinner", "snacks"]);
@@ -47,29 +52,16 @@ const searchFoodsInputSchema = z.object({
   query: z.string().min(2),
   limit: z.number().int().min(1).max(10).default(6),
 });
-const approvalInputSchema = z.object({
-  foodId: z.string().min(1),
-  name: z.string().min(1),
-  brand: z.string().optional(),
-  serving: z.string().optional(),
+const approvalSuggestionSchema = z.object({
+  resultId: z.string().min(1),
   meal: mealSchema.default("lunch"),
-  portion: z.number().min(0.1).max(5).default(1),
-  nutrition: z
-    .object({
-      calories: z.number().optional(),
-      protein: z.number().optional(),
-      carbs: z.number().optional(),
-      fat: z.number().optional(),
-      fiber: z.number().optional(),
-      sugars: z.number().optional(),
-      sodiumMg: z.number().optional(),
-      potassiumMg: z.number().optional(),
-    })
-    .optional(),
+  portion: z.number().min(0.25).default(1),
   reason: z.string().min(1),
 });
+const approvalInputSchema = z.object({
+  suggestions: z.array(approvalSuggestionSchema).min(1).max(8),
+});
 
-type ApprovalInput = z.infer<typeof approvalInputSchema>;
 type ApprovalOutput = {
   approved: boolean;
   reason?: string;
@@ -87,15 +79,32 @@ type TextUIMessage = {
 type SearchUIMessage = {
   id: string;
   kind: "search";
-  foods: SearchFood[];
+  foods: SearchResultFood[];
+};
+
+type SearchResultFood = {
+  resultId: string;
+  name: string;
+  brand?: string;
+  serving?: string;
+  nutrition?: SearchFood["nutrition"];
+};
+
+type ResolvedApprovalSuggestion = {
+  suggestionId: string;
+  resultId: string;
+  meal: z.infer<typeof mealSchema>;
+  portion: number;
+  reason: string;
+  food: SearchResultFood;
+  output?: ApprovalOutput;
 };
 
 type ApprovalUIMessage = {
   id: string;
   kind: "approval";
   toolCallId: string;
-  input: ApprovalInput;
-  output?: ApprovalOutput;
+  suggestions: ResolvedApprovalSuggestion[];
 };
 
 type UIMessage = TextUIMessage | SearchUIMessage | ApprovalUIMessage;
@@ -163,43 +172,55 @@ const openRouterTools = [
   {
     type: "function",
     function: {
-      name: "requestFoodApproval",
+      name: "requestFoodApprovals",
       description:
-        "Request user approval for a single selected food entry before logging it.",
+        "Request user approval for one or more selected food entries using local result IDs from searchFoods.",
       parameters: {
         type: "object",
         properties: {
-          foodId: { type: "string" },
-          name: { type: "string" },
-          brand: { type: "string" },
-          serving: { type: "string" },
-          meal: {
-            type: "string",
-            enum: ["breakfast", "lunch", "dinner", "snacks"],
-          },
-          portion: { type: "number", minimum: 0.1, maximum: 5 },
-          nutrition: {
-            type: "object",
-            properties: {
-              calories: { type: "number" },
-              protein: { type: "number" },
-              carbs: { type: "number" },
-              fat: { type: "number" },
-              fiber: { type: "number" },
-              sugars: { type: "number" },
-              sodiumMg: { type: "number" },
-              potassiumMg: { type: "number" },
+          suggestions: {
+            type: "array",
+            minItems: 1,
+            maxItems: 8,
+            items: {
+              type: "object",
+              properties: {
+                resultId: { type: "string" },
+                meal: {
+                  type: "string",
+                  enum: ["breakfast", "lunch", "dinner", "snacks"],
+                },
+                portion: { type: "number", minimum: 0.25 },
+                reason: { type: "string" },
+              },
+              required: ["resultId", "meal", "portion", "reason"],
             },
           },
-          reason: { type: "string" },
         },
-        required: ["foodId", "name", "meal", "portion", "reason"],
+        required: ["suggestions"],
       },
     },
   },
 ] as const;
 
 const createMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+
+function cloneNutrition(nutrition: SearchFood["nutrition"]) {
+  if (!nutrition) {
+    return undefined;
+  }
+
+  return {
+    calories: nutrition.calories,
+    protein: nutrition.protein,
+    carbs: nutrition.carbs,
+    fat: nutrition.fat,
+    fiber: nutrition.fiber,
+    sugars: nutrition.sugars,
+    sodiumMg: nutrition.sodiumMg,
+    potassiumMg: nutrition.potassiumMg,
+  };
+}
 
 function formatCalories(value: number | undefined): string {
   if (value === undefined || !Number.isFinite(value)) {
@@ -247,10 +268,12 @@ export default function AILogScreen() {
       content: systemPrompt,
     },
   ]);
-  const pendingApprovalsRef = useRef(new Map<string, ApprovalInput>());
+  const searchResultCounterRef = useRef(1);
+  const searchResultsByLocalIdRef = useRef(new Map<string, SearchResultFood>());
+  const pendingApprovalsRef = useRef(new Map<string, ResolvedApprovalSuggestion[]>());
   const loopRunningRef = useRef(false);
 
-  const appendApprovedFoodToLog = (approvalInput: ApprovalInput) => {
+  const appendApprovedFoodToLog = (suggestion: ResolvedApprovalSuggestion) => {
     if (!me.$isLoaded) {
       return;
     }
@@ -259,26 +282,15 @@ export default function AILogScreen() {
       me.root.$jazz.set("logs", []);
     }
 
-    const meal = normalizeMeal(approvalInput.meal) ?? "lunch";
+    const meal = normalizeMeal(suggestion.meal) ?? "lunch";
 
     me.root.logs?.$jazz.push({
       meal,
-      foodName: approvalInput.name,
-      brand: approvalInput.brand,
-      serving: approvalInput.serving,
-      portion: approvalInput.portion,
-      nutrition: approvalInput.nutrition
-        ? {
-            calories: approvalInput.nutrition.calories,
-            protein: approvalInput.nutrition.protein,
-            carbs: approvalInput.nutrition.carbs,
-            fat: approvalInput.nutrition.fat,
-            fiber: approvalInput.nutrition.fiber,
-            sugars: approvalInput.nutrition.sugars,
-            sodiumMg: approvalInput.nutrition.sodiumMg,
-            potassiumMg: approvalInput.nutrition.potassiumMg,
-          }
-        : undefined,
+      foodName: suggestion.food.name,
+      brand: suggestion.food.brand,
+      serving: suggestion.food.serving,
+      portion: suggestion.portion,
+      nutrition: cloneNutrition(suggestion.food.nutrition),
       createdAt: Date.now(),
     });
   };
@@ -470,44 +482,109 @@ export default function AILogScreen() {
         maxItems: Math.min(20, Math.max(limit * 2, 8)),
       });
       const topFoods = foods.slice(0, limit);
+      const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
+        const resultId = `r${searchResultCounterRef.current}`;
+        searchResultCounterRef.current += 1;
+        const mappedFood: SearchResultFood = {
+          resultId,
+          name: food.name,
+          brand: food.brand,
+          serving: food.serving,
+          nutrition: cloneNutrition(food.nutrition),
+        };
+        searchResultsByLocalIdRef.current.set(resultId, mappedFood);
+        return mappedFood;
+      });
 
       setMessages((current) => [
         ...current,
         {
           id: createMessageId(),
           kind: "search",
-          foods: topFoods,
+          foods: foodsWithResultIds,
         },
       ]);
 
       return {
         pauseForApproval: false,
         output: {
-          foods: topFoods,
+          foods: foodsWithResultIds,
         },
       };
     }
 
-    if (toolCall.function.name === "requestFoodApproval") {
+    if (toolCall.function.name === "requestFoodApprovals") {
       const parsed = approvalInputSchema.safeParse(rawArguments);
       if (!parsed.success) {
         return {
           pauseForApproval: false,
           output: {
-            approved: false,
-            reason: "Invalid requestFoodApproval input.",
+            error: "Invalid requestFoodApprovals input.",
           },
         };
       }
 
-      pendingApprovalsRef.current.set(toolCall.id, parsed.data);
+      const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
+      const unknownResultIds: string[] = [];
+      const seenSuggestions = new Set<string>();
+
+      for (const suggestion of parsed.data.suggestions) {
+        const resultId = suggestion.resultId.trim();
+        const food = searchResultsByLocalIdRef.current.get(resultId);
+        if (!food) {
+          unknownResultIds.push(resultId || "(empty)");
+          continue;
+        }
+
+        const meal = normalizeMeal(suggestion.meal) ?? "lunch";
+        const portion = sanitizePortion(suggestion.portion);
+        const reason = suggestion.reason.trim();
+        if (!reason) {
+          continue;
+        }
+
+        const duplicateKey = `${resultId}|${meal}|${portion}`;
+        if (seenSuggestions.has(duplicateKey)) {
+          continue;
+        }
+        seenSuggestions.add(duplicateKey);
+
+        resolvedSuggestions.push({
+          suggestionId: createMessageId(),
+          resultId,
+          meal,
+          portion,
+          reason,
+          food,
+        });
+      }
+
+      if (unknownResultIds.length > 0) {
+        return {
+          pauseForApproval: false,
+          output: {
+            error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
+          },
+        };
+      }
+
+      if (resolvedSuggestions.length === 0) {
+        return {
+          pauseForApproval: false,
+          output: {
+            error: "No valid suggestions to approve.",
+          },
+        };
+      }
+
+      pendingApprovalsRef.current.set(toolCall.id, resolvedSuggestions);
       setMessages((current) => [
         ...current,
         {
           id: createMessageId(),
           kind: "approval",
           toolCallId: toolCall.id,
-          input: parsed.data,
+          suggestions: resolvedSuggestions,
         },
       ]);
 
@@ -628,42 +705,76 @@ export default function AILogScreen() {
     await runAssistantLoop();
   };
 
-  const respondToApproval = async (toolCallId: string, approved: boolean) => {
+  const respondToApproval = async (toolCallId: string, suggestionId: string, approved: boolean) => {
     if (status === "streaming") {
       return;
     }
 
-    const inputForApproval = pendingApprovalsRef.current.get(toolCallId);
-    if (!inputForApproval) {
+    const pendingSuggestions = pendingApprovalsRef.current.get(toolCallId);
+    if (!pendingSuggestions) {
       return;
     }
 
-    pendingApprovalsRef.current.delete(toolCallId);
-
-    if (approved) {
-      appendApprovedFoodToLog(inputForApproval);
+    const targetIndex = pendingSuggestions.findIndex(
+      (suggestion) => suggestion.suggestionId === suggestionId,
+    );
+    if (targetIndex === -1) {
+      return;
     }
 
-    const output: ApprovalOutput = {
+    if (pendingSuggestions[targetIndex]?.output) {
+      return;
+    }
+
+    if (approved) {
+      appendApprovedFoodToLog(pendingSuggestions[targetIndex]);
+    }
+
+    const itemOutput: ApprovalOutput = {
       approved,
       reason: approved ? undefined : "User rejected this suggestion.",
     };
+    const nextSuggestions = pendingSuggestions.map((suggestion, index) =>
+      index === targetIndex
+        ? {
+            ...suggestion,
+            output: itemOutput,
+          }
+        : suggestion,
+    );
 
     setMessages((current) =>
       current.map((message) =>
         message.kind === "approval" && message.toolCallId === toolCallId
           ? {
               ...message,
-              output,
+              suggestions: nextSuggestions,
             }
           : message,
       ),
     );
 
+    const allResolved = nextSuggestions.every((suggestion) => Boolean(suggestion.output));
+    if (!allResolved) {
+      pendingApprovalsRef.current.set(toolCallId, nextSuggestions);
+      setStatus("awaiting-approval");
+      return;
+    }
+
+    pendingApprovalsRef.current.delete(toolCallId);
     conversationRef.current.push({
       role: "tool",
       tool_call_id: toolCallId,
-      content: JSON.stringify(output),
+      content: JSON.stringify({
+        decisions: nextSuggestions.map((suggestion) => ({
+          suggestionId: suggestion.suggestionId,
+          resultId: suggestion.resultId,
+          meal: suggestion.meal,
+          portion: suggestion.portion,
+          approved: suggestion.output?.approved ?? false,
+          reason: suggestion.output?.reason,
+        })),
+      }),
     });
 
     setError(null);
@@ -697,7 +808,7 @@ export default function AILogScreen() {
       >
         <Text style={styles.largeTitle}>AI Log</Text>
         <Text style={styles.subtitle}>
-          Ask for a food, review the suggestion, then approve to add it to your log.
+          Ask for foods, review suggestions, then approve each one to add to your log.
         </Text>
 
         {!hasApiKey ? (
@@ -710,7 +821,7 @@ export default function AILogScreen() {
 
         {status === "awaiting-approval" ? (
           <View style={styles.awaitingCard}>
-            <Text style={styles.awaitingText}>Choose approve or reject to continue.</Text>
+            <Text style={styles.awaitingText}>Approve or reject each suggestion to continue.</Text>
           </View>
         ) : null}
 
@@ -750,9 +861,9 @@ export default function AILogScreen() {
               <View key={message.id} style={[styles.messageBubble, styles.assistantBubble]}>
                 <View style={styles.toolCard}>
                   <Text style={styles.toolHeading}>Found foods</Text>
-                  {message.foods.slice(0, 3).map((food) => (
-                    <Text key={food.id} style={styles.toolText}>
-                      {food.name}
+                  {message.foods.slice(0, 6).map((food) => (
+                    <Text key={food.resultId} style={styles.toolText}>
+                      {food.resultId} • {food.name}
                       {food.brand ? ` • ${food.brand}` : ""}
                       {food.nutrition?.calories !== undefined
                         ? ` • ${formatCalories(food.nutrition.calories)} kcal`
@@ -764,58 +875,67 @@ export default function AILogScreen() {
             );
           }
 
-          const selectedMeal = normalizeMeal(message.input.meal) ?? "lunch";
-          const mealLabel = mealLabelFor(selectedMeal);
-
           return (
             <View key={message.id} style={[styles.messageBubble, styles.assistantBubble]}>
               <View style={styles.toolCard}>
-                <Text style={styles.toolHeading}>Approve this log?</Text>
-                <Text style={styles.toolText}>
-                  {message.input.name}
-                  {message.input.brand ? ` • ${message.input.brand}` : ""}
-                </Text>
-                {message.input.serving ? <Text style={styles.toolMeta}>{message.input.serving}</Text> : null}
-                <Text style={styles.toolMeta}>
-                  {formatCalories(message.input.nutrition?.calories)} kcal to {mealLabel}
-                </Text>
-                <Text style={styles.toolReason}>{message.input.reason}</Text>
+                <Text style={styles.toolHeading}>Review suggestions</Text>
+                {message.suggestions.map((suggestion) => {
+                  const mealLabel = mealLabelFor(suggestion.meal);
+                  const calories = (suggestion.food.nutrition?.calories ?? 0) * suggestion.portion;
 
-                {message.output ? (
-                  <Text
-                    style={[
-                      styles.toolMeta,
-                      message.output.approved ? styles.approvedText : styles.rejectedText,
-                    ]}
-                  >
-                    {message.output.approved
-                      ? "Approved and logged."
-                      : message.output.reason ?? "Rejected. Ask for another option."}
-                  </Text>
-                ) : (
-                  <View style={styles.approvalRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={isStreaming}
-                      onPress={() => {
-                        void respondToApproval(message.toolCallId, true);
-                      }}
-                      style={[styles.approveButton, isStreaming && styles.buttonDisabled]}
-                    >
-                      <Text style={styles.approveButtonText}>Approve</Text>
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      disabled={isStreaming}
-                      onPress={() => {
-                        void respondToApproval(message.toolCallId, false);
-                      }}
-                      style={[styles.denyButton, isStreaming && styles.buttonDisabled]}
-                    >
-                      <Text style={styles.denyButtonText}>Reject</Text>
-                    </Pressable>
-                  </View>
-                )}
+                  return (
+                    <View key={suggestion.suggestionId} style={styles.suggestionCard}>
+                      <Text style={styles.toolText}>
+                        {suggestion.food.name}
+                        {suggestion.food.brand ? ` • ${suggestion.food.brand}` : ""}
+                      </Text>
+                      {suggestion.food.serving ? (
+                        <Text style={styles.toolMeta}>{suggestion.food.serving}</Text>
+                      ) : null}
+                      <Text style={styles.toolMeta}>
+                        {suggestion.resultId} • {formatPortionLabel(suggestion.portion)} to {mealLabel}
+                      </Text>
+                      <Text style={styles.toolMeta}>{`${formatCalories(calories)} kcal`}</Text>
+                      <Text style={styles.toolReason}>{suggestion.reason}</Text>
+
+                      {suggestion.output ? (
+                        <Text
+                          style={[
+                            styles.toolMeta,
+                            suggestion.output.approved ? styles.approvedText : styles.rejectedText,
+                          ]}
+                        >
+                          {suggestion.output.approved
+                            ? "Approved and logged."
+                            : suggestion.output.reason ?? "Rejected. Ask for another option."}
+                        </Text>
+                      ) : (
+                        <View style={styles.approvalRow}>
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={isStreaming}
+                            onPress={() => {
+                              void respondToApproval(message.toolCallId, suggestion.suggestionId, true);
+                            }}
+                            style={[styles.approveButton, isStreaming && styles.buttonDisabled]}
+                          >
+                            <Text style={styles.approveButtonText}>Approve</Text>
+                          </Pressable>
+                          <Pressable
+                            accessibilityRole="button"
+                            disabled={isStreaming}
+                            onPress={() => {
+                              void respondToApproval(message.toolCallId, suggestion.suggestionId, false);
+                            }}
+                            style={[styles.denyButton, isStreaming && styles.buttonDisabled]}
+                          >
+                            <Text style={styles.denyButtonText}>Reject</Text>
+                          </Pressable>
+                        </View>
+                      )}
+                    </View>
+                  );
+                })}
               </View>
             </View>
           );
@@ -960,6 +1080,12 @@ const styles = StyleSheet.create({
     backgroundColor: palette.card,
     padding: 10,
     gap: 2,
+  },
+  suggestionCard: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.separator,
   },
   toolHeading: {
     fontSize: 13,
