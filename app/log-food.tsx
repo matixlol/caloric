@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { normalizeLocalDateKey } from "../src/date";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 import { CaloricAccount } from "../src/jazz/schema";
 
@@ -335,7 +336,7 @@ function FoodRow({
 export default function LogFoodScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ meal?: string | string[] }>();
+  const params = useLocalSearchParams<{ meal?: string | string[]; day?: string | string[] }>();
   const me = useAccount(CaloricAccount, {
     resolve: { root: { logs: true } },
   });
@@ -403,6 +404,8 @@ export default function LogFoodScreen() {
   }
 
   const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
+  const selectedDay = Array.isArray(params.day) ? params.day[0] : params.day;
+  const selectedDateKey = normalizeLocalDateKey(selectedDay, Date.now());
   const selectedMealLabel = mealLabelFor(selectedMeal);
   const selectedFood = foods.find((food) => food.id === selectedFoodId) || null;
   const trimmedQuery = query.trim();
@@ -414,6 +417,8 @@ export default function LogFoodScreen() {
     if (!me.root.logs) {
       me.root.$jazz.set("logs", []);
     }
+
+    const createdAt = Date.now();
 
     me.root.logs?.$jazz.push({
       meal: selectedMeal,
@@ -433,7 +438,8 @@ export default function LogFoodScreen() {
             potassiumMg: selectedFood.nutrition.potassiumMg,
           }
         : undefined,
-      createdAt: Date.now(),
+      createdAt,
+      dateKey: selectedDateKey,
     });
 
     if (router.canGoBack()) {

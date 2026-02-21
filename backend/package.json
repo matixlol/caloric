@@ -12,6 +12,7 @@
     "db:studio": "drizzle-kit studio"
   },
   "dependencies": {
+    "@fal-ai/client": "^1.9.3",
     "drizzle-orm": "^0.44.5",
     "postgres": "^3.4.7"
   },

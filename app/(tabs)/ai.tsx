@@ -1,7 +1,12 @@
 import { useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { Audio } from "expo-av";
+import {
+  RecordingPresets,
+  requestRecordingPermissionsAsync,
+  setAudioModeAsync,
+  useAudioRecorder,
+} from "expo-audio";
 import { useAccount } from "jazz-tools/expo";
 import {
   Platform,
@@ -202,7 +207,7 @@ export default function AILogScreen() {
   const [status, setStatus] = useState<ChatStatus>("ready");
   const [error, setError] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
-  const recordingRef = useRef<Audio.Recording | null>(null);
+  const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
 
   const isStreaming = status === "streaming";
@@ -499,41 +504,36 @@ export default function AILogScreen() {
     setError(null);
 
     try {
-      const permission = await Audio.requestPermissionsAsync();
+      const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
         setError("Microphone permission is required for voice input.");
         return;
       }
 
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: true,
-        playsInSilentModeIOS: true,
+      await setAudioModeAsync({
+        allowsRecording: true,
+        playsInSilentMode: true,
       });
 
-      const recording = new Audio.Recording();
-      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
-      recordingRef.current = recording;
+      await audioRecorder.prepareToRecordAsync();
+      audioRecorder.record();
       setIsRecording(true);
-      await recording.startAsync();
     } catch (recordingError) {
-      recordingRef.current = null;
       setIsRecording(false);
       setError(getErrorMessage(recordingError));
     }
   };
 
   const stopVoiceRecording = async () => {
-    const recording = recordingRef.current;
-    if (!recording) {
+    if (!isRecording) {
       return;
     }
 
-    recordingRef.current = null;
     setIsRecording(false);
 
     try {
-      await recording.stopAndUnloadAsync();
-      const uri = recording.getURI();
+      await audioRecorder.stop();
+      const uri = audioRecorder.uri;
       if (!uri) {
         throw new Error("Could not read recorded audio.");
       }
@@ -556,8 +556,8 @@ export default function AILogScreen() {
     } catch (recordingError) {
       setError(getErrorMessage(recordingError));
     } finally {
-      await Audio.setAudioModeAsync({
-        allowsRecordingIOS: false,
+      await setAudioModeAsync({
+        allowsRecording: false,
       }).catch(() => {
         // Ignore cleanup errors after recording.
       });

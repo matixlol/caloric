@@ -1,9 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useAccount } from "jazz-tools/expo";
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   type LayoutChangeEvent,
+  PanResponder,
   Platform,
   PlatformColor,
   Pressable,
@@ -14,6 +15,12 @@ import {
 import DraggableFlatList, { type RenderItemParams } from "react-native-draggable-flatlist";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  getTodayLocalDateKey,
+  normalizeLocalDateKey,
+  parseLocalDateKey,
+  shiftLocalDateKey,
+} from "../../src/date";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel, sanitizePortion } from "../../src/portion";
 import { CaloricAccount } from "../../src/jazz/schema";
@@ -41,6 +48,19 @@ const DEFAULT_FAT_PCT = 20;
 const HEADER_HEIGHT_ESTIMATE = 74;
 const ENTRY_HEIGHT_ESTIMATE = 54;
 const EMPTY_HEIGHT_ESTIMATE = 60;
+const DAY_NAV_SWIPE_THRESHOLD = 36;
+
+const DATE_TITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  month: "short",
+  day: "numeric",
+});
+
+const DATE_SUBTITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
+  weekday: "long",
+  month: "long",
+  day: "numeric",
+  year: "numeric",
+});
 
 type MealEntry = {
   id: string;
@@ -91,6 +111,22 @@ function estimateItemHeight(item: MealListItem) {
   if (item.type === "header") return HEADER_HEIGHT_ESTIMATE;
   if (item.type === "entry") return ENTRY_HEIGHT_ESTIMATE;
   return EMPTY_HEIGHT_ESTIMATE;
+}
+
+function formatDayTitle(dayOffset: number, selectedDate: Date | null): string {
+  if (dayOffset === 0) {
+    return "Today";
+  }
+
+  if (dayOffset === -1) {
+    return "Yesterday";
+  }
+
+  if (!selectedDate) {
+    return "Log";
+  }
+
+  return DATE_TITLE_FORMATTER.format(selectedDate);
 }
 
 function MealRow({
@@ -161,9 +197,37 @@ export default function HomeScreen() {
   const me = useAccount(CaloricAccount, {
     resolve: { root: { logs: { $each: { nutrition: true } } } },
   });
+
+  const [dayOffset, setDayOffset] = useState(0);
+  const [todayDateKey, setTodayDateKey] = useState(() => getTodayLocalDateKey());
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setTodayDateKey((current) => {
+        const next = getTodayLocalDateKey();
+        return next === current ? current : next;
+      });
+    }, 60_000);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, []);
+
+  const selectedDateKey = useMemo(
+    () => shiftLocalDateKey(todayDateKey, dayOffset),
+    [dayOffset, todayDateKey],
+  );
+  const selectedDate = useMemo(() => parseLocalDateKey(selectedDateKey), [selectedDateKey]);
+  const dayTitle = useMemo(() => formatDayTitle(dayOffset, selectedDate), [dayOffset, selectedDate]);
+  const daySubtitle = useMemo(
+    () => (selectedDate ? DATE_SUBTITLE_FORMATTER.format(selectedDate) : selectedDateKey),
+    [selectedDate, selectedDateKey],
+  );
+
   const logsValue = me.$isLoaded ? me.root.logs : undefined;
 
-  const logs = useMemo(() => {
+  const allLogs = useMemo(() => {
     if (!me.$isLoaded) {
       return [];
     }
@@ -172,6 +236,23 @@ export default function HomeScreen() {
       (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } => Boolean(entry?.$isLoaded),
     );
   }, [logsValue, me.$isLoaded]);
+
+  useEffect(() => {
+    allLogs.forEach((entry) => {
+      const normalizedDateKey = normalizeLocalDateKey(entry.dateKey, entry.createdAt);
+      if (entry.dateKey !== normalizedDateKey) {
+        entry.$jazz.set("dateKey", normalizedDateKey);
+      }
+    });
+  }, [allLogs]);
+
+  const logs = useMemo(
+    () =>
+      allLogs.filter(
+        (entry) => normalizeLocalDateKey(entry.dateKey, entry.createdAt) === selectedDateKey,
+      ),
+    [allLogs, selectedDateKey],
+  );
 
   const logsByMeal = useMemo<Record<MealKey, MealEntry[]>>(() => {
     const grouped: Record<MealKey, MealEntry[]> = {
@@ -295,6 +376,33 @@ export default function HomeScreen() {
 
     return isLastByKey;
   }, [dragItems]);
+
+  const goToPreviousDay = useCallback(() => {
+    setDayOffset((current) => current - 1);
+  }, []);
+
+  const goToNextDay = useCallback(() => {
+    setDayOffset((current) => Math.min(current + 1, 0));
+  }, []);
+
+  const dayHandlePanResponder = useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponder: (_, gesture) =>
+          Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
+        onPanResponderRelease: (_, gesture) => {
+          if (gesture.dx <= -DAY_NAV_SWIPE_THRESHOLD) {
+            goToPreviousDay();
+            return;
+          }
+
+          if (gesture.dx >= DAY_NAV_SWIPE_THRESHOLD) {
+            goToNextDay();
+          }
+        },
+      }),
+    [goToNextDay, goToPreviousDay],
+  );
 
   if (!me.$isLoaded) {
     return (
@@ -434,12 +542,57 @@ export default function HomeScreen() {
       return;
     }
 
-    rootLogs.$jazz.splice(0, rootLogs.length, ...reordered);
+    const reorderedEntryIds = new Set(reordered.map((entry) => entry.$jazz.id));
+    const nextRootLogs = rootLogs.filter(
+      (entry): entry is (typeof logs)[number] => Boolean(entry?.$isLoaded),
+    );
+    let nextDayEntryIndex = 0;
+
+    for (let index = 0; index < nextRootLogs.length; index += 1) {
+      const current = nextRootLogs[index];
+      if (!current || !current.$isLoaded || !reorderedEntryIds.has(current.$jazz.id)) {
+        continue;
+      }
+
+      const nextEntry = reordered[nextDayEntryIndex];
+      if (!nextEntry) {
+        return;
+      }
+
+      nextRootLogs[index] = nextEntry;
+      nextDayEntryIndex += 1;
+    }
+
+    if (nextDayEntryIndex !== reordered.length) {
+      return;
+    }
+
+    rootLogs.$jazz.splice(0, rootLogs.length, ...nextRootLogs);
   };
 
   const listHeader = (
     <View style={styles.listHeader}>
-      <Text style={styles.largeTitle}>Today</Text>
+      <View
+        accessibilityLabel="Swipe horizontally to move between days"
+        style={styles.dayTitleRow}
+        {...dayHandlePanResponder.panHandlers}
+      >
+        <View style={styles.dayTitleMain}>
+          <Text style={styles.largeTitle}>{dayTitle}</Text>
+          <Text style={styles.daySubtitle}>{daySubtitle}</Text>
+        </View>
+      </View>
+
+      {dayOffset !== 0 ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Back to today"
+          onPress={() => setDayOffset(0)}
+          style={styles.backToTodayButton}
+        >
+          <Text style={styles.backToTodayText}>Back to today</Text>
+        </Pressable>
+      ) : null}
 
       <View style={styles.summaryCard}>
         <Text style={styles.summaryLabel}>Calories</Text>
@@ -515,7 +668,7 @@ export default function HomeScreen() {
                 onPress={() =>
                   router.navigate({
                     pathname: "/log-food",
-                    params: { meal: item.meal },
+                    params: { meal: item.meal, day: selectedDateKey },
                   })
                 }
                 style={styles.addIconButton}
@@ -602,8 +755,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
   },
   listHeader: {
-    gap: 10,
+    gap: 8,
     marginBottom: 10,
+  },
+  dayTitleRow: {
+    minHeight: 52,
+    justifyContent: "center",
+  },
+  dayTitleMain: {
+    alignItems: "flex-start",
   },
   loadingContainer: {
     flex: 1,
@@ -620,6 +780,25 @@ const styles = StyleSheet.create({
     lineHeight: 41,
     fontWeight: "700",
     color: palette.label,
+  },
+  daySubtitle: {
+    marginTop: 1,
+    fontSize: 13,
+    lineHeight: 18,
+    color: palette.secondaryLabel,
+  },
+  backToTodayButton: {
+    alignSelf: "flex-start",
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    backgroundColor: palette.card,
+  },
+  backToTodayText: {
+    fontSize: 13,
+    lineHeight: 17,
+    fontWeight: "600",
+    color: palette.tint,
   },
   summaryCard: {
     backgroundColor: palette.card,

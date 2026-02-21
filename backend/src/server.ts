@@ -1,4 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
+import { fal } from "@fal-ai/client";
 import { config } from "./config";
 import { db } from "./db";
 import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
@@ -1112,25 +1113,6 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
   };
 }
 
-function parseFalErrorMessage(responseBody: unknown): string | null {
-  const root = asRecord(responseBody);
-  if (!root) {
-    return null;
-  }
-
-  const detail = asString(root.detail);
-  if (detail) {
-    return detail;
-  }
-
-  const message = asString(root.message);
-  if (message) {
-    return message;
-  }
-
-  return null;
-}
-
 async function transcribeAudioSnippet(audioFile: File): Promise<string> {
   if (!config.falKey) {
     throw new Error("FAL_KEY is not configured on the backend.");
@@ -1144,46 +1126,32 @@ async function transcribeAudioSnippet(audioFile: File): Promise<string> {
     throw new Error("Audio snippet is too large (max 12 MB).");
   }
 
-  const mimeType = audioFile.type || "audio/m4a";
-  const binary = Buffer.from(await audioFile.arrayBuffer());
-  const dataUri = `data:${mimeType};base64,${binary.toString("base64")}`;
-
-  const response = await fetch("https://fal.run/fal-ai/wizper", {
-    method: "POST",
-    headers: {
-      Authorization: `Key ${config.falKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      audio_url: dataUri,
-      task: "transcribe",
-      language: null,
-    }),
+  fal.config({
+    credentials: config.falKey,
   });
 
-  const rawText = await response.text();
+  const requestFile = new File([audioFile], audioFile.name || `voice-${Date.now()}.m4a`, {
+    type: audioFile.type || "audio/m4a",
+  });
 
-  let parsed: unknown = null;
-  if (rawText) {
-    try {
-      parsed = JSON.parse(rawText);
-    } catch {
-      parsed = null;
+  try {
+    const result = await fal.subscribe("fal-ai/wizper", {
+      input: {
+        audio_url: requestFile,
+        task: "transcribe",
+      },
+    });
+
+    const transcript = asString(asRecord(result.data)?.text)?.trim() ?? "";
+    if (!transcript) {
+      throw new Error("fal.ai wizper returned an empty transcription.");
     }
-  }
 
-  if (!response.ok) {
-    const falMessage = parseFalErrorMessage(parsed);
-    const suffix = falMessage ? `: ${falMessage}` : "";
-    throw new Error(`fal.ai wizper request failed (${response.status})${suffix}`);
+    return transcript;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`fal.ai wizper request failed: ${message}`);
   }
-
-  const transcript = asString(asRecord(parsed)?.text)?.trim() ?? "";
-  if (!transcript) {
-    throw new Error("fal.ai wizper returned an empty transcription.");
-  }
-
-  return transcript;
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {

@@ -1,4 +1,5 @@
 import { Group, co, z } from "jazz-tools";
+import { normalizeLocalDateKey } from "../date";
 
 const NutritionInfo = co.map({
   calories: z.optional(z.number()),
@@ -26,6 +27,7 @@ const FoodLogEntry = co.map({
   portion: z.number(),
   nutrition: co.optional(NutritionInfo),
   createdAt: z.number(),
+  dateKey: z.optional(z.string()),
 });
 
 const CaloricRoot = co.map({
@@ -123,7 +125,7 @@ export const CaloricAccount = co
     }
 
     const { profile, root } = await account.$jazz.ensureLoaded({
-      resolve: { profile: true, root: true },
+      resolve: { profile: true, root: { foods: true, logs: true } },
     });
 
     if (!profile.$jazz.has("name")) {
@@ -148,5 +150,18 @@ export const CaloricAccount = co
 
     if (root.foods && root.foods.$isLoaded && root.foods.length === 0) {
       root.foods.$jazz.push(...DEFAULT_FOODS);
+    }
+
+    if (root.logs && root.logs.$isLoaded) {
+      root.logs.forEach((entry) => {
+        if (!entry || !entry.$isLoaded) {
+          return;
+        }
+
+        const normalizedDateKey = normalizeLocalDateKey(entry.dateKey, entry.createdAt);
+        if (entry.dateKey !== normalizedDateKey) {
+          entry.$jazz.set("dateKey", normalizedDateKey);
+        }
+      });
     }
   });

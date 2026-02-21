@@ -47,7 +47,12 @@
         }
       ],
       "expo-secure-store",
-      "expo-av",
+      [
+        "expo-audio",
+        {
+          "enableBackgroundPlayback": false
+        }
+      ],
       "expo-sqlite"
     ],
     "experiments": {
