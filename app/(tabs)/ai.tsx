@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import { Audio } from "expo-av";
 import { useAccount } from "jazz-tools/expo";
 import {
   Platform,
@@ -14,6 +15,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
+import { localDateKeyFromTimestamp } from "../../src/date";
 import { CaloricAccount } from "../../src/jazz/schema";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel } from "../../src/portion";
@@ -116,7 +118,7 @@ type AgentEvent =
 type AgentAction =
   | {
       type: "user-message";
-      message: string;
+      message?: string;
     }
   | {
       type: "approval";
@@ -124,6 +126,12 @@ type AgentAction =
       suggestionId: string;
       approved: boolean;
     };
+
+type AudioUpload = {
+  uri: string;
+  mimeType: string;
+  fileName: string;
+};
 
 const createMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
@@ -160,6 +168,28 @@ function getErrorMessage(error: unknown): string {
   return "Something went wrong while talking to the backend AI service.";
 }
 
+function inferAudioMeta(uri: string): Pick<AudioUpload, "mimeType" | "fileName"> {
+  const extension = uri.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1]?.toLowerCase();
+
+  const mimeType =
+    extension === "m4a"
+      ? "audio/m4a"
+      : extension === "caf"
+        ? "audio/x-caf"
+        : extension === "wav"
+          ? "audio/wav"
+          : extension === "mp3"
+            ? "audio/mpeg"
+            : "audio/m4a";
+
+  const fileExtension = extension && extension.length > 0 ? extension : "m4a";
+
+  return {
+    mimeType,
+    fileName: `voice-${Date.now()}.${fileExtension}`,
+  };
+}
+
 export default function AILogScreen() {
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
@@ -172,6 +202,8 @@ export default function AILogScreen() {
   const [status, setStatus] = useState<ChatStatus>("ready");
   const [error, setError] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
+  const recordingRef = useRef<Audio.Recording | null>(null);
+  const [isRecording, setIsRecording] = useState(false);
 
   const isStreaming = status === "streaming";
   const sessionIdRef = useRef<string | null>(null);
@@ -188,6 +220,7 @@ export default function AILogScreen() {
     }
 
     const meal = normalizeMeal(suggestion.meal) ?? "lunch";
+    const createdAt = Date.now();
 
     me.root.logs?.$jazz.push({
       meal,
@@ -196,7 +229,8 @@ export default function AILogScreen() {
       serving: suggestion.food.serving,
       portion: suggestion.portion,
       nutrition: cloneNutrition(suggestion.food.nutrition),
-      createdAt: Date.now(),
+      createdAt,
+      dateKey: localDateKeyFromTimestamp(createdAt),
     });
   };
 
@@ -244,26 +278,58 @@ export default function AILogScreen() {
   const requestTurn = async (
     currentUserId: string,
     action: AgentAction,
+    options?: {
+      audio?: AudioUpload;
+    },
     retry = true,
-  ): Promise<{ status: ChatStatus; events: AgentEvent[] }> => {
+  ): Promise<{ status: ChatStatus; events: AgentEvent[]; resolvedUserMessage?: string }> => {
     const sessionId = await ensureSessionId(currentUserId);
+
+    const usingAudio = Boolean(options?.audio && action.type === "user-message");
+    const userMessage = action.type === "user-message" ? action.message?.trim() : undefined;
+
+    const body = usingAudio
+      ? (() => {
+          const formData = new FormData();
+          formData.append("sessionId", sessionId);
+          formData.append("userId", currentUserId);
+          formData.append("actionType", action.type);
+          if (userMessage) {
+            formData.append("message", userMessage);
+          }
+
+          const audio = options?.audio;
+          if (audio) {
+            formData.append("audio", {
+              uri: audio.uri,
+              type: audio.mimeType,
+              name: audio.fileName,
+            } as unknown as Blob);
+          }
+
+          return formData;
+        })()
+      : JSON.stringify({
+          sessionId,
+          userId: currentUserId,
+          action,
+        });
 
     const response = await fetch(`${BACKEND_BASE_URL}/ai/turn`, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        sessionId,
-        userId: currentUserId,
-        action,
-      }),
+      headers: usingAudio
+        ? undefined
+        : {
+            "Content-Type": "application/json",
+          },
+      body,
     });
 
     const payload = (await response.json().catch(() => null)) as
       | {
           status?: unknown;
           events?: unknown;
+          resolvedUserMessage?: unknown;
           error?: unknown;
           message?: unknown;
         }
@@ -272,7 +338,7 @@ export default function AILogScreen() {
     if (!response.ok) {
       if (response.status === 403 && retry) {
         sessionIdRef.current = null;
-        return requestTurn(currentUserId, action, false);
+        return requestTurn(currentUserId, action, options, false);
       }
 
       const backendMessage =
@@ -294,6 +360,8 @@ export default function AILogScreen() {
     return {
       status: nextStatus,
       events,
+      resolvedUserMessage:
+        typeof payload?.resolvedUserMessage === "string" ? payload.resolvedUserMessage : undefined,
     };
   };
 
@@ -351,7 +419,13 @@ export default function AILogScreen() {
     });
   };
 
-  const runAssistantAction = async (action: AgentAction) => {
+  const runAssistantAction = async (
+    action: AgentAction,
+    options?: {
+      audio?: AudioUpload;
+      appendResolvedUserMessage?: boolean;
+    },
+  ) => {
     if (loopRunningRef.current) {
       return;
     }
@@ -366,7 +440,21 @@ export default function AILogScreen() {
 
     try {
       setStatus("streaming");
-      const result = await requestTurn(userId, action);
+      const result = await requestTurn(userId, action, options);
+      const resolvedUserMessage = result.resolvedUserMessage?.trim();
+
+      if (options?.appendResolvedUserMessage && resolvedUserMessage) {
+        setMessages((current) => [
+          ...current,
+          {
+            id: createMessageId(),
+            kind: "text",
+            role: "user",
+            text: resolvedUserMessage,
+          },
+        ]);
+      }
+
       applyAgentEvents(result.events);
       nextStatus = result.status;
     } catch (loopError) {
@@ -401,6 +489,79 @@ export default function AILogScreen() {
       type: "user-message",
       message: trimmed,
     });
+  };
+
+  const startVoiceRecording = async () => {
+    if (!userId || status !== "ready" || isRecording || loopRunningRef.current) {
+      return;
+    }
+
+    setError(null);
+
+    try {
+      const permission = await Audio.requestPermissionsAsync();
+      if (!permission.granted) {
+        setError("Microphone permission is required for voice input.");
+        return;
+      }
+
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: true,
+        playsInSilentModeIOS: true,
+      });
+
+      const recording = new Audio.Recording();
+      await recording.prepareToRecordAsync(Audio.RecordingOptionsPresets.HIGH_QUALITY);
+      recordingRef.current = recording;
+      setIsRecording(true);
+      await recording.startAsync();
+    } catch (recordingError) {
+      recordingRef.current = null;
+      setIsRecording(false);
+      setError(getErrorMessage(recordingError));
+    }
+  };
+
+  const stopVoiceRecording = async () => {
+    const recording = recordingRef.current;
+    if (!recording) {
+      return;
+    }
+
+    recordingRef.current = null;
+    setIsRecording(false);
+
+    try {
+      await recording.stopAndUnloadAsync();
+      const uri = recording.getURI();
+      if (!uri) {
+        throw new Error("Could not read recorded audio.");
+      }
+
+      const audioMeta = inferAudioMeta(uri);
+
+      await runAssistantAction(
+        {
+          type: "user-message",
+        },
+        {
+          audio: {
+            uri,
+            mimeType: audioMeta.mimeType,
+            fileName: audioMeta.fileName,
+          },
+          appendResolvedUserMessage: true,
+        },
+      );
+    } catch (recordingError) {
+      setError(getErrorMessage(recordingError));
+    } finally {
+      await Audio.setAudioModeAsync({
+        allowsRecordingIOS: false,
+      }).catch(() => {
+        // Ignore cleanup errors after recording.
+      });
+    }
   };
 
   const respondToApproval = async (toolCallId: string, suggestionId: string, approved: boolean) => {
@@ -475,6 +636,9 @@ export default function AILogScreen() {
       </View>
     );
   }
+
+  const hasInputText = input.trim().length > 0;
+  const canUseComposerActions = Boolean(userId) && status === "ready";
 
   return (
     <View style={styles.screen}>
@@ -659,17 +823,40 @@ export default function AILogScreen() {
           />
           <Pressable
             accessibilityRole="button"
-            disabled={!userId || status !== "ready" || input.trim().length === 0}
+            disabled={!canUseComposerActions || !hasInputText}
             onPress={() => {
               void submitMessage();
             }}
             style={[
               styles.sendButton,
-              (!userId || status !== "ready" || input.trim().length === 0) && styles.buttonDisabled,
+              (!canUseComposerActions || !hasInputText) && styles.buttonDisabled,
             ]}
           >
             <Ionicons name="send" size={18} color={palette.buttonText} />
           </Pressable>
+          {!hasInputText ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canUseComposerActions}
+              onPressIn={() => {
+                void startVoiceRecording();
+              }}
+              onPressOut={() => {
+                void stopVoiceRecording();
+              }}
+              style={[
+                styles.voiceButton,
+                isRecording && styles.voiceButtonRecording,
+                !canUseComposerActions && styles.buttonDisabled,
+              ]}
+            >
+              <Ionicons
+                name={isRecording ? "radio-button-on" : "mic"}
+                size={18}
+                color={palette.buttonText}
+              />
+            </Pressable>
+          ) : null}
         </View>
       </View>
     </View>
@@ -900,6 +1087,17 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: palette.tint,
+  },
+  voiceButton: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.tint,
+  },
+  voiceButtonRecording: {
+    backgroundColor: palette.error,
   },
   buttonDisabled: {
     backgroundColor: palette.tintDisabled,

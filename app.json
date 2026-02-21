@@ -11,11 +11,15 @@
       "supportsTablet": true,
       "bundleIdentifier": "lol.mati.caloric",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSMicrophoneUsageDescription": "Caloric uses your microphone so you can log food with voice."
       }
     },
     "android": {
       "package": "lol.mati.caloric",
+      "permissions": [
+        "RECORD_AUDIO"
+      ],
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -43,6 +47,7 @@
         }
       ],
       "expo-secure-store",
+      "expo-av",
       "expo-sqlite"
     ],
     "experiments": {

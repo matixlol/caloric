@@ -20,7 +20,7 @@ Bun microservice that proxies MyFitnessPal search/detail APIs and persists every
     - `sessionId`
     - `status` (`ready`)
 - `POST /ai/turn`
-  - body:
+  - body (`application/json`):
     - `sessionId` (required)
     - `userId` (required, must match session owner)
     - `action` (required)
@@ -32,9 +32,16 @@ Bun microservice that proxies MyFitnessPal search/detail APIs and persists every
         - `toolCallId`
         - `suggestionId`
         - `approved`
+  - body (`multipart/form-data`, for voice):
+    - `sessionId` (required)
+    - `userId` (required)
+    - `actionType` (required, set to `user-message`)
+    - `audio` (required for voice-only requests)
+    - `message` (optional fallback text)
   - returns:
     - `status` (`ready` or `awaiting-approval`)
     - `events` (`assistant`, `search`, `approval`)
+    - `resolvedUserMessage` (present for user-message actions)
 
 `/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
 OpenRouter tracking fields are sent as `user` (client user id) and `session_id` (backend session id).
@@ -54,6 +61,7 @@ Copy `.env.example` to `.env` and set:
 - `DATABASE_URL`
 - `MFP_AUTHORIZATION`
 - `OPENROUTER_API_KEY`
+- `FAL_KEY`
 
 Optional:
 

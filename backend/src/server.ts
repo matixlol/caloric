@@ -1112,6 +1112,80 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
   };
 }
 
+function parseFalErrorMessage(responseBody: unknown): string | null {
+  const root = asRecord(responseBody);
+  if (!root) {
+    return null;
+  }
+
+  const detail = asString(root.detail);
+  if (detail) {
+    return detail;
+  }
+
+  const message = asString(root.message);
+  if (message) {
+    return message;
+  }
+
+  return null;
+}
+
+async function transcribeAudioSnippet(audioFile: File): Promise<string> {
+  if (!config.falKey) {
+    throw new Error("FAL_KEY is not configured on the backend.");
+  }
+
+  if (audioFile.size <= 0) {
+    throw new Error("Audio snippet was empty.");
+  }
+
+  if (audioFile.size > 12 * 1024 * 1024) {
+    throw new Error("Audio snippet is too large (max 12 MB).");
+  }
+
+  const mimeType = audioFile.type || "audio/m4a";
+  const binary = Buffer.from(await audioFile.arrayBuffer());
+  const dataUri = `data:${mimeType};base64,${binary.toString("base64")}`;
+
+  const response = await fetch("https://fal.run/fal-ai/wizper", {
+    method: "POST",
+    headers: {
+      Authorization: `Key ${config.falKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      audio_url: dataUri,
+      task: "transcribe",
+      language: null,
+    }),
+  });
+
+  const rawText = await response.text();
+
+  let parsed: unknown = null;
+  if (rawText) {
+    try {
+      parsed = JSON.parse(rawText);
+    } catch {
+      parsed = null;
+    }
+  }
+
+  if (!response.ok) {
+    const falMessage = parseFalErrorMessage(parsed);
+    const suffix = falMessage ? `: ${falMessage}` : "";
+    throw new Error(`fal.ai wizper request failed (${response.status})${suffix}`);
+  }
+
+  const transcript = asString(asRecord(parsed)?.text)?.trim() ?? "";
+  if (!transcript) {
+    throw new Error("fal.ai wizper returned an empty transcription.");
+  }
+
+  return transcript;
+}
+
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const parsed = await request.json();
@@ -1206,10 +1280,59 @@ const server = Bun.serve({
         return json({ error: "Method not allowed" }, 405);
       }
 
-      const body = await parseJsonBody(request);
-      const sessionId = asString(body?.sessionId)?.trim() ?? "";
-      const userId = asString(body?.userId)?.trim() ?? "";
-      const action = asRecord(body?.action);
+      let sessionId = "";
+      let userId = "";
+      let action: Record<string, unknown> | null = null;
+      let audioFile: File | null = null;
+
+      const contentType = request.headers.get("content-type") ?? "";
+
+      if (contentType.includes("multipart/form-data")) {
+        let formData: FormData;
+        try {
+          formData = await request.formData();
+        } catch {
+          return json({ error: "Invalid multipart body" }, 400);
+        }
+
+        sessionId = asString(formData.get("sessionId"))?.trim() ?? "";
+        userId = asString(formData.get("userId"))?.trim() ?? "";
+
+        const actionType = asString(formData.get("actionType"))?.trim() ?? "";
+        if (!actionType) {
+          return json({ error: "actionType is required" }, 400);
+        }
+
+        if (actionType === "user-message") {
+          const message = asString(formData.get("message"))?.trim();
+          action = {
+            type: "user-message",
+            ...(message ? { message } : {}),
+          };
+
+          const audioField = formData.get("audio");
+          if (audioField instanceof File && audioField.size > 0) {
+            audioFile = audioField;
+          }
+        } else if (actionType === "approval") {
+          action = {
+            type: "approval",
+            toolCallId: asString(formData.get("toolCallId")) ?? "",
+            suggestionId: asString(formData.get("suggestionId")) ?? "",
+            approved: formData.get("approved") === "true",
+          };
+        } else {
+          action = {
+            type: actionType,
+          };
+        }
+      } else {
+        const body = await parseJsonBody(request);
+        sessionId = asString(body?.sessionId)?.trim() ?? "";
+        userId = asString(body?.userId)?.trim() ?? "";
+        action = asRecord(body?.action);
+      }
+
       if (!action) {
         return json({ error: "action is required" }, 400);
       }
@@ -1234,9 +1357,13 @@ const server = Bun.serve({
 
       try {
         if (actionType === "user-message") {
-          const message = asString(action.message)?.trim() ?? "";
+          let message = asString(action.message)?.trim() ?? "";
+          if (!message && audioFile) {
+            message = await transcribeAudioSnippet(audioFile);
+          }
+
           if (!message) {
-            return json({ error: "action.message is required" }, 400);
+            return json({ error: "action.message or audio is required" }, 400);
           }
 
           if (session.pendingApprovals.size > 0) {
@@ -1254,6 +1381,7 @@ const server = Bun.serve({
           return json({
             status: loopResult.status,
             events: loopResult.events,
+            resolvedUserMessage: message,
           });
         }
 
