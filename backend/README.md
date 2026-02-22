@@ -61,7 +61,7 @@ Copy `.env.example` to `.env` and set:
 - `DATABASE_URL`
 - `MFP_AUTHORIZATION`
 - `OPENROUTER_API_KEY`
-- `FAL_KEY`
+- `GROQ_API_KEY`
 
 Optional:
 

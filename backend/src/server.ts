@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import Replicate from "replicate";
+import { buildRecentLogContextPrompt, parseRecentLogHints } from "./ai-log-context";
 import { config } from "./config";
 import { db } from "./db";
 import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
@@ -1114,8 +1114,8 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
 }
 
 async function transcribeAudioSnippet(audioFile: File): Promise<string> {
-  if (!config.replicateApiToken) {
-    throw new Error("REPLICATE_API_TOKEN is not configured on the backend.");
+  if (!config.groqApiKey) {
+    throw new Error("GROQ_API_KEY is not configured on the backend.");
   }
 
   if (audioFile.size <= 0) {
@@ -1126,37 +1126,57 @@ async function transcribeAudioSnippet(audioFile: File): Promise<string> {
     throw new Error("Audio snippet is too large (max 12 MB).");
   }
 
-  const replicate = new Replicate({ auth: config.replicateApiToken });
-
-  const arrayBuffer = await audioFile.arrayBuffer();
-  const mimeType = audioFile.type || "audio/m4a";
-  const base64 = Buffer.from(arrayBuffer).toString("base64");
-  const dataUri = `data:${mimeType};base64,${base64}`;
-  const parakeetVersion =
-    "dmtanner/parakeet-tdt-0.6b-v3:74e605e7e05d1a7f52a5a7bb5d741a8b5a087309bee88ebdd249f63835f8a90d";
+  const guessedExtension = (audioFile.type || "audio/m4a").split("/").at(1) ?? "m4a";
+  const fileName = audioFile.name?.trim() || `voice.${guessedExtension}`;
+  const formData = new FormData();
+  formData.set("model", "whisper-large-v3-turbo");
+  formData.set("response_format", "json");
+  formData.set("temperature", "0");
+  formData.set("file", audioFile, fileName);
 
   try {
-    const output = await replicate.run(parakeetVersion, {
-      input: {
-        audio_file: dataUri,
+    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.groqApiKey}`,
       },
+      body: formData,
     });
 
-    const raw = typeof output === "string" ? output : JSON.stringify(output);
-    const parsed = typeof output === "string" ? JSON.parse(output) : output;
-    const transcript = (typeof parsed === "object" && parsed !== null && "text" in parsed
-      ? String((parsed as Record<string, unknown>).text)
-      : raw
-    ).trim();
+    const rawBody = await response.text();
+
+    if (!response.ok) {
+      let errorMessage = rawBody;
+      try {
+        const parsedError = JSON.parse(rawBody) as { error?: { message?: unknown } };
+        if (typeof parsedError.error?.message === "string" && parsedError.error.message.trim()) {
+          errorMessage = parsedError.error.message;
+        }
+      } catch {
+        // Keep raw text fallback if Groq returns non-JSON.
+      }
+
+      throw new Error(`Groq returned ${response.status}: ${errorMessage}`);
+    }
+
+    let transcript = rawBody.trim();
+    try {
+      const parsed = JSON.parse(rawBody) as { text?: unknown };
+      if (typeof parsed.text === "string") {
+        transcript = parsed.text.trim();
+      }
+    } catch {
+      // Keep plain text response fallback.
+    }
 
     if (!transcript) {
-      throw new Error("Replicate parakeet returned an empty transcription.");
+      throw new Error("Groq returned an empty transcription.");
     }
 
     return transcript;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Replicate parakeet request failed: ${message}`);
+    throw new Error(`Groq transcription request failed: ${message}`);
   }
 }
 
@@ -1225,6 +1245,7 @@ const server = Bun.serve({
       }
 
       pruneOldAiSessions();
+      const recentLogContextPrompt = buildRecentLogContextPrompt(parseRecentLogHints(body?.recentLogs));
 
       const sessionId = crypto.randomUUID();
       const now = Date.now();
@@ -1236,6 +1257,14 @@ const server = Bun.serve({
             role: "system",
             content: systemPrompt,
           },
+          ...(recentLogContextPrompt
+            ? [
+                {
+                  role: "system" as const,
+                  content: recentLogContextPrompt,
+                },
+              ]
+            : []),
         ],
         searchResultCounter: 1,
         searchResultsByLocalId: new Map<string, SearchResultFood>(),
