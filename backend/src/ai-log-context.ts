@@ -9,6 +9,7 @@ export type RecentLogHint = {
 
 const maxRecentLogHints = 120;
 const maxDisplayHints = 40;
+const maxTranscriptionHints = 8;
 
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -105,4 +106,34 @@ export function buildRecentLogContextPrompt(hints: RecentLogHint[]): string | nu
     "If a phrase likely contains multiple foods, split it and search each likely item.",
     ...lines,
   ].join("\n");
+}
+
+export function buildRecentLogTranscriptionPrompt(hints: RecentLogHint[]): string | null {
+  if (hints.length === 0) {
+    return null;
+  }
+
+  const recentItems = hints
+    .slice(0, maxTranscriptionHints)
+    .map((hint) => {
+      const name = hint.foodName.trim();
+      if (!name) {
+        return null;
+      }
+
+      return hint.brand ? `${hint.brand} ${name}` : name;
+    })
+    .filter((item): item is string => Boolean(item));
+
+  if (recentItems.length === 0) {
+    return null;
+  }
+
+  return [
+    "Food logging voice note.",
+    "Prefer intended commands and product names over noisy ASR.",
+    "Preserve brand names when possible.",
+    "Likely phrases: log banana; whey protein cookies and cream.",
+    `Recent food names: ${recentItems.join("; ")}.`,
+  ].join(" ");
 }

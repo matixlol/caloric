@@ -138,6 +138,28 @@ type AudioUpload = {
   fileName: string;
 };
 
+type RecentLogHintPayload = {
+  foodName: string;
+  meal?: string;
+  brand?: string;
+  serving?: string;
+  createdAt?: number;
+  dateKey?: string;
+};
+
+type MaybeLoadedLogEntry = {
+  $isLoaded?: boolean;
+  foodName?: string;
+  meal?: string;
+  brand?: string;
+  serving?: string;
+  createdAt?: number;
+  dateKey?: string;
+};
+
+const recentLogWindowMs = 3 * 24 * 60 * 60 * 1000;
+const maxRecentLogHints = 80;
+
 const createMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
 function cloneNutrition(nutrition: SearchResultFood["nutrition"]) {
@@ -173,6 +195,64 @@ function getErrorMessage(error: unknown): string {
   return "Something went wrong while talking to the backend AI service.";
 }
 
+class UIError extends Error {
+  details?: string;
+
+  constructor(message: string, details?: string) {
+    super(message);
+    this.name = "UIError";
+    this.details = details?.trim() || undefined;
+  }
+}
+
+function getErrorDetails(error: unknown): string | null {
+  if (error instanceof UIError && error.details) {
+    return error.details;
+  }
+
+  if (error instanceof Error) {
+    return error.stack?.trim() || error.message.trim() || null;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error.trim();
+  }
+
+  return null;
+}
+
+function buildErrorDetails(options: {
+  method: string;
+  url: string;
+  status?: number;
+  payload?: unknown;
+  underlyingError?: unknown;
+}): string {
+  const lines = [`${options.method} ${options.url}`];
+
+  if (typeof options.status === "number") {
+    lines.push(`status: ${options.status}`);
+  }
+
+  if (options.payload !== undefined) {
+    if (typeof options.payload === "string") {
+      lines.push(`payload: ${options.payload}`);
+    } else {
+      try {
+        lines.push(`payload: ${JSON.stringify(options.payload)}`);
+      } catch {
+        lines.push("payload: [unserializable]");
+      }
+    }
+  }
+
+  if (options.underlyingError instanceof Error && options.underlyingError.message.trim()) {
+    lines.push(`cause: ${options.underlyingError.message.trim()}`);
+  }
+
+  return lines.join("\n");
+}
+
 function inferAudioMeta(uri: string): Pick<AudioUpload, "mimeType" | "fileName"> {
   const extension = uri.match(/\.([a-z0-9]+)(?:\?|$)/i)?.[1]?.toLowerCase();
 
@@ -195,6 +275,48 @@ function inferAudioMeta(uri: string): Pick<AudioUpload, "mimeType" | "fileName">
   };
 }
 
+function buildRecentLogHints(logs: unknown, now = Date.now()): RecentLogHintPayload[] {
+  if (!logs || typeof (logs as { forEach?: unknown }).forEach !== "function") {
+    return [];
+  }
+
+  const cutoff = now - recentLogWindowMs;
+  const output: RecentLogHintPayload[] = [];
+  const rows = logs as { forEach: (callback: (entry: MaybeLoadedLogEntry) => void) => void };
+
+  rows.forEach((entry) => {
+    if (output.length >= maxRecentLogHints) {
+      return;
+    }
+
+    if (!entry || entry.$isLoaded === false) {
+      return;
+    }
+
+    const foodName = typeof entry.foodName === "string" ? entry.foodName.trim() : "";
+    if (!foodName) {
+      return;
+    }
+
+    const createdAt = Number.isFinite(entry.createdAt) ? Number(entry.createdAt) : undefined;
+    if (createdAt !== undefined && createdAt < cutoff) {
+      return;
+    }
+
+    output.push({
+      foodName,
+      meal: typeof entry.meal === "string" ? entry.meal.trim() : undefined,
+      brand: typeof entry.brand === "string" ? entry.brand.trim() : undefined,
+      serving: typeof entry.serving === "string" ? entry.serving.trim() : undefined,
+      createdAt,
+      dateKey: typeof entry.dateKey === "string" ? entry.dateKey.trim() : undefined,
+    });
+  });
+
+  output.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
+  return output;
+}
+
 export default function AILogScreen() {
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
@@ -206,6 +328,7 @@ export default function AILogScreen() {
   const [messages, setMessages] = useState<UIMessage[]>([]);
   const [status, setStatus] = useState<ChatStatus>("ready");
   const [error, setError] = useState<string | null>(null);
+  const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
@@ -239,18 +362,44 @@ export default function AILogScreen() {
     });
   };
 
+  const clearError = () => {
+    setError(null);
+    setErrorDetails(null);
+  };
+
+  const showError = (nextError: unknown) => {
+    setError(getErrorMessage(nextError));
+    setErrorDetails(getErrorDetails(nextError));
+  };
+
   const ensureSessionId = async (currentUserId: string): Promise<string> => {
     if (sessionIdRef.current) {
       return sessionIdRef.current;
     }
 
-    const response = await fetch(`${BACKEND_BASE_URL}/ai/session`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ userId: currentUserId }),
-    });
+    const sessionUrl = `${BACKEND_BASE_URL}/ai/session`;
+    let response: Response;
+    try {
+      response = await fetch(sessionUrl, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          userId: currentUserId,
+          recentLogs: buildRecentLogHints(me.root.logs),
+        }),
+      });
+    } catch (networkError) {
+      throw new UIError(
+        "Could not reach backend to start AI session.",
+        buildErrorDetails({
+          method: "POST",
+          url: sessionUrl,
+          underlyingError: networkError,
+        }),
+      );
+    }
 
     const payload = (await response.json().catch(() => null)) as
       | {
@@ -264,7 +413,15 @@ export default function AILogScreen() {
         typeof payload?.error === "string"
           ? payload.error
           : `Could not start AI session (${response.status}).`;
-      throw new Error(message);
+      throw new UIError(
+        message,
+        buildErrorDetails({
+          method: "POST",
+          url: sessionUrl,
+          status: response.status,
+          payload,
+        }),
+      );
     }
 
     const sessionId =
@@ -273,7 +430,15 @@ export default function AILogScreen() {
         : "";
 
     if (!sessionId) {
-      throw new Error("Backend did not return a valid AI session id.");
+      throw new UIError(
+        "Backend did not return a valid AI session id.",
+        buildErrorDetails({
+          method: "POST",
+          url: sessionUrl,
+          status: response.status,
+          payload,
+        }),
+      );
     }
 
     sessionIdRef.current = sessionId;
@@ -320,15 +485,28 @@ export default function AILogScreen() {
           action,
         });
 
-    const response = await fetch(`${BACKEND_BASE_URL}/ai/turn`, {
-      method: "POST",
-      headers: usingAudio
-        ? undefined
-        : {
-            "Content-Type": "application/json",
-          },
-      body,
-    });
+    const turnUrl = `${BACKEND_BASE_URL}/ai/turn`;
+    let response: Response;
+    try {
+      response = await fetch(turnUrl, {
+        method: "POST",
+        headers: usingAudio
+          ? undefined
+          : {
+              "Content-Type": "application/json",
+            },
+        body,
+      });
+    } catch (networkError) {
+      throw new UIError(
+        "Could not reach backend AI endpoint.",
+        buildErrorDetails({
+          method: "POST",
+          url: turnUrl,
+          underlyingError: networkError,
+        }),
+      );
+    }
 
     const payload = (await response.json().catch(() => null)) as
       | {
@@ -352,7 +530,15 @@ export default function AILogScreen() {
           : typeof payload?.error === "string"
             ? payload.error
             : `AI request failed (${response.status}).`;
-      throw new Error(backendMessage);
+      throw new UIError(
+        backendMessage,
+        buildErrorDetails({
+          method: "POST",
+          url: turnUrl,
+          status: response.status,
+          payload,
+        }),
+      );
     }
 
     const nextStatus =
@@ -437,6 +623,7 @@ export default function AILogScreen() {
 
     if (!userId) {
       setError("Missing authenticated user id. Sign in again and retry.");
+      setErrorDetails(null);
       return;
     }
 
@@ -463,7 +650,7 @@ export default function AILogScreen() {
       applyAgentEvents(result.events);
       nextStatus = result.status;
     } catch (loopError) {
-      setError(getErrorMessage(loopError));
+      showError(loopError);
       nextStatus = pendingApprovalsRef.current.size > 0 ? "awaiting-approval" : "ready";
     } finally {
       loopRunningRef.current = false;
@@ -477,7 +664,7 @@ export default function AILogScreen() {
       return;
     }
 
-    setError(null);
+    clearError();
     setInput("");
 
     setMessages((current) => [
@@ -501,12 +688,13 @@ export default function AILogScreen() {
       return;
     }
 
-    setError(null);
+    clearError();
 
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
         setError("Microphone permission is required for voice input.");
+        setErrorDetails(null);
         return;
       }
 
@@ -520,7 +708,7 @@ export default function AILogScreen() {
       setIsRecording(true);
     } catch (recordingError) {
       setIsRecording(false);
-      setError(getErrorMessage(recordingError));
+      showError(recordingError);
     }
   };
 
@@ -554,7 +742,7 @@ export default function AILogScreen() {
         },
       );
     } catch (recordingError) {
-      setError(getErrorMessage(recordingError));
+      showError(recordingError);
     } finally {
       await setAudioModeAsync({
         allowsRecording: false,
@@ -620,7 +808,7 @@ export default function AILogScreen() {
       pendingApprovalsRef.current.set(toolCallId, nextSuggestions);
     }
 
-    setError(null);
+    clearError();
     await runAssistantAction({
       type: "approval",
       toolCallId,
@@ -806,7 +994,16 @@ export default function AILogScreen() {
           );
         })}
 
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
+        {error ? (
+          <View style={styles.errorCard}>
+            <Text style={styles.errorText}>{error}</Text>
+            {errorDetails ? (
+              <Text selectable style={styles.errorDetailsText}>
+                {errorDetails}
+              </Text>
+            ) : null}
+          </View>
+        ) : null}
       </ScrollView>
 
       <View style={[styles.composerContainer, { paddingBottom: insets.bottom + 10 }]}>
@@ -1044,11 +1241,21 @@ const styles = StyleSheet.create({
   },
   errorText: {
     marginTop: 6,
-    marginBottom: 4,
     paddingHorizontal: 4,
     fontSize: 13,
     lineHeight: 18,
     color: palette.error,
+  },
+  errorCard: {
+    marginBottom: 8,
+  },
+  errorDetailsText: {
+    marginTop: 4,
+    paddingHorizontal: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: palette.secondaryLabel,
+    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
   },
   composerContainer: {
     position: "absolute",

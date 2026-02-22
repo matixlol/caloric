@@ -1,5 +1,9 @@
 import { and, desc, eq } from "drizzle-orm";
-import { buildRecentLogContextPrompt, parseRecentLogHints } from "./ai-log-context";
+import {
+  buildRecentLogContextPrompt,
+  buildRecentLogTranscriptionPrompt,
+  parseRecentLogHints,
+} from "./ai-log-context";
 import { config } from "./config";
 import { db } from "./db";
 import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
@@ -154,6 +158,7 @@ type AgentSession = {
   id: string;
   userId: string;
   conversation: OpenRouterMessage[];
+  transcriptionPrompt: string | null;
   searchResultCounter: number;
   searchResultsByLocalId: Map<string, SearchResultFood>;
   pendingApprovals: Map<string, ResolvedApprovalSuggestion[]>;
@@ -1113,7 +1118,7 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
   };
 }
 
-async function transcribeAudioSnippet(audioFile: File): Promise<string> {
+async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): Promise<string> {
   if (!config.groqApiKey) {
     throw new Error("GROQ_API_KEY is not configured on the backend.");
   }
@@ -1132,6 +1137,9 @@ async function transcribeAudioSnippet(audioFile: File): Promise<string> {
   formData.set("model", "whisper-large-v3-turbo");
   formData.set("response_format", "json");
   formData.set("temperature", "0");
+  if (prompt && prompt.trim()) {
+    formData.set("prompt", prompt.trim());
+  }
   formData.set("file", audioFile, fileName);
 
   try {
@@ -1245,7 +1253,9 @@ const server = Bun.serve({
       }
 
       pruneOldAiSessions();
-      const recentLogContextPrompt = buildRecentLogContextPrompt(parseRecentLogHints(body?.recentLogs));
+      const recentLogHints = parseRecentLogHints(body?.recentLogs);
+      const recentLogContextPrompt = buildRecentLogContextPrompt(recentLogHints);
+      const transcriptionPrompt = buildRecentLogTranscriptionPrompt(recentLogHints);
 
       const sessionId = crypto.randomUUID();
       const now = Date.now();
@@ -1266,6 +1276,7 @@ const server = Bun.serve({
               ]
             : []),
         ],
+        transcriptionPrompt,
         searchResultCounter: 1,
         searchResultsByLocalId: new Map<string, SearchResultFood>(),
         pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
@@ -1362,7 +1373,7 @@ const server = Bun.serve({
         if (actionType === "user-message") {
           let message = asString(action.message)?.trim() ?? "";
           if (!message && audioFile) {
-            message = await transcribeAudioSnippet(audioFile);
+            message = await transcribeAudioSnippet(audioFile, session.transcriptionPrompt);
           }
 
           if (!message) {
