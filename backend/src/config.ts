@@ -22,7 +22,7 @@ export const config = {
   port: getNumberEnv("PORT", 8787),
   databaseUrl: getRequiredEnv("DATABASE_URL"),
   mfpAuthorization: getRequiredEnv("MFP_AUTHORIZATION"),
-  falKey: Bun.env.FAL_KEY,
+  replicateApiToken: Bun.env.REPLICATE_API_TOKEN,
   mfpBaseUrl: Bun.env.MFP_BASE_URL ?? "https://www.myfitnesspal.com",
   mfpCookie: Bun.env.MFP_COOKIE,
   detailConcurrency: Math.max(1, getNumberEnv("MFP_DETAIL_CONCURRENCY", 10)),

@@ -1,5 +1,5 @@
 import { and, desc, eq } from "drizzle-orm";
-import { fal } from "@fal-ai/client";
+import Replicate from "replicate";
 import { config } from "./config";
 import { db } from "./db";
 import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
@@ -1114,8 +1114,8 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
 }
 
 async function transcribeAudioSnippet(audioFile: File): Promise<string> {
-  if (!config.falKey) {
-    throw new Error("FAL_KEY is not configured on the backend.");
+  if (!config.replicateApiToken) {
+    throw new Error("REPLICATE_API_TOKEN is not configured on the backend.");
   }
 
   if (audioFile.size <= 0) {
@@ -1126,31 +1126,35 @@ async function transcribeAudioSnippet(audioFile: File): Promise<string> {
     throw new Error("Audio snippet is too large (max 12 MB).");
   }
 
-  fal.config({
-    credentials: config.falKey,
-  });
+  const replicate = new Replicate({ auth: config.replicateApiToken });
 
-  const requestFile = new File([audioFile], audioFile.name || `voice-${Date.now()}.m4a`, {
-    type: audioFile.type || "audio/m4a",
-  });
+  const arrayBuffer = await audioFile.arrayBuffer();
+  const mimeType = audioFile.type || "audio/m4a";
+  const base64 = Buffer.from(arrayBuffer).toString("base64");
+  const dataUri = `data:${mimeType};base64,${base64}`;
 
   try {
-    const result = await fal.subscribe("fal-ai/wizper", {
+    const output = await replicate.run("dmtanner/parakeet-tdt-0.6b-v3", {
       input: {
-        audio_url: requestFile,
-        task: "transcribe",
+        audio_file: dataUri,
       },
     });
 
-    const transcript = asString(asRecord(result.data)?.text)?.trim() ?? "";
+    const raw = typeof output === "string" ? output : JSON.stringify(output);
+    const parsed = typeof output === "string" ? JSON.parse(output) : output;
+    const transcript = (typeof parsed === "object" && parsed !== null && "text" in parsed
+      ? String((parsed as Record<string, unknown>).text)
+      : raw
+    ).trim();
+
     if (!transcript) {
-      throw new Error("fal.ai wizper returned an empty transcription.");
+      throw new Error("Replicate parakeet returned an empty transcription.");
     }
 
     return transcript;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`fal.ai wizper request failed: ${message}`);
+    throw new Error(`Replicate parakeet request failed: ${message}`);
   }
 }
 
