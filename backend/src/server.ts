@@ -1132,9 +1132,11 @@ async function transcribeAudioSnippet(audioFile: File): Promise<string> {
   const mimeType = audioFile.type || "audio/m4a";
   const base64 = Buffer.from(arrayBuffer).toString("base64");
   const dataUri = `data:${mimeType};base64,${base64}`;
+  const parakeetVersion =
+    "dmtanner/parakeet-tdt-0.6b-v3:74e605e7e05d1a7f52a5a7bb5d741a8b5a087309bee88ebdd249f63835f8a90d";
 
   try {
-    const output = await replicate.run("dmtanner/parakeet-tdt-0.6b-v3", {
+    const output = await replicate.run(parakeetVersion, {
       input: {
         audio_file: dataUri,
       },
