@@ -1,10 +1,10 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useAccount } from "jazz-tools/expo";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  FlatList,
   type LayoutChangeEvent,
-  PanResponder,
   Platform,
   PlatformColor,
   Pressable,
@@ -13,6 +13,7 @@ import {
   View,
 } from "react-native";
 import DraggableFlatList, { type RenderItemParams } from "react-native-draggable-flatlist";
+import PagerView, { type PagerViewOnPageSelectedEvent } from "react-native-pager-view";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
@@ -48,7 +49,6 @@ const DEFAULT_FAT_PCT = 20;
 const HEADER_HEIGHT_ESTIMATE = 74;
 const ENTRY_HEIGHT_ESTIMATE = 54;
 const EMPTY_HEIGHT_ESTIMATE = 60;
-const DAY_NAV_SWIPE_THRESHOLD = 36;
 
 const DATE_TITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   month: "short",
@@ -377,31 +377,34 @@ export default function HomeScreen() {
     return isLastByKey;
   }, [dragItems]);
 
-  const goToPreviousDay = useCallback(() => {
+  const goToOlderDay = useCallback(() => {
     setDayOffset((current) => current - 1);
   }, []);
 
-  const goToNextDay = useCallback(() => {
+  const goToNewerDay = useCallback(() => {
     setDayOffset((current) => Math.min(current + 1, 0));
   }, []);
 
-  const dayHandlePanResponder = useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponder: (_, gesture) =>
-          Math.abs(gesture.dx) > 8 && Math.abs(gesture.dx) > Math.abs(gesture.dy),
-        onPanResponderRelease: (_, gesture) => {
-          if (gesture.dx <= -DAY_NAV_SWIPE_THRESHOLD) {
-            goToPreviousDay();
-            return;
-          }
+  const pagerRef = useRef<PagerView>(null);
 
-          if (gesture.dx >= DAY_NAV_SWIPE_THRESHOLD) {
-            goToNextDay();
-          }
-        },
-      }),
-    [goToNextDay, goToPreviousDay],
+  const handlePagerPageSelected = useCallback(
+    (event: PagerViewOnPageSelectedEvent) => {
+      const nextPage = event.nativeEvent.position;
+      if (nextPage === 1) {
+        return;
+      }
+
+      if (nextPage === 0) {
+        goToOlderDay();
+      } else {
+        goToNewerDay();
+      }
+
+      requestAnimationFrame(() => {
+        pagerRef.current?.setPageWithoutAnimation(1);
+      });
+    },
+    [goToNewerDay, goToOlderDay],
   );
 
   if (!me.$isLoaded) {
@@ -444,6 +447,74 @@ export default function HomeScreen() {
   const proteinProgress = clampPercent((protein / Math.max(proteinGoal, 1)) * 100);
   const carbsProgress = clampPercent((carbs / Math.max(carbsGoal, 1)) * 100);
   const fatProgress = clampPercent((fat / Math.max(fatGoal, 1)) * 100);
+
+  const buildDayPreview = (targetDayOffset: number) => {
+    const targetDateKey = shiftLocalDateKey(todayDateKey, targetDayOffset);
+    const targetDate = parseLocalDateKey(targetDateKey);
+    const targetTitle = formatDayTitle(targetDayOffset, targetDate);
+    const targetSubtitle = targetDate ? DATE_SUBTITLE_FORMATTER.format(targetDate) : targetDateKey;
+
+    const targetLogs = allLogs.filter(
+      (entry) => normalizeLocalDateKey(entry.dateKey, entry.createdAt) === targetDateKey,
+    );
+
+    const grouped: Record<MealKey, MealEntry[]> = {
+      breakfast: [],
+      lunch: [],
+      dinner: [],
+      snacks: [],
+    };
+
+    targetLogs.forEach((entry) => {
+      const meal = normalizeMeal(entry.meal);
+      if (!meal) return;
+
+      const portion = sanitizePortion(entry.portion);
+
+      grouped[meal].push({
+        id: entry.$jazz.id,
+        name: entry.foodName,
+        meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
+        calories: (entry.nutrition?.calories ?? 0) * portion,
+      });
+    });
+
+    const targetCalories = targetLogs.reduce(
+      (sum, entry) => sum + (entry.nutrition?.calories ?? 0) * sanitizePortion(entry.portion),
+      0,
+    );
+    const targetProtein = targetLogs.reduce(
+      (sum, entry) => sum + (entry.nutrition?.protein ?? 0) * sanitizePortion(entry.portion),
+      0,
+    );
+    const targetCarbs = targetLogs.reduce(
+      (sum, entry) => sum + (entry.nutrition?.carbs ?? 0) * sanitizePortion(entry.portion),
+      0,
+    );
+    const targetFat = targetLogs.reduce(
+      (sum, entry) => sum + (entry.nutrition?.fat ?? 0) * sanitizePortion(entry.portion),
+      0,
+    );
+
+    return {
+      dayOffset: targetDayOffset,
+      selectedDateKey: targetDateKey,
+      dayTitle: targetTitle,
+      daySubtitle: targetSubtitle,
+      logsByMeal: grouped,
+      calories: targetCalories,
+      protein: targetProtein,
+      carbs: targetCarbs,
+      fat: targetFat,
+      calorieProgress: clampPercent((targetCalories / goal) * 100),
+      proteinProgress: clampPercent((targetProtein / Math.max(proteinGoal, 1)) * 100),
+      carbsProgress: clampPercent((targetCarbs / Math.max(carbsGoal, 1)) * 100),
+      fatProgress: clampPercent((targetFat / Math.max(fatGoal, 1)) * 100),
+    };
+  };
+
+  const olderPreview = buildDayPreview(dayOffset - 1);
+  const newerPreview = buildDayPreview(Math.min(dayOffset + 1, 0));
 
   const recordItemHeight = (itemKey: string, event: LayoutChangeEvent) => {
     const next = event.nativeEvent.layout.height;
@@ -571,70 +642,71 @@ export default function HomeScreen() {
   };
 
   const listHeader = (
-    <View style={styles.listHeader}>
-      <View
-        accessibilityLabel="Swipe horizontally to move between days"
-        style={styles.dayTitleRow}
-        {...dayHandlePanResponder.panHandlers}
-      >
-        <View style={styles.dayTitleMain}>
-          <Text style={styles.largeTitle}>{dayTitle}</Text>
-          <Text style={styles.daySubtitle}>{daySubtitle}</Text>
-        </View>
-      </View>
-
-      {dayOffset !== 0 ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel="Back to today"
-          onPress={() => setDayOffset(0)}
-          style={styles.backToTodayButton}
-        >
-          <Text style={styles.backToTodayText}>Back to today</Text>
-        </Pressable>
-      ) : null}
-
-      <View style={styles.summaryCard}>
-        <Text style={styles.summaryLabel}>Calories</Text>
-        <View style={styles.summaryValueRow}>
-          <Text style={styles.summaryValue}>{formatCalories(caloriesConsumed)}</Text>
-          <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
-        </View>
-        <View style={styles.progressTrack}>
-          <View style={[styles.progressFill, { width: `${calorieProgress}%` }]} />
-        </View>
-        <View style={styles.summaryDivider} />
-        <View style={styles.macroColumns}>
-          <View style={styles.macroColumn}>
-            <Text style={styles.macroLabel}>Protein</Text>
-            <Text style={styles.macroValue}>
-              {formatGrams(protein)}
-              <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
-            </Text>
-            <View style={styles.macroTrack}>
-              <View style={[styles.macroFill, { width: `${proteinProgress}%` }]} />
-            </View>
+    <View
+      accessibilityLabel="Swipe horizontally to move between days"
+      style={styles.listHeaderOuter}
+    >
+      <View style={styles.listHeader}>
+        <View style={styles.dayTitleRow}>
+          <View style={styles.dayTitleMain}>
+            <Text style={styles.largeTitle}>{dayTitle}</Text>
+            <Text style={styles.daySubtitle}>{daySubtitle}</Text>
           </View>
+        </View>
 
-          <View style={[styles.macroColumn, styles.macroColumnDivider]}>
-            <Text style={styles.macroLabel}>Carbs</Text>
-            <Text style={styles.macroValue}>
-              {formatGrams(carbs)}
-              <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
-            </Text>
-            <View style={styles.macroTrack}>
-              <View style={[styles.macroFill, { width: `${carbsProgress}%` }]} />
-            </View>
+        {dayOffset !== 0 ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Back to today"
+            onPress={() => setDayOffset(0)}
+            style={styles.backToTodayButton}
+          >
+            <Text style={styles.backToTodayText}>Back to today</Text>
+          </Pressable>
+        ) : null}
+
+        <View style={styles.summaryCard}>
+          <Text style={styles.summaryLabel}>Calories</Text>
+          <View style={styles.summaryValueRow}>
+            <Text style={styles.summaryValue}>{formatCalories(caloriesConsumed)}</Text>
+            <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
           </View>
+          <View style={styles.progressTrack}>
+            <View style={[styles.progressFill, { width: `${calorieProgress}%` }]} />
+          </View>
+          <View style={styles.summaryDivider} />
+          <View style={styles.macroColumns}>
+            <View style={styles.macroColumn}>
+              <Text style={styles.macroLabel}>Protein</Text>
+              <Text style={styles.macroValue}>
+                {formatGrams(protein)}
+                <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
+              </Text>
+              <View style={styles.macroTrack}>
+                <View style={[styles.macroFill, { width: `${proteinProgress}%` }]} />
+              </View>
+            </View>
 
-          <View style={[styles.macroColumn, styles.macroColumnDivider]}>
-            <Text style={styles.macroLabel}>Fat</Text>
-            <Text style={styles.macroValue}>
-              {formatGrams(fat)}
-              <Text style={styles.macroGoal}> / {fatGoal}g</Text>
-            </Text>
-            <View style={styles.macroTrack}>
-              <View style={[styles.macroFill, { width: `${fatProgress}%` }]} />
+            <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+              <Text style={styles.macroLabel}>Carbs</Text>
+              <Text style={styles.macroValue}>
+                {formatGrams(carbs)}
+                <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
+              </Text>
+              <View style={styles.macroTrack}>
+                <View style={[styles.macroFill, { width: `${carbsProgress}%` }]} />
+              </View>
+            </View>
+
+            <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+              <Text style={styles.macroLabel}>Fat</Text>
+              <Text style={styles.macroValue}>
+                {formatGrams(fat)}
+                <Text style={styles.macroGoal}> / {fatGoal}g</Text>
+              </Text>
+              <View style={styles.macroTrack}>
+                <View style={[styles.macroFill, { width: `${fatProgress}%` }]} />
+              </View>
             </View>
           </View>
         </View>
@@ -714,14 +786,74 @@ export default function HomeScreen() {
     );
   };
 
-  return (
-    <View style={styles.screen}>
-      <DraggableFlatList
-        activationDistance={8}
-        autoscrollSpeed={120}
-        autoscrollThreshold={80}
-        containerStyle={styles.listContainer}
-        contentInsetAdjustmentBehavior="automatic"
+  const renderPreviewPage = (preview: ReturnType<typeof buildDayPreview>) => {
+    const previewHeader = (
+      <View style={styles.listHeaderOuter}>
+        <View style={styles.listHeader}>
+          <View style={styles.dayTitleRow}>
+            <View style={styles.dayTitleMain}>
+              <Text style={styles.largeTitle}>{preview.dayTitle}</Text>
+              <Text style={styles.daySubtitle}>{preview.daySubtitle}</Text>
+            </View>
+          </View>
+
+          {preview.dayOffset !== 0 ? (
+            <View style={styles.backToTodayButton}>
+              <Text style={styles.backToTodayText}>Back to today</Text>
+            </View>
+          ) : null}
+
+          <View style={styles.summaryCard}>
+            <Text style={styles.summaryLabel}>Calories</Text>
+            <View style={styles.summaryValueRow}>
+              <Text style={styles.summaryValue}>{formatCalories(preview.calories)}</Text>
+              <Text style={styles.summaryGoal}>/ {goal.toLocaleString()}</Text>
+            </View>
+            <View style={styles.progressTrack}>
+              <View style={[styles.progressFill, { width: `${preview.calorieProgress}%` }]} />
+            </View>
+            <View style={styles.summaryDivider} />
+            <View style={styles.macroColumns}>
+              <View style={styles.macroColumn}>
+                <Text style={styles.macroLabel}>Protein</Text>
+                <Text style={styles.macroValue}>
+                  {formatGrams(preview.protein)}
+                  <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
+                </Text>
+                <View style={styles.macroTrack}>
+                  <View style={[styles.macroFill, { width: `${preview.proteinProgress}%` }]} />
+                </View>
+              </View>
+
+              <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+                <Text style={styles.macroLabel}>Carbs</Text>
+                <Text style={styles.macroValue}>
+                  {formatGrams(preview.carbs)}
+                  <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
+                </Text>
+                <View style={styles.macroTrack}>
+                  <View style={[styles.macroFill, { width: `${preview.carbsProgress}%` }]} />
+                </View>
+              </View>
+
+              <View style={[styles.macroColumn, styles.macroColumnDivider]}>
+                <Text style={styles.macroLabel}>Fat</Text>
+                <Text style={styles.macroValue}>
+                  {formatGrams(preview.fat)}
+                  <Text style={styles.macroGoal}> / {fatGoal}g</Text>
+                </Text>
+                <View style={styles.macroTrack}>
+                  <View style={[styles.macroFill, { width: `${preview.fatProgress}%` }]} />
+                </View>
+              </View>
+            </View>
+          </View>
+        </View>
+      </View>
+    );
+
+    return (
+      <FlatList
         contentContainerStyle={[
           styles.contentContainer,
           {
@@ -729,15 +861,98 @@ export default function HomeScreen() {
             paddingBottom: insets.bottom + 24,
           },
         ]}
-        data={dragItems}
-        keyExtractor={(item) => item.key}
-        ListHeaderComponent={listHeader}
-        onDragEnd={({ data }) => {
-          setDragItems(data);
-          persistDraggedOrder(data);
+        data={MEAL_TIMES}
+        keyExtractor={(meal) => `preview-${preview.selectedDateKey}-${meal.key}`}
+        ListHeaderComponent={previewHeader}
+        renderItem={({ item: meal, index }) => {
+          const entries = preview.logsByMeal[meal.key];
+          const mealCalories = entries.reduce((sum, entry) => sum + entry.calories, 0);
+
+          return (
+            <View style={styles.previewMealSection}>
+              <View style={[styles.mealHeaderCard, index > 0 && styles.mealHeaderCardSpaced]}>
+                <View style={styles.mealHeader}>
+                  <View>
+                    <Text style={styles.previewMealTitle}>{meal.label}</Text>
+                    <View style={styles.mealCaloriesRow}>
+                      <Text style={styles.mealCalories}>{formatCalories(mealCalories)}</Text>
+                      <Text style={styles.mealCaloriesUnit}>kcal</Text>
+                    </View>
+                  </View>
+                </View>
+              </View>
+
+              {entries.length === 0 ? (
+                <View style={[styles.mealBodyCard, styles.mealBodyCardLast]}>
+                  <Text style={styles.emptyText}>{meal.emptyCopy}</Text>
+                </View>
+              ) : (
+                entries.map((entry, entryIndex) => {
+                  const isLast = entryIndex === entries.length - 1;
+
+                  return (
+                    <View key={`preview-entry-${entry.id}`} style={[styles.mealBodyCard, isLast && styles.mealBodyCardLast]}>
+                      <View style={[styles.rowPressable, !isLast && styles.rowWithDivider]}>
+                        <View style={styles.row}>
+                          <View style={styles.rowMain}>
+                            <Text style={styles.rowTitle}>{entry.name}</Text>
+                            {entry.meta ? <Text style={styles.rowSubtitle}>{entry.meta}</Text> : null}
+                          </View>
+                          <Text style={styles.rowValue}>{formatCalories(entry.calories)}</Text>
+                        </View>
+                      </View>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+          );
         }}
-        renderItem={renderItem}
       />
+    );
+  };
+
+  return (
+    <View style={styles.screen}>
+      <PagerView
+        initialPage={1}
+        onPageSelected={handlePagerPageSelected}
+        ref={pagerRef}
+        style={styles.pager}
+      >
+        <View key="older" style={styles.pagerPage}>
+          {renderPreviewPage(olderPreview)}
+        </View>
+
+        <View key="current" style={styles.pagerPage}>
+          <DraggableFlatList
+            activationDistance={8}
+            autoscrollSpeed={120}
+            autoscrollThreshold={80}
+            containerStyle={styles.listContainer}
+            contentInsetAdjustmentBehavior="automatic"
+            contentContainerStyle={[
+              styles.contentContainer,
+              {
+                paddingTop: insets.top,
+                paddingBottom: insets.bottom + 24,
+              },
+            ]}
+            data={dragItems}
+            keyExtractor={(item) => item.key}
+            ListHeaderComponent={listHeader}
+            onDragEnd={({ data }) => {
+              setDragItems(data);
+              persistDraggedOrder(data);
+            }}
+            renderItem={renderItem}
+          />
+        </View>
+
+        <View key="newer" style={styles.pagerPage}>
+          {renderPreviewPage(newerPreview)}
+        </View>
+      </PagerView>
     </View>
   );
 }
@@ -751,12 +966,33 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
+  pager: {
+    flex: 1,
+  },
+  pagerPage: {
+    flex: 1,
+  },
   contentContainer: {
     paddingHorizontal: 16,
   },
+  listHeaderOuter: {
+    overflow: "hidden",
+    marginBottom: 10,
+  },
   listHeader: {
     gap: 8,
-    marginBottom: 10,
+  },
+  previewMealSection: {
+    marginBottom: 2,
+  },
+  previewMealTitle: {
+    fontSize: 12,
+    lineHeight: 16,
+    letterSpacing: 0.6,
+    fontWeight: "700",
+    color: palette.secondaryLabel,
+    textTransform: "uppercase",
+    marginBottom: 3,
   },
   dayTitleRow: {
     minHeight: 52,
