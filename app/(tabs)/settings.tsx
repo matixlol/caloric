@@ -257,6 +257,10 @@ export default function SettingsScreen() {
   const fatPct = 100 - macroSplitB;
 
   const parsedGoal = parseWholeNumber(goalInput);
+  const macroGoalBase = parsedGoal ?? loadedGoal;
+  const proteinGoal = Math.round((macroGoalBase * (proteinPct / 100)) / 4);
+  const carbsGoal = Math.round((macroGoalBase * (carbsPct / 100)) / 4);
+  const fatGoal = Math.round((macroGoalBase * (fatPct / 100)) / 9);
 
   let goalValidationError: string | null = null;
 
@@ -382,15 +386,15 @@ export default function SettingsScreen() {
           <View style={styles.macroLegendRow}>
             <View style={styles.macroLegendItem}>
               <View style={[styles.macroLegendDot, { backgroundColor: palette.macroProtein }]} />
-              <Text style={styles.macroLegendText}>Protein {proteinPct}%</Text>
+              <Text style={styles.macroLegendText}>Protein {proteinGoal}g</Text>
             </View>
             <View style={styles.macroLegendItem}>
               <View style={[styles.macroLegendDot, { backgroundColor: palette.macroCarbs }]} />
-              <Text style={styles.macroLegendText}>Carbs {carbsPct}%</Text>
+              <Text style={styles.macroLegendText}>Carbs {carbsGoal}g</Text>
             </View>
             <View style={styles.macroLegendItem}>
               <View style={[styles.macroLegendDot, { backgroundColor: palette.macroFat }]} />
-              <Text style={styles.macroLegendText}>Fat {fatPct}%</Text>
+              <Text style={styles.macroLegendText}>Fat {fatGoal}g</Text>
             </View>
           </View>
 
@@ -401,21 +405,33 @@ export default function SettingsScreen() {
             }}
           >
             <View style={styles.macroSliderTrack}>
-              <View style={[styles.macroSection, styles.macroProteinSection, { width: `${proteinPct}%` }]} />
+              <View style={[styles.macroSection, styles.macroProteinSection, { width: `${proteinPct}%` }]}>
+                <Text style={[styles.macroSectionPctText, styles.macroSectionPctTextLight]}>
+                  {proteinPct}%
+                </Text>
+              </View>
               <View
                 style={[
                   styles.macroSection,
                   styles.macroCarbsSection,
                   { left: `${proteinPct}%`, width: `${carbsPct}%` },
                 ]}
-              />
+              >
+                <Text style={[styles.macroSectionPctText, styles.macroSectionPctTextDark]}>
+                  {carbsPct}%
+                </Text>
+              </View>
               <View
                 style={[
                   styles.macroSection,
                   styles.macroFatSection,
                   { left: `${proteinPct + carbsPct}%`, width: `${fatPct}%` },
                 ]}
-              />
+              >
+                <Text style={[styles.macroSectionPctText, styles.macroSectionPctTextLight]}>
+                  {fatPct}%
+                </Text>
+              </View>
 
               <View pointerEvents="none" style={styles.macroDivisionOverlay}>
                 {Array.from({ length: MACRO_DIVISIONS - 1 }).map((_, index) => (
@@ -625,6 +641,9 @@ const styles = StyleSheet.create({
     position: "absolute",
     top: 0,
     bottom: 0,
+    alignItems: "center",
+    justifyContent: "center",
+    overflow: "hidden",
   },
   macroProteinSection: {
     left: 0,
@@ -639,6 +658,18 @@ const styles = StyleSheet.create({
     backgroundColor: palette.macroFat,
     borderTopRightRadius: 14,
     borderBottomRightRadius: 14,
+  },
+  macroSectionPctText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  macroSectionPctTextLight: {
+    color: "rgba(255,255,255,0.96)",
+  },
+  macroSectionPctTextDark: {
+    color: "rgba(17,24,39,0.9)",
   },
   macroDivisionOverlay: {
     ...StyleSheet.absoluteFillObject,
