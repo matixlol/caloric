@@ -1,19 +1,25 @@
 import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { useAppTheme } from "../../src/theme/useAppTheme";
 
 export default function TabsLayout() {
+  const { isDark, palette } = useAppTheme();
+
   return (
     <NativeTabs
-      blurEffect="systemChromeMaterial"
+      blurEffect={isDark ? "systemChromeMaterialDark" : "systemChromeMaterialLight"}
+      backgroundColor={palette.background}
       disableTransparentOnScrollEdge
       minimizeBehavior="onScrollDown"
+      tintColor={palette.label}
       iconColor={{
-        default: "#6B7280",
-        selected: "#111827",
+        default: palette.secondaryLabel,
+        selected: palette.label,
       }}
       labelStyle={{
-        default: { color: "#6B7280" },
-        selected: { color: "#111827" },
+        default: { color: palette.secondaryLabel },
+        selected: { color: palette.label },
       }}
+      shadowColor={palette.separator}
     >
       <NativeTabs.Trigger name="index">
         <NativeTabs.Trigger.Icon sf={{ default: "house", selected: "house.fill" }} md="home" />

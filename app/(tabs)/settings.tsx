@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaloricAccount } from "../../src/jazz/schema";
+import { useAppTheme } from "../../src/theme/useAppTheme";
 
 const DEFAULT_CALORIE_GOAL = 2500;
 const DEFAULT_PROTEIN_PCT = 30;
@@ -112,6 +113,7 @@ function FormRow({
 }
 
 export default function SettingsScreen() {
+  const { isDark, palette: themePalette } = useAppTheme();
   const insets = useSafeAreaInsets();
   const clerk = useClerk();
   const { user } = useUser();
@@ -473,11 +475,19 @@ export default function SettingsScreen() {
         </View>
       </ScrollView>
 
-      <View style={[styles.actionBarContainer, { paddingBottom: insets.bottom + 12 }]}>
+      <View
+        style={[
+          styles.actionBarContainer,
+          {
+            paddingBottom: insets.bottom + 12,
+            backgroundColor: themePalette.overlay,
+          },
+        ]}
+      >
         {canUseGlass ? (
           <GlassView
             glassEffectStyle="regular"
-            tintColor="rgba(255,255,255,0.2)"
+            tintColor={isDark ? "rgba(24,24,27,0.28)" : "rgba(255,255,255,0.2)"}
             style={StyleSheet.absoluteFillObject}
           />
         ) : null}
@@ -489,9 +499,21 @@ export default function SettingsScreen() {
           accessibilityRole="button"
           onPress={handleSave}
           disabled={!hasChanges}
-          style={[styles.saveButton, !hasChanges && styles.saveButtonDisabled]}
+          style={[
+            styles.saveButton,
+            !hasChanges && {
+              backgroundColor: themePalette.tintDisabled,
+            },
+          ]}
         >
-          <Text style={[styles.saveButtonText, !hasChanges && styles.saveButtonTextDisabled]}>
+          <Text
+            style={[
+              styles.saveButtonText,
+              !hasChanges && {
+                color: themePalette.buttonDisabledText,
+              },
+            ]}
+          >
             Save Changes
           </Text>
         </Pressable>

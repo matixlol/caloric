@@ -8,8 +8,6 @@ import {
 import { type ReactNode, useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
-  Platform,
-  PlatformColor,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -20,6 +18,7 @@ import {
 import { useAccount } from "jazz-tools/expo";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { CaloricAccount } from "../jazz/schema";
+import { type AppPalette, type AppTheme, useThemedStyles } from "../theme/useAppTheme";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -31,26 +30,126 @@ type AuthScreenProps = {
   title: string;
   subtitle: string;
   children: ReactNode;
+  styles: AuthStyles;
 };
 
 type AuthMode = "sign-in" | "sign-up";
 type VerificationMode = "none" | "sign-in" | "sign-up";
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
+function createStyles({ palette }: AppTheme) {
+  return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: palette.background,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.background,
+    },
+    authContentContainer: {
+      flexGrow: 1,
+      justifyContent: "center",
+      paddingHorizontal: 20,
+    },
+    authTitle: {
+      fontSize: 34,
+      lineHeight: 41,
+      fontWeight: "700",
+      color: palette.label,
+    },
+    authSubtitle: {
+      marginTop: 6,
+      marginBottom: 16,
+      fontSize: 16,
+      lineHeight: 22,
+      color: palette.secondaryLabel,
+    },
+    authCard: {
+      borderRadius: 16,
+      padding: 16,
+      backgroundColor: palette.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    formStack: {
+      gap: 12,
+    },
+    inputGroup: {
+      gap: 6,
+    },
+    inputLabel: {
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: "600",
+      color: palette.secondaryLabel,
+      textTransform: "uppercase",
+      letterSpacing: 0.5,
+    },
+    textInput: {
+      minHeight: 48,
+      borderRadius: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+      backgroundColor: palette.inputBackground,
+      paddingHorizontal: 12,
+      fontSize: 17,
+      color: palette.label,
+    },
+    errorText: {
+      marginTop: 12,
+      fontSize: 14,
+      lineHeight: 20,
+      color: palette.error,
+      fontWeight: "500",
+    },
+    infoText: {
+      marginTop: 12,
+      fontSize: 14,
+      lineHeight: 20,
+      color: palette.secondaryLabel,
+    },
+    actions: {
+      marginTop: 14,
+      gap: 10,
+    },
+    primaryButton: {
+      minHeight: 48,
+      borderRadius: 12,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.tint,
+    },
+    primaryButtonDisabled: {
+      backgroundColor: palette.tintDisabled,
+    },
+    primaryButtonText: {
+      fontSize: 17,
+      lineHeight: 22,
+      fontWeight: "600",
+      color: palette.buttonText,
+    },
+    primaryButtonTextDisabled: {
+      color: palette.buttonDisabledText,
+    },
+    tertiaryButton: {
+      minHeight: 42,
+      borderRadius: 10,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: "transparent",
+    },
+    tertiaryButtonText: {
+      fontSize: 15,
+      lineHeight: 20,
+      color: palette.tint,
+      fontWeight: "500",
+    },
+  });
+}
 
-const palette = {
-  background: iosColor("systemGroupedBackground", "#F3F4F6"),
-  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
-  label: iosColor("label", "#111827"),
-  secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
-  tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
-  separator: iosColor("separator", "#E5E7EB"),
-  tint: "#2563EB",
-  buttonDisabled: "#D1D5DB",
-  error: iosColor("systemRed", "#DC2626"),
-  white: "#FFFFFF",
-};
+type AuthStyles = ReturnType<typeof createStyles>;
 
 function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
@@ -75,7 +174,7 @@ function getAuthErrorMessage(error: unknown) {
   return "Authentication failed.";
 }
 
-function AuthScreen({ title, subtitle, children }: AuthScreenProps) {
+function AuthScreen({ title, subtitle, children, styles }: AuthScreenProps) {
   const insets = useSafeAreaInsets();
 
   return (
@@ -107,6 +206,9 @@ function LabeledInput({
   placeholder,
   secureTextEntry,
   keyboardType,
+  palette,
+  styles,
+  isDark,
 }: {
   label: string;
   value: string;
@@ -114,6 +216,9 @@ function LabeledInput({
   placeholder: string;
   secureTextEntry?: boolean;
   keyboardType?: "default" | "email-address" | "number-pad";
+  palette: AppPalette;
+  styles: AuthStyles;
+  isDark: boolean;
 }) {
   return (
     <View style={styles.inputGroup}>
@@ -127,12 +232,15 @@ function LabeledInput({
         secureTextEntry={secureTextEntry}
         autoCapitalize="none"
         keyboardType={keyboardType}
+        keyboardAppearance={isDark ? "dark" : "light"}
+        selectionColor={palette.tint}
       />
     </View>
   );
 }
 
 export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
+  const { palette, styles, isDark } = useThemedStyles(createStyles);
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
   const { user } = useUser();
   const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
@@ -363,6 +471,7 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
     return (
       <AuthScreen
+        styles={styles}
         title={showingVerification ? "Verify" : isSigningIn ? "Sign In" : "Sign Up"}
         subtitle={
           showingVerification
@@ -375,6 +484,9 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
         {!showingVerification ? (
           <View style={styles.formStack}>
             <LabeledInput
+              palette={palette}
+              styles={styles}
+              isDark={isDark}
               label="Email"
               value={emailInput}
               onChangeText={setEmailInput}
@@ -384,6 +496,9 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
           </View>
         ) : (
           <LabeledInput
+            palette={palette}
+            styles={styles}
+            isDark={isDark}
             label="Verification Code"
             value={codeInput}
             onChangeText={setCodeInput}
@@ -409,7 +524,12 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
             }
             style={[styles.primaryButton, isPrimaryDisabled && styles.primaryButtonDisabled]}
           >
-            <Text style={styles.primaryButtonText}>
+            <Text
+              style={[
+                styles.primaryButtonText,
+                isPrimaryDisabled && styles.primaryButtonTextDisabled,
+              ]}
+            >
               {showingVerification
                 ? "Verify Code"
                 : "Send Code"}
@@ -454,10 +574,14 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   if (!currentEmail) {
     return (
       <AuthScreen
+        styles={styles}
         title="Add Email"
         subtitle="Your account requires an email. This is stored on your public profile."
       >
         <LabeledInput
+          palette={palette}
+          styles={styles}
+          isDark={isDark}
           label="Email"
           value={emailInput}
           onChangeText={setEmailInput}
@@ -476,109 +600,3 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
 
   return <>{children}</>;
 }
-
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: palette.background,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.background,
-  },
-  authContentContainer: {
-    flexGrow: 1,
-    justifyContent: "center",
-    paddingHorizontal: 20,
-  },
-  authTitle: {
-    fontSize: 34,
-    lineHeight: 41,
-    fontWeight: "700",
-    color: palette.label,
-  },
-  authSubtitle: {
-    marginTop: 6,
-    marginBottom: 16,
-    fontSize: 16,
-    lineHeight: 22,
-    color: palette.secondaryLabel,
-  },
-  authCard: {
-    borderRadius: 16,
-    padding: 16,
-    backgroundColor: palette.card,
-  },
-  formStack: {
-    gap: 12,
-  },
-  inputGroup: {
-    gap: 6,
-  },
-  inputLabel: {
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: palette.secondaryLabel,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  textInput: {
-    minHeight: 48,
-    borderRadius: 10,
-    borderWidth: StyleSheet.hairlineWidth,
-    borderColor: palette.separator,
-    backgroundColor: palette.white,
-    paddingHorizontal: 12,
-    fontSize: 17,
-    color: palette.label,
-  },
-  errorText: {
-    marginTop: 12,
-    fontSize: 14,
-    lineHeight: 20,
-    color: palette.error,
-    fontWeight: "500",
-  },
-  infoText: {
-    marginTop: 12,
-    fontSize: 14,
-    lineHeight: 20,
-    color: palette.secondaryLabel,
-  },
-  actions: {
-    marginTop: 14,
-    gap: 10,
-  },
-  primaryButton: {
-    minHeight: 48,
-    borderRadius: 12,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.tint,
-  },
-  primaryButtonDisabled: {
-    backgroundColor: palette.buttonDisabled,
-  },
-  primaryButtonText: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    color: "#FFFFFF",
-  },
-  tertiaryButton: {
-    minHeight: 42,
-    borderRadius: 10,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: "transparent",
-  },
-  tertiaryButtonText: {
-    fontSize: 15,
-    lineHeight: 20,
-    color: palette.tint,
-    fontWeight: "500",
-  },
-});

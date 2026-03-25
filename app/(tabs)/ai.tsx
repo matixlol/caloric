@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import {
@@ -9,8 +9,9 @@ import {
 } from "expo-audio";
 import { useAccount } from "jazz-tools/expo";
 import {
+  Keyboard,
+  KeyboardAvoidingView,
   Platform,
-  PlatformColor,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -24,28 +25,11 @@ import { localDateKeyFromTimestamp } from "../../src/date";
 import { CaloricAccount } from "../../src/jazz/schema";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel } from "../../src/portion";
+import { type AppTheme, useThemedStyles } from "../../src/theme/useAppTheme";
 
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
   "https://backend.caloric.mati.lol";
-
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
-
-const palette = {
-  background: iosColor("systemGroupedBackground", "#F3F4F6"),
-  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
-  userBubble: "#2563EB",
-  assistantBubble: iosColor("secondarySystemFill", "#E5E7EB"),
-  label: iosColor("label", "#111827"),
-  secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
-  separator: iosColor("separator", "#D1D5DB"),
-  buttonText: "#FFFFFF",
-  tint: "#2563EB",
-  tintDisabled: "#9CA3AF",
-  error: iosColor("systemRed", "#DC2626"),
-  success: iosColor("systemGreen", "#16A34A"),
-};
 
 type Meal = "breakfast" | "lunch" | "dinner" | "snacks";
 
@@ -318,6 +302,7 @@ function buildRecentLogHints(logs: unknown, now = Date.now()): RecentLogHintPayl
 }
 
 export default function AILogScreen() {
+  const { palette, markdownTheme, isDark, styles } = useThemedStyles(createStyles);
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
   const me = useAccount(CaloricAccount, {
@@ -329,6 +314,7 @@ export default function AILogScreen() {
   const [status, setStatus] = useState<ChatStatus>("ready");
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
+  const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
   const scrollViewRef = useRef<ScrollView | null>(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
@@ -337,6 +323,30 @@ export default function AILogScreen() {
   const sessionIdRef = useRef<string | null>(null);
   const pendingApprovalsRef = useRef(new Map<string, ResolvedApprovalSuggestion[]>());
   const loopRunningRef = useRef(false);
+
+  useEffect(() => {
+    requestAnimationFrame(() => {
+      scrollViewRef.current?.scrollToEnd({ animated: true });
+    });
+  }, [messages.length, status]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSubscription = Keyboard.addListener(showEvent, () => {
+      setIsKeyboardVisible(true);
+    });
+
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setIsKeyboardVisible(false);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, []);
 
   const appendApprovedFoodToLog = (suggestion: ResolvedApprovalSuggestion) => {
     if (!me.$isLoaded) {
@@ -387,7 +397,7 @@ export default function AILogScreen() {
         },
         body: JSON.stringify({
           userId: currentUserId,
-          recentLogs: buildRecentLogHints(me.root.logs),
+          recentLogs: buildRecentLogHints(me.$isLoaded ? me.root.logs : undefined),
         }),
       });
     } catch (networkError) {
@@ -829,17 +839,24 @@ export default function AILogScreen() {
   const canUseComposerActions = Boolean(userId) && status === "ready";
 
   return (
-    <View style={styles.screen}>
+    <KeyboardAvoidingView
+      style={styles.screen}
+      behavior={Platform.OS === "ios" ? "padding" : undefined}
+      keyboardVerticalOffset={0}
+    >
       <ScrollView
         ref={scrollViewRef}
+        style={styles.scrollView}
+        automaticallyAdjustKeyboardInsets
         contentInsetAdjustmentBehavior="automatic"
         contentContainerStyle={[
           styles.contentContainer,
           {
             paddingTop: insets.top + 4,
-            paddingBottom: insets.bottom + 96,
+            paddingBottom: 24,
           },
         ]}
+        keyboardDismissMode={Platform.OS === "ios" ? "interactive" : "on-drag"}
         keyboardShouldPersistTaps="handled"
         onContentSizeChange={() => {
           scrollViewRef.current?.scrollToEnd({ animated: true });
@@ -891,7 +908,7 @@ export default function AILogScreen() {
                     <Text style={[styles.messageText, styles.userMessageText]}>{message.text}</Text>
                   ) : (
                     <StreamdownRN
-                      theme="light"
+                      theme={markdownTheme}
                       isComplete={!isActiveAssistantStream}
                       style={styles.assistantMarkdown}
                     >
@@ -1006,17 +1023,29 @@ export default function AILogScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={[styles.composerContainer, { paddingBottom: insets.bottom + 10 }]}>
+      <View
+        style={[
+          styles.composerContainer,
+          { paddingBottom: isKeyboardVisible ? 10 : insets.bottom + 10 },
+        ]}
+      >
         <View style={styles.composerCard}>
           <TextInput
             value={input}
             onChangeText={setInput}
+            onFocus={() => {
+              requestAnimationFrame(() => {
+                scrollViewRef.current?.scrollToEnd({ animated: true });
+              });
+            }}
             placeholder="Message the food assistant"
             placeholderTextColor={palette.secondaryLabel}
             style={styles.input}
             multiline
             maxLength={600}
             editable={Boolean(userId) && status === "ready"}
+            keyboardAppearance={isDark ? "dark" : "light"}
+            selectionColor={palette.tint}
           />
           <Pressable
             accessibilityRole="button"
@@ -1056,257 +1085,268 @@ export default function AILogScreen() {
           ) : null}
         </View>
       </View>
-    </View>
+    </KeyboardAvoidingView>
   );
 }
 
-const styles = StyleSheet.create({
-  screen: {
-    flex: 1,
-    backgroundColor: palette.background,
-  },
-  contentContainer: {
-    paddingHorizontal: 16,
-  },
-  loadingContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.background,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: palette.secondaryLabel,
-  },
-  largeTitle: {
-    fontSize: 34,
-    lineHeight: 41,
-    fontWeight: "700",
-    color: palette.label,
-    paddingHorizontal: 4,
-  },
-  subtitle: {
-    marginTop: 2,
-    marginBottom: 14,
-    paddingHorizontal: 4,
-    fontSize: 15,
-    lineHeight: 20,
-    color: palette.secondaryLabel,
-  },
-  warningCard: {
-    backgroundColor: palette.card,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-  },
-  warningText: {
-    color: palette.error,
-    fontSize: 14,
-    lineHeight: 19,
-    fontWeight: "500",
-  },
-  awaitingCard: {
-    backgroundColor: palette.card,
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 10,
-  },
-  awaitingText: {
-    color: palette.secondaryLabel,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "500",
-  },
-  emptyCard: {
-    backgroundColor: palette.card,
-    borderRadius: 14,
-    padding: 14,
-    marginBottom: 10,
-  },
-  emptyText: {
-    fontSize: 14,
-    lineHeight: 19,
-    color: palette.secondaryLabel,
-  },
-  messageBubble: {
-    borderRadius: 14,
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    marginBottom: 10,
-    maxWidth: "92%",
-  },
-  userBubble: {
-    alignSelf: "flex-end",
-    backgroundColor: palette.userBubble,
-  },
-  assistantBubble: {
-    alignSelf: "flex-start",
-    backgroundColor: palette.assistantBubble,
-  },
-  messageText: {
-    fontSize: 15,
-    lineHeight: 20,
-    color: palette.label,
-  },
-  userMessageText: {
-    color: palette.buttonText,
-  },
-  assistantMarkdown: {
-    flex: 0,
-    width: "100%",
-    marginBottom: -12,
-  },
-  typingText: {
-    fontSize: 14,
-    lineHeight: 18,
-    color: palette.secondaryLabel,
-    fontStyle: "italic",
-  },
-  toolCard: {
-    borderRadius: 10,
-    backgroundColor: palette.card,
-    padding: 10,
-    gap: 2,
-  },
-  suggestionCard: {
-    marginTop: 8,
-    paddingTop: 8,
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: palette.separator,
-  },
-  toolHeading: {
-    fontSize: 13,
-    lineHeight: 17,
-    fontWeight: "700",
-    color: palette.label,
-  },
-  toolText: {
-    marginTop: 2,
-    fontSize: 14,
-    lineHeight: 19,
-    color: palette.label,
-  },
-  toolMeta: {
-    marginTop: 1,
-    fontSize: 12,
-    lineHeight: 17,
-    color: palette.secondaryLabel,
-  },
-  toolReason: {
-    marginTop: 8,
-    fontSize: 13,
-    lineHeight: 18,
-    color: palette.secondaryLabel,
-  },
-  approvalRow: {
-    marginTop: 10,
-    flexDirection: "row",
-    gap: 8,
-  },
-  approveButton: {
-    flex: 1,
-    minHeight: 40,
-    borderRadius: 10,
-    backgroundColor: palette.success,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  approveButtonText: {
-    color: palette.buttonText,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-  },
-  denyButton: {
-    flex: 1,
-    minHeight: 40,
-    borderRadius: 10,
-    backgroundColor: palette.error,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  denyButtonText: {
-    color: palette.buttonText,
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "600",
-  },
-  approvedText: {
-    color: palette.success,
-    fontWeight: "600",
-  },
-  rejectedText: {
-    color: palette.error,
-    fontWeight: "600",
-  },
-  errorText: {
-    marginTop: 6,
-    paddingHorizontal: 4,
-    fontSize: 13,
-    lineHeight: 18,
-    color: palette.error,
-  },
-  errorCard: {
-    marginBottom: 8,
-  },
-  errorDetailsText: {
-    marginTop: 4,
-    paddingHorizontal: 4,
-    fontSize: 12,
-    lineHeight: 17,
-    color: palette.secondaryLabel,
-    fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
-  },
-  composerContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    backgroundColor: "rgba(255,255,255,0.4)",
-  },
-  composerCard: {
-    backgroundColor: palette.card,
-    borderRadius: 14,
-    padding: 6,
-    paddingLeft: 10,
-    flexDirection: "row",
-    alignItems: "flex-end",
-    gap: 6,
-  },
-  input: {
-    flex: 1,
-    minHeight: 36,
-    maxHeight: 140,
-    borderRadius: 10,
-    backgroundColor: palette.card,
-    color: palette.label,
-    paddingHorizontal: 6,
-    paddingVertical: 8,
-    fontSize: 16,
-    lineHeight: 20,
-  },
-  sendButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.tint,
-  },
-  voiceButton: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.tint,
-  },
-  voiceButtonRecording: {
-    backgroundColor: palette.error,
-  },
-  buttonDisabled: {
-    backgroundColor: palette.tintDisabled,
-  },
-});
+function createStyles({ palette }: AppTheme) {
+  return StyleSheet.create({
+    screen: {
+      flex: 1,
+      backgroundColor: palette.background,
+    },
+    contentContainer: {
+      paddingHorizontal: 16,
+    },
+    scrollView: {
+      flex: 1,
+    },
+    loadingContainer: {
+      flex: 1,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.background,
+    },
+    loadingText: {
+      fontSize: 16,
+      color: palette.secondaryLabel,
+    },
+    largeTitle: {
+      fontSize: 34,
+      lineHeight: 41,
+      fontWeight: "700",
+      color: palette.label,
+      paddingHorizontal: 4,
+    },
+    subtitle: {
+      marginTop: 2,
+      marginBottom: 14,
+      paddingHorizontal: 4,
+      fontSize: 15,
+      lineHeight: 20,
+      color: palette.secondaryLabel,
+    },
+    warningCard: {
+      backgroundColor: palette.card,
+      borderRadius: 14,
+      padding: 14,
+      marginBottom: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    warningText: {
+      color: palette.error,
+      fontSize: 14,
+      lineHeight: 19,
+      fontWeight: "500",
+    },
+    awaitingCard: {
+      backgroundColor: palette.card,
+      borderRadius: 14,
+      padding: 12,
+      marginBottom: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    awaitingText: {
+      color: palette.secondaryLabel,
+      fontSize: 13,
+      lineHeight: 18,
+      fontWeight: "500",
+    },
+    emptyCard: {
+      backgroundColor: palette.card,
+      borderRadius: 14,
+      padding: 14,
+      marginBottom: 10,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    emptyText: {
+      fontSize: 14,
+      lineHeight: 19,
+      color: palette.secondaryLabel,
+    },
+    messageBubble: {
+      borderRadius: 14,
+      paddingHorizontal: 12,
+      paddingVertical: 10,
+      marginBottom: 10,
+      maxWidth: "92%",
+    },
+    userBubble: {
+      alignSelf: "flex-end",
+      backgroundColor: palette.userBubble,
+    },
+    assistantBubble: {
+      alignSelf: "flex-start",
+      backgroundColor: palette.assistantBubble,
+    },
+    messageText: {
+      fontSize: 15,
+      lineHeight: 20,
+      color: palette.label,
+    },
+    userMessageText: {
+      color: palette.buttonText,
+    },
+    assistantMarkdown: {
+      flex: 0,
+      width: "100%",
+      marginBottom: -12,
+    },
+    typingText: {
+      fontSize: 14,
+      lineHeight: 18,
+      color: palette.secondaryLabel,
+      fontStyle: "italic",
+    },
+    toolCard: {
+      borderRadius: 10,
+      backgroundColor: palette.cardElevated,
+      padding: 10,
+      gap: 2,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    suggestionCard: {
+      marginTop: 8,
+      paddingTop: 8,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: palette.separator,
+    },
+    toolHeading: {
+      fontSize: 13,
+      lineHeight: 17,
+      fontWeight: "700",
+      color: palette.label,
+    },
+    toolText: {
+      marginTop: 2,
+      fontSize: 14,
+      lineHeight: 19,
+      color: palette.label,
+    },
+    toolMeta: {
+      marginTop: 1,
+      fontSize: 12,
+      lineHeight: 17,
+      color: palette.secondaryLabel,
+    },
+    toolReason: {
+      marginTop: 8,
+      fontSize: 13,
+      lineHeight: 18,
+      color: palette.secondaryLabel,
+    },
+    approvalRow: {
+      marginTop: 10,
+      flexDirection: "row",
+      gap: 8,
+    },
+    approveButton: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: 10,
+      backgroundColor: palette.success,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    approveButtonText: {
+      color: palette.buttonText,
+      fontSize: 14,
+      lineHeight: 18,
+      fontWeight: "600",
+    },
+    denyButton: {
+      flex: 1,
+      minHeight: 40,
+      borderRadius: 10,
+      backgroundColor: palette.error,
+      alignItems: "center",
+      justifyContent: "center",
+    },
+    denyButtonText: {
+      color: palette.buttonText,
+      fontSize: 14,
+      lineHeight: 18,
+      fontWeight: "600",
+    },
+    approvedText: {
+      color: palette.success,
+      fontWeight: "600",
+    },
+    rejectedText: {
+      color: palette.error,
+      fontWeight: "600",
+    },
+    errorText: {
+      marginTop: 6,
+      paddingHorizontal: 4,
+      fontSize: 13,
+      lineHeight: 18,
+      color: palette.error,
+    },
+    errorCard: {
+      marginBottom: 8,
+    },
+    errorDetailsText: {
+      marginTop: 4,
+      paddingHorizontal: 4,
+      fontSize: 12,
+      lineHeight: 17,
+      color: palette.secondaryLabel,
+      fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
+    },
+    composerContainer: {
+      paddingHorizontal: 16,
+      paddingTop: 10,
+      backgroundColor: palette.overlay,
+    },
+    composerCard: {
+      backgroundColor: palette.card,
+      borderRadius: 14,
+      padding: 6,
+      paddingLeft: 10,
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 6,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    input: {
+      flex: 1,
+      minHeight: 36,
+      maxHeight: 140,
+      borderRadius: 10,
+      backgroundColor: palette.inputBackground,
+      color: palette.label,
+      paddingHorizontal: 6,
+      paddingVertical: 8,
+      fontSize: 16,
+      lineHeight: 20,
+    },
+    sendButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.tint,
+    },
+    voiceButton: {
+      width: 34,
+      height: 34,
+      borderRadius: 17,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.tint,
+    },
+    voiceButtonRecording: {
+      backgroundColor: palette.error,
+    },
+    buttonDisabled: {
+      backgroundColor: palette.tintDisabled,
+    },
+  });
+}
