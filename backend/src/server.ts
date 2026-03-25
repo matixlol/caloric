@@ -841,27 +841,20 @@ function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
   return output;
 }
 
-async function requestOpenRouterTurn(session: AgentSession): Promise<{
-  assistantText: string;
-  toolCalls: OpenRouterToolCall[];
-}> {
+function applyOpenRouterProviderPreference(requestBody: Record<string, unknown>) {
   const providerOnly = config.openRouterProviderOnly.trim();
-  const requestBody: Record<string, unknown> = {
-    model: config.openRouterModel,
-    stream: false,
-    tool_choice: "auto",
-    tools: openRouterTools,
-    messages: session.conversation,
-    user: normalizeOpenRouterUserId(session.userId),
-    session_id: session.id,
-  };
-
-  if (providerOnly) {
-    requestBody.provider = {
-      only: [providerOnly],
-      allow_fallbacks: false,
-    };
+  if (!providerOnly) {
+    return;
   }
+
+  requestBody.provider = {
+    only: [providerOnly],
+    allow_fallbacks: false,
+  };
+}
+
+async function sendOpenRouterRequest(requestBody: Record<string, unknown>): Promise<Record<string, unknown>> {
+  applyOpenRouterProviderPreference(requestBody);
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -887,6 +880,27 @@ async function requestOpenRouterTurn(session: AgentSession): Promise<{
   }
 
   const root = asRecord(parsed);
+  if (!root) {
+    throw new Error("OpenRouter returned an invalid response shape.");
+  }
+
+  return root;
+}
+
+async function requestOpenRouterTurn(session: AgentSession): Promise<{
+  assistantText: string;
+  toolCalls: OpenRouterToolCall[];
+}> {
+  const requestBody: Record<string, unknown> = {
+    model: config.openRouterModel,
+    stream: false,
+    tool_choice: "auto",
+    tools: openRouterTools,
+    messages: session.conversation,
+    user: normalizeOpenRouterUserId(session.userId),
+    session_id: session.id,
+  };
+  const root = await sendOpenRouterRequest(requestBody);
   const choices = Array.isArray(root?.choices) ? root.choices : [];
   const firstChoice = asRecord(choices[0]);
   const message = asRecord(firstChoice?.message);
@@ -1118,11 +1132,70 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
   };
 }
 
-async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): Promise<string> {
-  if (!config.groqApiKey) {
-    throw new Error("GROQ_API_KEY is not configured on the backend.");
+function normalizeAudioFormat(audioFile: File): string {
+  const normalizedType = audioFile.type.trim().toLowerCase();
+  const fileName = audioFile.name.trim().toLowerCase();
+  const extension = fileName.includes(".") ? fileName.split(".").at(-1) ?? "" : "";
+
+  if (
+    extension === "m4a" ||
+    normalizedType === "audio/m4a" ||
+    normalizedType === "audio/mp4" ||
+    normalizedType === "audio/x-m4a"
+  ) {
+    return "m4a";
   }
 
+  if (extension === "wav" || normalizedType === "audio/wav" || normalizedType === "audio/x-wav") {
+    return "wav";
+  }
+
+  if (extension === "mp3" || normalizedType === "audio/mpeg" || normalizedType === "audio/mp3") {
+    return "mp3";
+  }
+
+  if (extension === "aac" || normalizedType === "audio/aac") {
+    return "aac";
+  }
+
+  if (extension === "ogg" || extension === "oga" || normalizedType === "audio/ogg") {
+    return "ogg";
+  }
+
+  if (extension === "flac" || normalizedType === "audio/flac" || normalizedType === "audio/x-flac") {
+    return "flac";
+  }
+
+  if (
+    extension === "aiff" ||
+    extension === "aif" ||
+    normalizedType === "audio/aiff" ||
+    normalizedType === "audio/x-aiff"
+  ) {
+    return "aiff";
+  }
+
+  if (extension === "caf" || normalizedType === "audio/x-caf") {
+    throw new Error(
+      "Recorded audio uses CAF, which OpenRouter audio input does not reliably accept. Use m4a, wav, mp3, aac, ogg, flac, or aiff.",
+    );
+  }
+
+  throw new Error(
+    `Unsupported audio format${normalizedType ? ` (${normalizedType})` : ""}. Use m4a, wav, mp3, aac, ogg, flac, or aiff.`,
+  );
+}
+
+async function encodeFileAsBase64(file: File): Promise<string> {
+  const bytes = await file.arrayBuffer();
+  return Buffer.from(bytes).toString("base64");
+}
+
+async function transcribeAudioSnippet(
+  session: AgentSession,
+  audioFile: File,
+  prompt?: string | null,
+): Promise<string> {
   if (audioFile.size <= 0) {
     throw new Error("Audio snippet was empty.");
   }
@@ -1131,60 +1204,58 @@ async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): 
     throw new Error("Audio snippet is too large (max 12 MB).");
   }
 
-  const guessedExtension = (audioFile.type || "audio/m4a").split("/").at(1) ?? "m4a";
-  const fileName = audioFile.name?.trim() || `voice.${guessedExtension}`;
-  const formData = new FormData();
-  formData.set("model", "whisper-large-v3-turbo");
-  formData.set("response_format", "json");
-  formData.set("temperature", "0");
-  if (prompt && prompt.trim()) {
-    formData.set("prompt", prompt.trim());
-  }
-  formData.set("file", audioFile, fileName);
+  const audioFormat = normalizeAudioFormat(audioFile);
+  const audioBase64 = await encodeFileAsBase64(audioFile);
+  const promptText = prompt?.trim()
+    ? `${prompt.trim()} Return only the resolved transcript.`
+    : "Transcribe this food logging voice note. Return only the resolved transcript.";
 
   try {
-    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.groqApiKey}`,
-      },
-      body: formData,
+    const root = await sendOpenRouterRequest({
+      model: config.openRouterModel,
+      stream: false,
+      temperature: 0,
+      max_tokens: 240,
+      user: normalizeOpenRouterUserId(session.userId),
+      session_id: session.id,
+      messages: [
+        {
+          role: "system",
+          content:
+            "Transcribe the user's food logging voice note into concise plain text. Output only the transcript. Correct likely product or brand names when the provided context makes the intent obvious.",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: promptText,
+            },
+            {
+              type: "input_audio",
+              input_audio: {
+                data: audioBase64,
+                format: audioFormat,
+              },
+            },
+          ],
+        },
+      ],
     });
 
-    const rawBody = await response.text();
-
-    if (!response.ok) {
-      let errorMessage = rawBody;
-      try {
-        const parsedError = JSON.parse(rawBody) as { error?: { message?: unknown } };
-        if (typeof parsedError.error?.message === "string" && parsedError.error.message.trim()) {
-          errorMessage = parsedError.error.message;
-        }
-      } catch {
-        // Keep raw text fallback if Groq returns non-JSON.
-      }
-
-      throw new Error(`Groq returned ${response.status}: ${errorMessage}`);
-    }
-
-    let transcript = rawBody.trim();
-    try {
-      const parsed = JSON.parse(rawBody) as { text?: unknown };
-      if (typeof parsed.text === "string") {
-        transcript = parsed.text.trim();
-      }
-    } catch {
-      // Keep plain text response fallback.
-    }
+    const choices = Array.isArray(root?.choices) ? root.choices : [];
+    const firstChoice = asRecord(choices[0]);
+    const message = asRecord(firstChoice?.message);
+    const transcript = parseOpenRouterText(message?.content).trim();
 
     if (!transcript) {
-      throw new Error("Groq returned an empty transcription.");
+      throw new Error("OpenRouter returned an empty transcription.");
     }
 
     return transcript;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Groq transcription request failed: ${message}`);
+    throw new Error(`OpenRouter transcription request failed: ${message}`);
   }
 }
 
@@ -1373,7 +1444,7 @@ const server = Bun.serve({
         if (actionType === "user-message") {
           let message = asString(action.message)?.trim() ?? "";
           if (!message && audioFile) {
-            message = await transcribeAudioSnippet(audioFile, session.transcriptionPrompt);
+            message = await transcribeAudioSnippet(session, audioFile, session.transcriptionPrompt);
           }
 
           if (!message) {

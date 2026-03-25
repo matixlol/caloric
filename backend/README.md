@@ -45,6 +45,7 @@ Bun microservice that proxies MyFitnessPal search/detail APIs and persists every
 
 `/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
 OpenRouter tracking fields are sent as `user` (client user id) and `session_id` (backend session id).
+Voice uploads are transcribed through the same OpenRouter model before the normal assistant/tool loop runs.
 
 `/search` does this:
 1. Looks up the latest cached search response for the exact request tuple (`query`, `offset`, `maxItems`, `countryCode`, `resourceType`)
@@ -61,7 +62,6 @@ Copy `.env.example` to `.env` and set:
 - `DATABASE_URL`
 - `MFP_AUTHORIZATION`
 - `OPENROUTER_API_KEY`
-- `GROQ_API_KEY`
 
 Optional:
 
@@ -70,7 +70,7 @@ Optional:
 - `MFP_BASE_URL`
 - `MFP_DETAIL_CONCURRENCY`
 - `MFP_REQUEST_TIMEOUT_MS`
-- `OPENROUTER_MODEL`
+- `OPENROUTER_MODEL` (defaults to `mistralai/voxtral-small-24b-2507`)
 - `OPENROUTER_PROVIDER_ONLY`
 
 ## Run
