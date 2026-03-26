@@ -229,12 +229,14 @@ const openRouterTools = [
 
 const systemPrompt = [
   "You are Caloric's food logging assistant.",
+  "You do have access to tools named searchFoods and requestFoodApprovals.",
   "Always call searchFoods before suggesting a food entry.",
   "searchFoods returns local result IDs. Only reference those IDs later.",
   "Never send or edit nutrition/name/brand/serving in approval requests.",
   "When ready, call requestFoodApprovals once with one or more suggestions.",
   "Only set resultId, meal, portion, and reason in each suggestion.",
   "Portion should be in quarter increments (0.25).",
+  "Never claim that you lack tools, access, or logging capability.",
   "If the user rejects suggestions, explain briefly and search again.",
 ].join(" ");
 
@@ -400,6 +402,41 @@ function summarizeAudioFileForLog(audioFile: File | null): Record<string, unknow
 
 function summarizeConversationForLog(session: AgentSession): unknown {
   return summarizeOpenRouterMessagesForLog(session.conversation);
+}
+
+function assistantWronglyClaimsMissingTools(text: string): boolean {
+  const normalized = text.toLowerCase();
+  if (!normalized.trim()) {
+    return false;
+  }
+
+  const toolLanguage =
+    normalized.includes("tool") ||
+    normalized.includes("access") ||
+    normalized.includes("capability") ||
+    normalized.includes("unable") ||
+    normalized.includes("can't") ||
+    normalized.includes("cannot") ||
+    normalized.includes("don't have") ||
+    normalized.includes("do not have");
+
+  const loggingLanguage =
+    normalized.includes("log") ||
+    normalized.includes("breakfast") ||
+    normalized.includes("food") ||
+    normalized.includes("meal") ||
+    normalized.includes("search");
+
+  return toolLanguage && loggingLanguage;
+}
+
+function buildToolCorrectionPrompt(): string {
+  return [
+    "Reminder: you do have access to the tools searchFoods and requestFoodApprovals.",
+    "Do not say that you lack tools or logging capability.",
+    "If the user has not specified a food, ask a short clarifying question.",
+    "If they did specify a food, use searchFoods immediately.",
+  ].join(" ");
 }
 
 type PreparedAudioInput = {
@@ -1280,9 +1317,37 @@ async function runToolCall(
 
 async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
   const events: AgentEvent[] = [];
+  let toolCorrectionCount = 0;
 
   for (let step = 0; step < 8; step += 1) {
     const turn = await requestOpenRouterTurn(session);
+
+    logInfo("ai.assistant_turn", {
+      sessionId: session.id,
+      userId: summarizeUserIdForLog(session.userId),
+      step,
+      assistantTextPreview: turn.assistantText.trim() ? truncateForLog(turn.assistantText, 240) : null,
+      toolCalls: turn.toolCalls.map((toolCall) => toolCall.function.name),
+    });
+
+    if (
+      turn.toolCalls.length === 0 &&
+      assistantWronglyClaimsMissingTools(turn.assistantText) &&
+      toolCorrectionCount < 1
+    ) {
+      toolCorrectionCount += 1;
+      logInfo("ai.assistant_tool_correction", {
+        sessionId: session.id,
+        userId: summarizeUserIdForLog(session.userId),
+        step,
+        assistantTextPreview: truncateForLog(turn.assistantText, 240),
+      });
+      session.conversation.push({
+        role: "system",
+        content: buildToolCorrectionPrompt(),
+      });
+      continue;
+    }
 
     if (turn.assistantText.trim()) {
       events.push({
