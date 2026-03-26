@@ -1,4 +1,8 @@
 import { and, desc, eq } from "drizzle-orm";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import ffmpegPath from "ffmpeg-static";
 import {
   buildRecentLogContextPrompt,
   buildRecentLogTranscriptionPrompt,
@@ -397,6 +401,13 @@ function summarizeAudioFileForLog(audioFile: File | null): Record<string, unknow
 function summarizeConversationForLog(session: AgentSession): unknown {
   return summarizeOpenRouterMessagesForLog(session.conversation);
 }
+
+type PreparedAudioInput = {
+  file: File;
+  format: "wav" | "mp3";
+  sourceFormat: string;
+  transcoded: boolean;
+};
 
 function json(data: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -1362,19 +1373,93 @@ function normalizeAudioFormat(audioFile: File): string {
   }
 
   if (extension === "caf" || normalizedType === "audio/x-caf") {
-    throw new Error(
-      "Recorded audio uses CAF, which OpenRouter audio input does not reliably accept. Use m4a, wav, mp3, aac, ogg, flac, or aiff.",
-    );
+    return "caf";
   }
 
   throw new Error(
-    `Unsupported audio format${normalizedType ? ` (${normalizedType})` : ""}. Use m4a, wav, mp3, aac, ogg, flac, or aiff.`,
+    `Unsupported audio format${normalizedType ? ` (${normalizedType})` : ""}. Use m4a, wav, mp3, aac, ogg, flac, aiff, or caf.`,
   );
 }
 
 async function encodeFileAsBase64(file: File): Promise<string> {
   const bytes = await file.arrayBuffer();
   return Buffer.from(bytes).toString("base64");
+}
+
+async function transcodeAudioToWav(audioFile: File, sourceFormat: string): Promise<File> {
+  if (!ffmpegPath) {
+    throw new Error("Audio transcoding is unavailable because ffmpeg is not installed.");
+  }
+
+  const tempDir = await mkdtemp(join(tmpdir(), "caloric-audio-"));
+  const inputPath = join(tempDir, `input.${sourceFormat}`);
+  const outputPath = join(tempDir, "output.wav");
+
+  try {
+    await Bun.write(inputPath, audioFile);
+
+    const process = Bun.spawn(
+      [
+        ffmpegPath,
+        "-nostdin",
+        "-y",
+        "-i",
+        inputPath,
+        "-vn",
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-c:a",
+        "pcm_s16le",
+        outputPath,
+      ],
+      {
+        stdin: "ignore",
+        stdout: "pipe",
+        stderr: "pipe",
+      },
+    );
+
+    const [exitCode, stderrText] = await Promise.all([
+      process.exited,
+      new Response(process.stderr).text(),
+    ]);
+
+    if (exitCode !== 0) {
+      throw new Error(`ffmpeg exited with code ${exitCode}: ${truncateForLog(stderrText, 1000)}`);
+    }
+
+    const outputBytes = await Bun.file(outputPath).arrayBuffer();
+    return new File([outputBytes], `${audioFile.name.replace(/\.[^.]+$/, "") || "voice"}.wav`, {
+      type: "audio/wav",
+    });
+  } finally {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {
+      // Ignore temp cleanup failures.
+    });
+  }
+}
+
+async function prepareAudioForOpenRouter(audioFile: File): Promise<PreparedAudioInput> {
+  const sourceFormat = normalizeAudioFormat(audioFile);
+
+  if (sourceFormat === "wav" || sourceFormat === "mp3") {
+    return {
+      file: audioFile,
+      format: sourceFormat,
+      sourceFormat,
+      transcoded: false,
+    };
+  }
+
+  const transcodedFile = await transcodeAudioToWav(audioFile, sourceFormat);
+  return {
+    file: transcodedFile,
+    format: "wav",
+    sourceFormat,
+    transcoded: true,
+  };
 }
 
 async function transcribeAudioSnippet(
@@ -1390,11 +1475,22 @@ async function transcribeAudioSnippet(
     throw new Error("Audio snippet is too large (max 12 MB).");
   }
 
-  const audioFormat = normalizeAudioFormat(audioFile);
-  const audioBase64 = await encodeFileAsBase64(audioFile);
+  const preparedAudio = await prepareAudioForOpenRouter(audioFile);
+  const audioBase64 = await encodeFileAsBase64(preparedAudio.file);
   const promptText = prompt?.trim()
     ? `${prompt.trim()} Return only the resolved transcript.`
     : "Transcribe this food logging voice note. Return only the resolved transcript.";
+
+  if (preparedAudio.transcoded) {
+    logInfo("audio.transcoded_for_openrouter", {
+      sessionId: session.id,
+      userId: summarizeUserIdForLog(session.userId),
+      sourceAudio: summarizeAudioFileForLog(audioFile),
+      sourceFormat: preparedAudio.sourceFormat,
+      targetAudio: summarizeAudioFileForLog(preparedAudio.file),
+      targetFormat: preparedAudio.format,
+    });
+  }
 
   try {
     const root = await sendOpenRouterRequest({
@@ -1421,7 +1517,7 @@ async function transcribeAudioSnippet(
               type: "input_audio",
               input_audio: {
                 data: audioBase64,
-                format: audioFormat,
+                format: preparedAudio.format,
               },
             },
           ],
@@ -1431,7 +1527,10 @@ async function transcribeAudioSnippet(
       operation: "transcription",
       sessionId: session.id,
       userId: summarizeUserIdForLog(session.userId),
-      audio: summarizeAudioFileForLog(audioFile),
+      audio: summarizeAudioFileForLog(preparedAudio.file),
+      sourceAudio: summarizeAudioFileForLog(audioFile),
+      sourceFormat: preparedAudio.sourceFormat,
+      transcoded: preparedAudio.transcoded,
     });
 
     const choices = Array.isArray(root?.choices) ? root.choices : [];
