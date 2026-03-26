@@ -1,8 +1,4 @@
 import { and, desc, eq } from "drizzle-orm";
-import { mkdtemp, rm } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import ffmpegPath from "ffmpeg-static";
 import {
   buildRecentLogContextPrompt,
   buildRecentLogTranscriptionPrompt,
@@ -229,222 +225,17 @@ const openRouterTools = [
 
 const systemPrompt = [
   "You are Caloric's food logging assistant.",
-  "You do have access to tools named searchFoods and requestFoodApprovals.",
   "Always call searchFoods before suggesting a food entry.",
   "searchFoods returns local result IDs. Only reference those IDs later.",
   "Never send or edit nutrition/name/brand/serving in approval requests.",
   "When ready, call requestFoodApprovals once with one or more suggestions.",
   "Only set resultId, meal, portion, and reason in each suggestion.",
   "Portion should be in quarter increments (0.25).",
-  "Never claim that you lack tools, access, or logging capability.",
   "If the user rejects suggestions, explain briefly and search again.",
 ].join(" ");
 
 const aiSessions = new Map<string, AgentSession>();
 const maxAiSessionIdleMs = 1000 * 60 * 60 * 8;
-
-function truncateForLog(value: string, maxLength = 240): string {
-  const normalized = value.replace(/\s+/g, " ").trim();
-  if (normalized.length <= maxLength) {
-    return normalized;
-  }
-  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
-}
-
-function summarizeUserIdForLog(userId: string): string {
-  const normalized = userId.trim();
-  if (!normalized) {
-    return "(empty)";
-  }
-
-  if (normalized.length <= 18) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, 8)}…${normalized.slice(-6)}`;
-}
-
-function safeSerializeForLog(value: unknown): string {
-  try {
-    return JSON.stringify(value);
-  } catch {
-    return JSON.stringify({ error: "unserializable_log_payload" });
-  }
-}
-
-function logInfo(event: string, details?: Record<string, unknown>) {
-  console.log(
-    safeSerializeForLog({
-      level: "info",
-      event,
-      ...(details ?? {}),
-    }),
-  );
-}
-
-function logError(event: string, details?: Record<string, unknown>) {
-  console.error(
-    safeSerializeForLog({
-      level: "error",
-      event,
-      ...(details ?? {}),
-    }),
-  );
-}
-
-function serializeErrorForLog(error: unknown): Record<string, unknown> {
-  if (error instanceof Error) {
-    return {
-      name: error.name,
-      message: error.message,
-      stack: error.stack,
-    };
-  }
-
-  return {
-    message: String(error),
-  };
-}
-
-function summarizeOpenRouterContentForLog(content: unknown): unknown {
-  if (typeof content === "string") {
-    return {
-      type: "text",
-      preview: truncateForLog(content),
-    };
-  }
-
-  if (!Array.isArray(content)) {
-    return null;
-  }
-
-  return content.map((part) => {
-    const record = asRecord(part);
-    if (!record) {
-      return { type: "unknown" };
-    }
-
-    if (record.type === "input_audio") {
-      const inputAudio = asRecord(record.input_audio);
-      return {
-        type: "input_audio",
-        format: asString(inputAudio?.format) ?? null,
-        dataLength:
-          typeof inputAudio?.data === "string"
-            ? inputAudio.data.length
-            : null,
-      };
-    }
-
-    return {
-      type: asString(record.type) ?? "unknown",
-      text:
-        typeof record.text === "string"
-          ? truncateForLog(record.text)
-          : null,
-    };
-  });
-}
-
-function summarizeOpenRouterMessagesForLog(messages: unknown): unknown {
-  if (!Array.isArray(messages)) {
-    return [];
-  }
-
-  return messages.slice(-8).map((message) => {
-    const record = asRecord(message);
-    if (!record) {
-      return { role: "unknown" };
-    }
-
-    const toolCalls = Array.isArray(record.tool_calls)
-      ? record.tool_calls
-          .map((candidate) => {
-            const toolCall = asRecord(candidate);
-            const fn = asRecord(toolCall?.function);
-            return asString(fn?.name);
-          })
-          .filter((name): name is string => Boolean(name))
-      : [];
-
-    return {
-      role: asString(record.role) ?? "unknown",
-      toolCallId: asString(record.tool_call_id) ?? null,
-      toolCalls,
-      content: summarizeOpenRouterContentForLog(record.content),
-    };
-  });
-}
-
-function summarizeOpenRouterRequestForLog(requestBody: Record<string, unknown>): Record<string, unknown> {
-  return {
-    model: asString(requestBody.model) ?? null,
-    stream: requestBody.stream === true,
-    toolChoice: asString(requestBody.tool_choice) ?? null,
-    maxTokens: asNumber(requestBody.max_tokens) ?? null,
-    temperature: asNumber(requestBody.temperature) ?? null,
-    provider: requestBody.provider ?? null,
-    messages: summarizeOpenRouterMessagesForLog(requestBody.messages),
-  };
-}
-
-function summarizeAudioFileForLog(audioFile: File | null): Record<string, unknown> | null {
-  if (!audioFile) {
-    return null;
-  }
-
-  return {
-    name: truncateForLog(audioFile.name || "voice", 80),
-    type: audioFile.type || null,
-    size: audioFile.size,
-  };
-}
-
-function summarizeConversationForLog(session: AgentSession): unknown {
-  return summarizeOpenRouterMessagesForLog(session.conversation);
-}
-
-function assistantWronglyClaimsMissingTools(text: string): boolean {
-  const normalized = text.toLowerCase();
-  if (!normalized.trim()) {
-    return false;
-  }
-
-  const toolLanguage =
-    normalized.includes("tool") ||
-    normalized.includes("access") ||
-    normalized.includes("capability") ||
-    normalized.includes("unable") ||
-    normalized.includes("can't") ||
-    normalized.includes("cannot") ||
-    normalized.includes("don't have") ||
-    normalized.includes("do not have");
-
-  const loggingLanguage =
-    normalized.includes("log") ||
-    normalized.includes("breakfast") ||
-    normalized.includes("food") ||
-    normalized.includes("meal") ||
-    normalized.includes("search");
-
-  return toolLanguage && loggingLanguage;
-}
-
-function buildToolCorrectionPrompt(): string {
-  return [
-    "Reminder: you do have access to the tools searchFoods and requestFoodApprovals.",
-    "Do not say that you lack tools or logging capability.",
-    "If the user has not specified a food, ask a short clarifying question.",
-    "If they did specify a food, use searchFoods immediately.",
-  ].join(" ");
-}
-
-type PreparedAudioInput = {
-  file: File;
-  format: "wav" | "mp3";
-  sourceFormat: string;
-  transcoded: boolean;
-};
 
 function json(data: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -1050,24 +841,27 @@ function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
   return output;
 }
 
-function applyOpenRouterProviderPreference(requestBody: Record<string, unknown>) {
+async function requestOpenRouterTurn(session: AgentSession): Promise<{
+  assistantText: string;
+  toolCalls: OpenRouterToolCall[];
+}> {
   const providerOnly = config.openRouterProviderOnly.trim();
-  if (!providerOnly) {
-    return;
-  }
-
-  requestBody.provider = {
-    only: [providerOnly],
-    allow_fallbacks: false,
+  const requestBody: Record<string, unknown> = {
+    model: config.openRouterModel,
+    stream: false,
+    tool_choice: "auto",
+    tools: openRouterTools,
+    messages: session.conversation,
+    user: normalizeOpenRouterUserId(session.userId),
+    session_id: session.id,
   };
-}
 
-async function sendOpenRouterRequest(
-  requestBody: Record<string, unknown>,
-  logContext?: Record<string, unknown>,
-): Promise<Record<string, unknown>> {
-  applyOpenRouterProviderPreference(requestBody);
-  const requestSummary = summarizeOpenRouterRequestForLog(requestBody);
+  if (providerOnly) {
+    requestBody.provider = {
+      only: [providerOnly],
+      allow_fallbacks: false,
+    };
+  }
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -1081,12 +875,6 @@ async function sendOpenRouterRequest(
   const textBody = await response.text();
 
   if (!response.ok) {
-    logError("openrouter.request_failed", {
-      ...(logContext ?? {}),
-      status: response.status,
-      responseBodyPreview: truncateForLog(textBody, 600),
-      request: requestSummary,
-    });
     const suffix = textBody ? `: ${textBody.slice(0, 300)}` : "";
     throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
   }
@@ -1094,47 +882,11 @@ async function sendOpenRouterRequest(
   let parsed: unknown;
   try {
     parsed = textBody ? JSON.parse(textBody) : {};
-  } catch (error) {
-    logError("openrouter.invalid_json", {
-      ...(logContext ?? {}),
-      error: serializeErrorForLog(error),
-      responseBodyPreview: truncateForLog(textBody, 600),
-      request: requestSummary,
-    });
+  } catch {
     throw new Error("OpenRouter returned invalid JSON.");
   }
 
   const root = asRecord(parsed);
-  if (!root) {
-    logError("openrouter.invalid_response_shape", {
-      ...(logContext ?? {}),
-      responseBodyPreview: truncateForLog(textBody, 600),
-      request: requestSummary,
-    });
-    throw new Error("OpenRouter returned an invalid response shape.");
-  }
-
-  return root;
-}
-
-async function requestOpenRouterTurn(session: AgentSession): Promise<{
-  assistantText: string;
-  toolCalls: OpenRouterToolCall[];
-}> {
-  const requestBody: Record<string, unknown> = {
-    model: config.openRouterModel,
-    stream: false,
-    tool_choice: "auto",
-    tools: openRouterTools,
-    messages: session.conversation,
-    user: normalizeOpenRouterUserId(session.userId),
-    session_id: session.id,
-  };
-  const root = await sendOpenRouterRequest(requestBody, {
-    operation: "assistant-turn",
-    sessionId: session.id,
-    userId: summarizeUserIdForLog(session.userId),
-  });
   const choices = Array.isArray(root?.choices) ? root.choices : [];
   const firstChoice = asRecord(choices[0]);
   const message = asRecord(firstChoice?.message);
@@ -1317,37 +1069,9 @@ async function runToolCall(
 
 async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
   const events: AgentEvent[] = [];
-  let toolCorrectionCount = 0;
 
   for (let step = 0; step < 8; step += 1) {
     const turn = await requestOpenRouterTurn(session);
-
-    logInfo("ai.assistant_turn", {
-      sessionId: session.id,
-      userId: summarizeUserIdForLog(session.userId),
-      step,
-      assistantTextPreview: turn.assistantText.trim() ? truncateForLog(turn.assistantText, 240) : null,
-      toolCalls: turn.toolCalls.map((toolCall) => toolCall.function.name),
-    });
-
-    if (
-      turn.toolCalls.length === 0 &&
-      assistantWronglyClaimsMissingTools(turn.assistantText) &&
-      toolCorrectionCount < 1
-    ) {
-      toolCorrectionCount += 1;
-      logInfo("ai.assistant_tool_correction", {
-        sessionId: session.id,
-        userId: summarizeUserIdForLog(session.userId),
-        step,
-        assistantTextPreview: truncateForLog(turn.assistantText, 240),
-      });
-      session.conversation.push({
-        role: "system",
-        content: buildToolCorrectionPrompt(),
-      });
-      continue;
-    }
 
     if (turn.assistantText.trim()) {
       events.push({
@@ -1394,144 +1118,11 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
   };
 }
 
-function normalizeAudioFormat(audioFile: File): string {
-  const normalizedType = audioFile.type.trim().toLowerCase();
-  const fileName = audioFile.name.trim().toLowerCase();
-  const extension = fileName.includes(".") ? fileName.split(".").at(-1) ?? "" : "";
-
-  if (
-    extension === "m4a" ||
-    normalizedType === "audio/m4a" ||
-    normalizedType === "audio/mp4" ||
-    normalizedType === "audio/x-m4a"
-  ) {
-    return "m4a";
+async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): Promise<string> {
+  if (!config.groqApiKey) {
+    throw new Error("GROQ_API_KEY is not configured on the backend.");
   }
 
-  if (extension === "wav" || normalizedType === "audio/wav" || normalizedType === "audio/x-wav") {
-    return "wav";
-  }
-
-  if (extension === "mp3" || normalizedType === "audio/mpeg" || normalizedType === "audio/mp3") {
-    return "mp3";
-  }
-
-  if (extension === "aac" || normalizedType === "audio/aac") {
-    return "aac";
-  }
-
-  if (extension === "ogg" || extension === "oga" || normalizedType === "audio/ogg") {
-    return "ogg";
-  }
-
-  if (extension === "flac" || normalizedType === "audio/flac" || normalizedType === "audio/x-flac") {
-    return "flac";
-  }
-
-  if (
-    extension === "aiff" ||
-    extension === "aif" ||
-    normalizedType === "audio/aiff" ||
-    normalizedType === "audio/x-aiff"
-  ) {
-    return "aiff";
-  }
-
-  if (extension === "caf" || normalizedType === "audio/x-caf") {
-    return "caf";
-  }
-
-  throw new Error(
-    `Unsupported audio format${normalizedType ? ` (${normalizedType})` : ""}. Use m4a, wav, mp3, aac, ogg, flac, aiff, or caf.`,
-  );
-}
-
-async function encodeFileAsBase64(file: File): Promise<string> {
-  const bytes = await file.arrayBuffer();
-  return Buffer.from(bytes).toString("base64");
-}
-
-async function transcodeAudioToWav(audioFile: File, sourceFormat: string): Promise<File> {
-  if (!ffmpegPath) {
-    throw new Error("Audio transcoding is unavailable because ffmpeg is not installed.");
-  }
-
-  const tempDir = await mkdtemp(join(tmpdir(), "caloric-audio-"));
-  const inputPath = join(tempDir, `input.${sourceFormat}`);
-  const outputPath = join(tempDir, "output.wav");
-
-  try {
-    await Bun.write(inputPath, audioFile);
-
-    const process = Bun.spawn(
-      [
-        ffmpegPath,
-        "-nostdin",
-        "-y",
-        "-i",
-        inputPath,
-        "-vn",
-        "-ac",
-        "1",
-        "-ar",
-        "16000",
-        "-c:a",
-        "pcm_s16le",
-        outputPath,
-      ],
-      {
-        stdin: "ignore",
-        stdout: "pipe",
-        stderr: "pipe",
-      },
-    );
-
-    const [exitCode, stderrText] = await Promise.all([
-      process.exited,
-      new Response(process.stderr).text(),
-    ]);
-
-    if (exitCode !== 0) {
-      throw new Error(`ffmpeg exited with code ${exitCode}: ${truncateForLog(stderrText, 1000)}`);
-    }
-
-    const outputBytes = await Bun.file(outputPath).arrayBuffer();
-    return new File([outputBytes], `${audioFile.name.replace(/\.[^.]+$/, "") || "voice"}.wav`, {
-      type: "audio/wav",
-    });
-  } finally {
-    await rm(tempDir, { recursive: true, force: true }).catch(() => {
-      // Ignore temp cleanup failures.
-    });
-  }
-}
-
-async function prepareAudioForOpenRouter(audioFile: File): Promise<PreparedAudioInput> {
-  const sourceFormat = normalizeAudioFormat(audioFile);
-
-  if (sourceFormat === "wav" || sourceFormat === "mp3") {
-    return {
-      file: audioFile,
-      format: sourceFormat,
-      sourceFormat,
-      transcoded: false,
-    };
-  }
-
-  const transcodedFile = await transcodeAudioToWav(audioFile, sourceFormat);
-  return {
-    file: transcodedFile,
-    format: "wav",
-    sourceFormat,
-    transcoded: true,
-  };
-}
-
-async function transcribeAudioSnippet(
-  session: AgentSession,
-  audioFile: File,
-  prompt?: string | null,
-): Promise<string> {
   if (audioFile.size <= 0) {
     throw new Error("Audio snippet was empty.");
   }
@@ -1540,77 +1131,60 @@ async function transcribeAudioSnippet(
     throw new Error("Audio snippet is too large (max 12 MB).");
   }
 
-  const preparedAudio = await prepareAudioForOpenRouter(audioFile);
-  const audioBase64 = await encodeFileAsBase64(preparedAudio.file);
-  const promptText = prompt?.trim()
-    ? `${prompt.trim()} Return only the resolved transcript.`
-    : "Transcribe this food logging voice note. Return only the resolved transcript.";
-
-  if (preparedAudio.transcoded) {
-    logInfo("audio.transcoded_for_openrouter", {
-      sessionId: session.id,
-      userId: summarizeUserIdForLog(session.userId),
-      sourceAudio: summarizeAudioFileForLog(audioFile),
-      sourceFormat: preparedAudio.sourceFormat,
-      targetAudio: summarizeAudioFileForLog(preparedAudio.file),
-      targetFormat: preparedAudio.format,
-    });
+  const guessedExtension = (audioFile.type || "audio/m4a").split("/").at(1) ?? "m4a";
+  const fileName = audioFile.name?.trim() || `voice.${guessedExtension}`;
+  const formData = new FormData();
+  formData.set("model", "whisper-large-v3-turbo");
+  formData.set("response_format", "json");
+  formData.set("temperature", "0");
+  if (prompt && prompt.trim()) {
+    formData.set("prompt", prompt.trim());
   }
+  formData.set("file", audioFile, fileName);
 
   try {
-    const root = await sendOpenRouterRequest({
-      model: config.openRouterModel,
-      stream: false,
-      temperature: 0,
-      max_tokens: 240,
-      user: normalizeOpenRouterUserId(session.userId),
-      session_id: session.id,
-      messages: [
-        {
-          role: "system",
-          content:
-            "Transcribe the user's food logging voice note into concise plain text. Output only the transcript. Correct likely product or brand names when the provided context makes the intent obvious.",
-        },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: promptText,
-            },
-            {
-              type: "input_audio",
-              input_audio: {
-                data: audioBase64,
-                format: preparedAudio.format,
-              },
-            },
-          ],
-        },
-      ],
-    }, {
-      operation: "transcription",
-      sessionId: session.id,
-      userId: summarizeUserIdForLog(session.userId),
-      audio: summarizeAudioFileForLog(preparedAudio.file),
-      sourceAudio: summarizeAudioFileForLog(audioFile),
-      sourceFormat: preparedAudio.sourceFormat,
-      transcoded: preparedAudio.transcoded,
+    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${config.groqApiKey}`,
+      },
+      body: formData,
     });
 
-    const choices = Array.isArray(root?.choices) ? root.choices : [];
-    const firstChoice = asRecord(choices[0]);
-    const message = asRecord(firstChoice?.message);
-    const transcript = parseOpenRouterText(message?.content).trim();
+    const rawBody = await response.text();
+
+    if (!response.ok) {
+      let errorMessage = rawBody;
+      try {
+        const parsedError = JSON.parse(rawBody) as { error?: { message?: unknown } };
+        if (typeof parsedError.error?.message === "string" && parsedError.error.message.trim()) {
+          errorMessage = parsedError.error.message;
+        }
+      } catch {
+        // Keep raw text fallback if Groq returns non-JSON.
+      }
+
+      throw new Error(`Groq returned ${response.status}: ${errorMessage}`);
+    }
+
+    let transcript = rawBody.trim();
+    try {
+      const parsed = JSON.parse(rawBody) as { text?: unknown };
+      if (typeof parsed.text === "string") {
+        transcript = parsed.text.trim();
+      }
+    } catch {
+      // Keep plain text response fallback.
+    }
 
     if (!transcript) {
-      throw new Error("OpenRouter returned an empty transcription.");
+      throw new Error("Groq returned an empty transcription.");
     }
 
     return transcript;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`OpenRouter transcription request failed: ${message}`);
+    throw new Error(`Groq transcription request failed: ${message}`);
   }
 }
 
@@ -1661,15 +1235,6 @@ const server = Bun.serve({
 
         return json(payload);
       } catch (error) {
-        logError("search.failed", {
-          query: truncateForLog(query, 120),
-          offset,
-          maxItems,
-          countryCode,
-          resourceType,
-          includeDetails,
-          error: serializeErrorForLog(error),
-        });
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: "search_failed", message }, 502);
       }
@@ -1716,14 +1281,6 @@ const server = Bun.serve({
         searchResultsByLocalId: new Map<string, SearchResultFood>(),
         pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
         updatedAt: now,
-      });
-
-      logInfo("ai.session_created", {
-        sessionId,
-        userId: summarizeUserIdForLog(userId),
-        recentLogHintCount: recentLogHints.length,
-        hasRecentLogContext: Boolean(recentLogContextPrompt),
-        hasTranscriptionPrompt: Boolean(transcriptionPrompt),
       });
 
       return json({
@@ -1812,22 +1369,11 @@ const server = Bun.serve({
 
       session.updatedAt = Date.now();
 
-      const turnLogContext = {
-        sessionId,
-        userId: summarizeUserIdForLog(userId),
-        actionType,
-        contentType: contentType.split(";")[0] || null,
-        hasAudio: Boolean(audioFile),
-        audio: summarizeAudioFileForLog(audioFile),
-        pendingApprovalGroups: session.pendingApprovals.size,
-        conversation: summarizeConversationForLog(session),
-      };
-
       try {
         if (actionType === "user-message") {
           let message = asString(action.message)?.trim() ?? "";
           if (!message && audioFile) {
-            message = await transcribeAudioSnippet(session, audioFile, session.transcriptionPrompt);
+            message = await transcribeAudioSnippet(audioFile, session.transcriptionPrompt);
           }
 
           if (!message) {
@@ -1933,14 +1479,6 @@ const server = Bun.serve({
 
         return json({ error: `Unsupported action type: ${actionType}` }, 400);
       } catch (error) {
-        logError("ai.turn_failed", {
-          ...turnLogContext,
-          messagePreview:
-            actionType === "user-message"
-              ? truncateForLog(asString(action.message)?.trim() ?? "", 160) || null
-              : null,
-          error: serializeErrorForLog(error),
-        });
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: "ai_turn_failed", message }, 502);
       }
