@@ -237,6 +237,167 @@ const systemPrompt = [
 const aiSessions = new Map<string, AgentSession>();
 const maxAiSessionIdleMs = 1000 * 60 * 60 * 8;
 
+function truncateForLog(value: string, maxLength = 240): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  if (normalized.length <= maxLength) {
+    return normalized;
+  }
+  return `${normalized.slice(0, Math.max(0, maxLength - 1))}…`;
+}
+
+function summarizeUserIdForLog(userId: string): string {
+  const normalized = userId.trim();
+  if (!normalized) {
+    return "(empty)";
+  }
+
+  if (normalized.length <= 18) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, 8)}…${normalized.slice(-6)}`;
+}
+
+function safeSerializeForLog(value: unknown): string {
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return JSON.stringify({ error: "unserializable_log_payload" });
+  }
+}
+
+function logInfo(event: string, details?: Record<string, unknown>) {
+  console.log(
+    safeSerializeForLog({
+      level: "info",
+      event,
+      ...(details ?? {}),
+    }),
+  );
+}
+
+function logError(event: string, details?: Record<string, unknown>) {
+  console.error(
+    safeSerializeForLog({
+      level: "error",
+      event,
+      ...(details ?? {}),
+    }),
+  );
+}
+
+function serializeErrorForLog(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    return {
+      name: error.name,
+      message: error.message,
+      stack: error.stack,
+    };
+  }
+
+  return {
+    message: String(error),
+  };
+}
+
+function summarizeOpenRouterContentForLog(content: unknown): unknown {
+  if (typeof content === "string") {
+    return {
+      type: "text",
+      preview: truncateForLog(content),
+    };
+  }
+
+  if (!Array.isArray(content)) {
+    return null;
+  }
+
+  return content.map((part) => {
+    const record = asRecord(part);
+    if (!record) {
+      return { type: "unknown" };
+    }
+
+    if (record.type === "input_audio") {
+      const inputAudio = asRecord(record.input_audio);
+      return {
+        type: "input_audio",
+        format: asString(inputAudio?.format) ?? null,
+        dataLength:
+          typeof inputAudio?.data === "string"
+            ? inputAudio.data.length
+            : null,
+      };
+    }
+
+    return {
+      type: asString(record.type) ?? "unknown",
+      text:
+        typeof record.text === "string"
+          ? truncateForLog(record.text)
+          : null,
+    };
+  });
+}
+
+function summarizeOpenRouterMessagesForLog(messages: unknown): unknown {
+  if (!Array.isArray(messages)) {
+    return [];
+  }
+
+  return messages.slice(-8).map((message) => {
+    const record = asRecord(message);
+    if (!record) {
+      return { role: "unknown" };
+    }
+
+    const toolCalls = Array.isArray(record.tool_calls)
+      ? record.tool_calls
+          .map((candidate) => {
+            const toolCall = asRecord(candidate);
+            const fn = asRecord(toolCall?.function);
+            return asString(fn?.name);
+          })
+          .filter((name): name is string => Boolean(name))
+      : [];
+
+    return {
+      role: asString(record.role) ?? "unknown",
+      toolCallId: asString(record.tool_call_id) ?? null,
+      toolCalls,
+      content: summarizeOpenRouterContentForLog(record.content),
+    };
+  });
+}
+
+function summarizeOpenRouterRequestForLog(requestBody: Record<string, unknown>): Record<string, unknown> {
+  return {
+    model: asString(requestBody.model) ?? null,
+    stream: requestBody.stream === true,
+    toolChoice: asString(requestBody.tool_choice) ?? null,
+    maxTokens: asNumber(requestBody.max_tokens) ?? null,
+    temperature: asNumber(requestBody.temperature) ?? null,
+    provider: requestBody.provider ?? null,
+    messages: summarizeOpenRouterMessagesForLog(requestBody.messages),
+  };
+}
+
+function summarizeAudioFileForLog(audioFile: File | null): Record<string, unknown> | null {
+  if (!audioFile) {
+    return null;
+  }
+
+  return {
+    name: truncateForLog(audioFile.name || "voice", 80),
+    type: audioFile.type || null,
+    size: audioFile.size,
+  };
+}
+
+function summarizeConversationForLog(session: AgentSession): unknown {
+  return summarizeOpenRouterMessagesForLog(session.conversation);
+}
+
 function json(data: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(data), {
     status,
@@ -853,8 +1014,12 @@ function applyOpenRouterProviderPreference(requestBody: Record<string, unknown>)
   };
 }
 
-async function sendOpenRouterRequest(requestBody: Record<string, unknown>): Promise<Record<string, unknown>> {
+async function sendOpenRouterRequest(
+  requestBody: Record<string, unknown>,
+  logContext?: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
   applyOpenRouterProviderPreference(requestBody);
+  const requestSummary = summarizeOpenRouterRequestForLog(requestBody);
 
   const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
     method: "POST",
@@ -868,6 +1033,12 @@ async function sendOpenRouterRequest(requestBody: Record<string, unknown>): Prom
   const textBody = await response.text();
 
   if (!response.ok) {
+    logError("openrouter.request_failed", {
+      ...(logContext ?? {}),
+      status: response.status,
+      responseBodyPreview: truncateForLog(textBody, 600),
+      request: requestSummary,
+    });
     const suffix = textBody ? `: ${textBody.slice(0, 300)}` : "";
     throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
   }
@@ -875,12 +1046,23 @@ async function sendOpenRouterRequest(requestBody: Record<string, unknown>): Prom
   let parsed: unknown;
   try {
     parsed = textBody ? JSON.parse(textBody) : {};
-  } catch {
+  } catch (error) {
+    logError("openrouter.invalid_json", {
+      ...(logContext ?? {}),
+      error: serializeErrorForLog(error),
+      responseBodyPreview: truncateForLog(textBody, 600),
+      request: requestSummary,
+    });
     throw new Error("OpenRouter returned invalid JSON.");
   }
 
   const root = asRecord(parsed);
   if (!root) {
+    logError("openrouter.invalid_response_shape", {
+      ...(logContext ?? {}),
+      responseBodyPreview: truncateForLog(textBody, 600),
+      request: requestSummary,
+    });
     throw new Error("OpenRouter returned an invalid response shape.");
   }
 
@@ -900,7 +1082,11 @@ async function requestOpenRouterTurn(session: AgentSession): Promise<{
     user: normalizeOpenRouterUserId(session.userId),
     session_id: session.id,
   };
-  const root = await sendOpenRouterRequest(requestBody);
+  const root = await sendOpenRouterRequest(requestBody, {
+    operation: "assistant-turn",
+    sessionId: session.id,
+    userId: summarizeUserIdForLog(session.userId),
+  });
   const choices = Array.isArray(root?.choices) ? root.choices : [];
   const firstChoice = asRecord(choices[0]);
   const message = asRecord(firstChoice?.message);
@@ -1241,6 +1427,11 @@ async function transcribeAudioSnippet(
           ],
         },
       ],
+    }, {
+      operation: "transcription",
+      sessionId: session.id,
+      userId: summarizeUserIdForLog(session.userId),
+      audio: summarizeAudioFileForLog(audioFile),
     });
 
     const choices = Array.isArray(root?.choices) ? root.choices : [];
@@ -1306,6 +1497,15 @@ const server = Bun.serve({
 
         return json(payload);
       } catch (error) {
+        logError("search.failed", {
+          query: truncateForLog(query, 120),
+          offset,
+          maxItems,
+          countryCode,
+          resourceType,
+          includeDetails,
+          error: serializeErrorForLog(error),
+        });
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: "search_failed", message }, 502);
       }
@@ -1352,6 +1552,14 @@ const server = Bun.serve({
         searchResultsByLocalId: new Map<string, SearchResultFood>(),
         pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
         updatedAt: now,
+      });
+
+      logInfo("ai.session_created", {
+        sessionId,
+        userId: summarizeUserIdForLog(userId),
+        recentLogHintCount: recentLogHints.length,
+        hasRecentLogContext: Boolean(recentLogContextPrompt),
+        hasTranscriptionPrompt: Boolean(transcriptionPrompt),
       });
 
       return json({
@@ -1439,6 +1647,17 @@ const server = Bun.serve({
       }
 
       session.updatedAt = Date.now();
+
+      const turnLogContext = {
+        sessionId,
+        userId: summarizeUserIdForLog(userId),
+        actionType,
+        contentType: contentType.split(";")[0] || null,
+        hasAudio: Boolean(audioFile),
+        audio: summarizeAudioFileForLog(audioFile),
+        pendingApprovalGroups: session.pendingApprovals.size,
+        conversation: summarizeConversationForLog(session),
+      };
 
       try {
         if (actionType === "user-message") {
@@ -1550,6 +1769,14 @@ const server = Bun.serve({
 
         return json({ error: `Unsupported action type: ${actionType}` }, 400);
       } catch (error) {
+        logError("ai.turn_failed", {
+          ...turnLogContext,
+          messagePreview:
+            actionType === "user-message"
+              ? truncateForLog(asString(action.message)?.trim() ?? "", 160) || null
+              : null,
+          error: serializeErrorForLog(error),
+        });
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: "ai_turn_failed", message }, 502);
       }
