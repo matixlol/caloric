@@ -102,7 +102,7 @@ export function buildRecentLogContextPrompt(hints: RecentLogHint[]): string | nu
   return [
     "User context from the last 3 days of logged foods (noisy voice hints may refer to these).",
     "Use this list to resolve likely ASR/transcription mistakes and map to likely foods before searching.",
-    "Examples: 'laga banana' -> banana; incorrect ASR 'anana protein scoop' likely means intended query 'ena protein scoop' -> the matching Ena whey/protein item from recent logs.",
+    "Examples: 'laga banana' -> banana; incorrect ASR 'anana protein scoop' likely means intended query 'ENA protein scoop' -> the matching ENA whey/protein item from recent logs.",
     "If a phrase likely contains multiple foods, split it and search each likely item.",
     ...lines,
   ].join("\n");
@@ -125,15 +125,20 @@ export function buildRecentLogTranscriptionPrompt(hints: RecentLogHint[]): strin
     })
     .filter((item): item is string => Boolean(item));
 
+  const recentBrands = Array.from(
+    new Set(
+      hints
+        .slice(0, maxTranscriptionHints)
+        .map((hint) => hint.brand?.trim())
+        .filter((brand): brand is string => Boolean(brand)),
+    ),
+  );
+
   if (recentItems.length === 0) {
     return null;
   }
 
-  return [
-    "Food logging voice note.",
-    "Prefer intended commands and product names over noisy ASR.",
-    "Preserve brand names when possible.",
-    "Likely phrases: log banana; whey protein cookies and cream.",
-    `Recent food names: ${recentItems.join("; ")}.`,
-  ].join(" ");
+  return ["Food log.", ...recentItems.map((item) => `${item}.`), ...recentBrands.map((brand) => `${brand}.`)].join(
+    " ",
+  );
 }

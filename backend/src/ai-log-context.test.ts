@@ -16,7 +16,7 @@ describe("ai-log-context", () => {
       },
       {
         foodName: "Whey Protein Cookies & Cream",
-        brand: "Ena",
+        brand: "ENA",
         serving: "31 gramos",
         meal: "breakfast",
         dateKey: "2026-02-22",
@@ -30,13 +30,13 @@ describe("ai-log-context", () => {
     expect(prompt ?? "").toContain("last 3 days");
     expect(prompt ?? "").toContain("laga banana");
     expect(prompt ?? "").toContain("anana protein scoop");
-    expect(prompt ?? "").toContain("ena protein scoop");
+    expect(prompt ?? "").toContain("ENA protein scoop");
     expect(prompt ?? "").toContain("Banana");
     expect(prompt ?? "").toContain("Whey Protein Cookies & Cream");
-    expect(prompt ?? "").toContain("Ena");
+    expect(prompt ?? "").toContain("ENA");
   });
 
-  it("builds a short transcription prompt with likely phrases and recent names", () => {
+  it("builds a compact glossary-style transcription prompt", () => {
     const recentLogs = parseRecentLogHints([
       {
         foodName: "Banana",
@@ -46,7 +46,7 @@ describe("ai-log-context", () => {
       },
       {
         foodName: "Whey Protein Cookies & Cream",
-        brand: "Ena",
+        brand: "ENA",
         serving: "31 gramos",
         meal: "breakfast",
         dateKey: "2026-02-22",
@@ -56,12 +56,6 @@ describe("ai-log-context", () => {
 
     const prompt = buildRecentLogTranscriptionPrompt(recentLogs);
 
-    expect(prompt).not.toBeNull();
-    expect(prompt ?? "").toContain("Food logging voice note");
-    expect(prompt ?? "").toContain("Preserve brand names when possible");
-    expect(prompt ?? "").toContain("log banana");
-    expect(prompt ?? "").toContain("whey protein cookies and cream");
-    expect(prompt ?? "").toContain("Ena Whey Protein Cookies & Cream");
-    expect(prompt ?? "").toContain("Banana");
+    expect(prompt).toBe("Food log. ENA Whey Protein Cookies & Cream. Banana. ENA.");
   });
 });
