@@ -1178,28 +1178,31 @@ async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSea
   const anmatFoods = anmatResult.status === "fulfilled" ? anmatResult.value : [];
   const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value : [];
 
-  if (anmatFoods.length === 0 && mfpFoods.length === 0) {
-    if (anmatResult.status === "rejected") {
-      logError("food_search.anmat_failed", anmatResult.reason, {
-        query,
-        limit,
-      });
-      throw anmatResult.reason;
-    }
-    if (mfpResult.status === "rejected") {
-      logError("food_search.mfp_failed", mfpResult.reason, {
-        query,
-        limit,
-      });
-      throw mfpResult.reason;
-    }
+  if (anmatResult.status === "rejected") {
+    logError("food_search.anmat_failed", anmatResult.reason, {
+      query,
+      limit,
+    });
   }
 
   if (mfpResult.status === "rejected") {
-    logError("food_search.mfp_partial_failure", mfpResult.reason, {
+    logError("food_search.mfp_failed", mfpResult.reason, {
       query,
       limit,
       anmatCount: anmatFoods.length,
+    });
+  }
+
+  if (anmatResult.status === "rejected" && mfpResult.status === "rejected") {
+    throw anmatResult.reason;
+  }
+
+  if (mfpResult.status === "rejected") {
+    logInfo("food_search.complete_without_mfp", {
+      query,
+      limit,
+      anmatCount: anmatFoods.length,
+      mfpCount: 0,
     });
   } else {
     logInfo("food_search.mfp_success", {
