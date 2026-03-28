@@ -51,7 +51,7 @@ OpenRouter tracking fields are sent as `user` (client user id) and `session_id` 
 
 `/search` does this:
 1. Looks up the latest cached search response for the exact request tuple (`query`, `offset`, `maxItems`, `countryCode`, `resourceType`)
-2. Reuses the latest MyFitnessPal auth session from `mfp_auth_sessions`, or refreshes it with Playwright when missing/expired
+2. Reuses the latest MyFitnessPal auth session from `mfp_auth_sessions`, or refreshes it with Rebrowser Playwright when missing/expired
 3. If not cached, calls MyFitnessPal `/api/nutrition` and saves the response in `mfp_search_responses`
 4. Retries once after an automatic auth refresh when MyFitnessPal responds with `401` or `403`
 5. If `includeDetails=true`, resolves each food detail by:
@@ -59,8 +59,7 @@ OpenRouter tracking fields are sent as `user` (client user id) and `session_id` 
    - fetching upstream only for detail keys not already cached
 6. Saves resolved detail payloads in `mfp_food_detail_responses` for the current `searchResponseId`
 
-The Playwright refresh path launches a single browser instance, signs in with username/password, captures cookies and auth state, stores them in `mfp_auth_sessions`, and closes the browser immediately after persistence.
-When `BROWSERBASE_API_KEY` is set, the refresh runs through Browserbase using a single remote browser session and falls back to local Playwright only when Browserbase is not configured.
+The refresh path launches a single Rebrowser Playwright Chrome instance, signs in with username/password, captures cookies and auth state, stores them in `mfp_auth_sessions`, and closes the browser immediately after persistence.
 
 ## Environment
 
@@ -69,13 +68,13 @@ Copy `.env.example` to `.env` and set:
 - `DATABASE_URL`
 - `MFP_USERNAME`
 - `MFP_PASSWORD`
-- `BROWSERBASE_API_KEY` (recommended for protected login flows)
+- `MFP_PROXY_URL` (recommended; used by Rebrowser Playwright during MyFitnessPal login)
+- `TWO_CAPTCHA_API_KEY` (used to solve Cloudflare Turnstile during MyFitnessPal login)
 - `OPENROUTER_API_KEY`
 - `GROQ_API_KEY`
 
 Optional:
 
-- `BROWSERBASE_PROJECT_ID`
 - `PORT`
 - `MFP_DETAIL_CONCURRENCY`
 - `MFP_REQUEST_TIMEOUT_MS`
@@ -87,7 +86,7 @@ Optional:
 ```bash
 cd backend
 bun install
-bunx playwright install chromium
+bunx playwright install chrome
 bun run db:generate
 bun run db:migrate
 bun run dev

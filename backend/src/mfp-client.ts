@@ -1,5 +1,8 @@
 import { config } from "./config";
-import { getMfpAuthHeaders, MFP_BASE_URL, MFP_USER_AGENT } from "./mfp-session";
+import { getMfpAuthHeaders, MFP_BASE_URL } from "./mfp-session";
+
+const MFP_API_USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.7680.165 Safari/537.36";
 
 type MfpResponse = {
   status: number;
@@ -14,7 +17,7 @@ async function getMfpHeaders(forceRefresh = false): Promise<HeadersInit> {
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Accept-Language": "en-US,en;q=0.9",
-    "User-Agent": MFP_USER_AGENT,
+    "User-Agent": MFP_API_USER_AGENT,
     Referer: `${MFP_BASE_URL}/food/search`,
     Authorization: auth.authorization,
     Cookie: auth.cookieHeader,

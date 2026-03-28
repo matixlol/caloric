@@ -1,25 +1,33 @@
 import { eq } from "drizzle-orm";
-import StealthPlugin from "puppeteer-extra-plugin-stealth";
-import { chromium as chromiumWithExtra } from "playwright-extra";
+import { mkdtemp, rm } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import type { Browser, BrowserContext, Page } from "rebrowser-playwright";
+import { chromium } from "rebrowser-playwright";
 import { config } from "./config";
 import { db } from "./db";
 import { mfpAuthSessions } from "./db/schema";
+import { installTurnstileHook, solveTurnstileWith2Captcha } from "./mfp-turnstile";
 
 export const MFP_BASE_URL = "https://www.myfitnesspal.com";
-export const MFP_USER_AGENT =
-  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36";
 
 const MFP_PROVIDER = "myfitnesspal";
 const MFP_SEARCH_URL = `${MFP_BASE_URL}/food/search`;
 const MFP_LOGIN_URL = `${MFP_BASE_URL}/account/login?callbackUrl=${encodeURIComponent(MFP_SEARCH_URL)}`;
+const MFP_AUTH_CALLBACK_URL = `${MFP_BASE_URL}/api/auth/callback/credentials`;
 const MFP_SESSION_ENDPOINT = `${MFP_BASE_URL}/api/auth/session`;
 const MFP_REFRESH_TIMEOUT_MS = 60_000;
 const MFP_TURNSTILE_TIMEOUT_MS = 20_000;
+const DESKTOP_CHROME_USER_AGENT =
+  "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 const MFP_LOGIN_ERROR_PATTERNS = [
   /technical difficulties/i,
   /rate limiting block/i,
   /please try again later/i,
   /invalid email or password/i,
+  /recaptcha verification failed/i,
+  /temporarily blocked/i,
+  /allowed timeframe/i,
 ];
 
 type SessionStorageState = Record<string, string>;
@@ -48,94 +56,24 @@ export type MfpRequestAuth = {
   cookieHeader: string;
 };
 
-let refreshPromise: Promise<MfpRequestAuth> | null = null;
-let stealthConfigured = false;
-
 type BrowserSessionHandle = {
-  browser: import("playwright").Browser;
-  page: import("playwright").Page;
+  browser: Browser | null;
+  context: BrowserContext;
+  page: Page;
+  profileDir: string;
 };
 
-type BrowserbaseRefreshPayload = {
-  storageState: MfpStorageState;
-  sessionStorage: SessionStorageState;
-  authorization: string;
-  cookieHeader: string;
+type SubmitResult = {
+  bodyText: string;
+  csrfTokenLength: number;
+  emailLength: number;
+  ok: boolean;
+  recaptchaLength: number;
+  status: number;
+  turnstileLength: number;
 };
 
-function getChromium() {
-  if (!stealthConfigured) {
-    chromiumWithExtra.use(StealthPlugin());
-    stealthConfigured = true;
-  }
-
-  return chromiumWithExtra;
-}
-
-async function createLocalStealthSession(): Promise<BrowserSessionHandle> {
-  const browser = await getChromium().launch({
-    headless: true,
-    args: ["--disable-blink-features=AutomationControlled", "--disable-dev-shm-usage", "--no-sandbox"],
-  });
-
-  const context = await browser.newContext({
-    userAgent: MFP_USER_AGENT,
-    viewport: { width: 1440, height: 900 },
-    locale: "en-US",
-    timezoneId: "America/Los_Angeles",
-  });
-  const page = await context.newPage();
-
-  return {
-    browser,
-    page,
-  };
-}
-
-async function refreshWithBrowserbase(): Promise<BrowserbaseRefreshPayload> {
-  const scriptPath = new URL("./mfp-browserbase-refresh.mjs", import.meta.url).pathname;
-  const process = Bun.spawn({
-    cmd: ["node", scriptPath],
-    env: { ...Bun.env },
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const [stdout, stderr, exitCode] = await Promise.all([
-    new Response(process.stdout).text(),
-    new Response(process.stderr).text(),
-    process.exited,
-  ]);
-
-  if (exitCode !== 0) {
-    const detail = (stderr || stdout).trim() || `Node refresh process exited with code ${exitCode}.`;
-    throw new Error(`Browserbase refresh failed: ${detail}`);
-  }
-
-  let parsed: unknown;
-  try {
-    parsed = stdout ? JSON.parse(stdout) : null;
-  } catch {
-    throw new Error("Browserbase refresh returned invalid JSON.");
-  }
-
-  const record = isRecord(parsed) ? parsed : null;
-  const storageState = normalizeStorageState(record?.storageState);
-  const sessionStorage = normalizeSessionStorage(record?.sessionStorage) ?? {};
-  const authorization = normalizeAuthorization(typeof record?.authorization === "string" ? record.authorization : null);
-  const cookieHeader = typeof record?.cookieHeader === "string" ? record.cookieHeader.trim() : "";
-
-  if (!storageState || !authorization || !cookieHeader) {
-    throw new Error("Browserbase refresh did not return a complete MyFitnessPal session.");
-  }
-
-  return {
-    storageState,
-    sessionStorage,
-    authorization,
-    cookieHeader,
-  };
-}
+let refreshPromise: Promise<MfpRequestAuth> | null = null;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
@@ -315,7 +253,55 @@ function requireRefreshCredentials(): { username: string; password: string } {
   return { username, password };
 }
 
-async function captureSessionStorage(page: import("playwright").Page): Promise<SessionStorageState> {
+function parseProxyConfig(proxyUrl: string | null | undefined):
+  | {
+      password?: string;
+      server: string;
+      username?: string;
+    }
+  | undefined {
+  const trimmed = proxyUrl?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const parsed = new URL(trimmed);
+  return {
+    server: `${parsed.protocol}//${parsed.host}`,
+    ...(parsed.username ? { username: decodeURIComponent(parsed.username) } : {}),
+    ...(parsed.password ? { password: decodeURIComponent(parsed.password) } : {}),
+  };
+}
+
+async function createLocalStealthSession(): Promise<BrowserSessionHandle> {
+  const profileDir = await mkdtemp(path.join(os.tmpdir(), "mfp-session-"));
+  const context = await chromium.launchPersistentContext(profileDir, {
+    channel: "chrome",
+    headless: config.mfpBrowserHeadless,
+    proxy: parseProxyConfig(config.mfpProxyUrl),
+    viewport: { width: 1440, height: 900 },
+    locale: "en-US",
+    timezoneId: "America/Los_Angeles",
+    userAgent: DESKTOP_CHROME_USER_AGENT,
+    args: [
+      "--disable-blink-features=AutomationControlled",
+      "--no-first-run",
+      "--no-default-browser-check",
+    ],
+  });
+  const browser = context.browser();
+  const page = context.pages()[0] ?? (await context.newPage());
+  await installTurnstileHook(page);
+
+  return {
+    browser,
+    context,
+    page,
+    profileDir,
+  };
+}
+
+async function captureSessionStorage(page: Page): Promise<SessionStorageState> {
   return page.evaluate(() => {
     const output: Record<string, string> = {};
     for (let index = 0; index < window.sessionStorage.length; index += 1) {
@@ -333,8 +319,8 @@ async function captureSessionStorage(page: import("playwright").Page): Promise<S
   });
 }
 
-async function fetchSessionPayload(page: import("playwright").Page): Promise<unknown | null> {
-  const result = await page.evaluate(async (endpoint) => {
+async function fetchSessionPayload(page: Page): Promise<unknown | null> {
+  const result = await page.evaluate(async (endpoint: string) => {
     try {
       const response = await fetch(endpoint, {
         credentials: "include",
@@ -359,14 +345,26 @@ async function fetchSessionPayload(page: import("playwright").Page): Promise<unk
   return tryParseJson(result.text);
 }
 
-async function maybeSolveTurnstile(page: import("playwright").Page): Promise<void> {
-  const tokenInput = page.locator('input[name="cf-turnstile-response"]');
+async function maybeSolveTurnstile(page: Page): Promise<void> {
+  await page
+    .waitForFunction(
+      () =>
+        Boolean(
+          document.querySelector('input[name="cf-turnstile-response"]') ||
+            document.querySelector('iframe[src*="challenges.cloudflare.com"]'),
+        ),
+      { timeout: 15_000 },
+    )
+    .catch(() => undefined);
 
-  if ((await tokenInput.count()) === 0) {
+  const widget = page.locator('input[name="cf-turnstile-response"], iframe[src*="challenges.cloudflare.com"]');
+  if ((await widget.count()) === 0) {
     return;
   }
 
-  const initialValue = await tokenInput.first().inputValue().catch(() => "");
+  const tokenInput = page.locator('input[name="cf-turnstile-response"]');
+  const tokenInputCount = await tokenInput.count();
+  const initialValue = tokenInputCount > 0 ? await tokenInput.first().inputValue().catch(() => "") : "";
   if (initialValue.trim()) {
     return;
   }
@@ -377,6 +375,31 @@ async function maybeSolveTurnstile(page: import("playwright").Page): Promise<voi
     if (box) {
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2, { steps: 8 });
       await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2, { delay: 150 });
+      await page
+        .waitForFunction(
+          () => {
+            const input = document.querySelector('input[name="cf-turnstile-response"]');
+            return input instanceof HTMLInputElement && input.value.trim().length > 0;
+          },
+          { timeout: 8_000 },
+        )
+        .catch(() => undefined);
+      const clickedValue = await tokenInput.first().inputValue().catch(() => "");
+      if (clickedValue.trim()) {
+        return;
+      }
+    }
+  }
+
+  const twoCaptchaApiKey = config.twoCaptchaApiKey?.trim();
+  if (twoCaptchaApiKey) {
+    const userAgent = await page.evaluate(() => navigator.userAgent).catch(() => undefined);
+    const solved = await solveTurnstileWith2Captcha(page, twoCaptchaApiKey, {
+      proxyUrl: config.mfpProxyUrl,
+      userAgent,
+    });
+    if (solved) {
+      return;
     }
   }
 
@@ -391,7 +414,7 @@ async function maybeSolveTurnstile(page: import("playwright").Page): Promise<voi
     .catch(() => undefined);
 }
 
-async function dismissConsentModal(page: import("playwright").Page): Promise<void> {
+async function dismissConsentModal(page: Page): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < 10_000) {
@@ -419,7 +442,7 @@ async function dismissConsentModal(page: import("playwright").Page): Promise<voi
   }
 }
 
-async function readLoginError(page: import("playwright").Page): Promise<string | null> {
+async function readLoginError(page: Page): Promise<string | null> {
   const bodyText = await page.locator("body").innerText().catch(() => "");
   const normalized = bodyText.trim();
   if (!normalized) {
@@ -436,20 +459,101 @@ async function readLoginError(page: import("playwright").Page): Promise<string |
   return null;
 }
 
-async function waitForAuthenticatedPage(
-  page: import("playwright").Page,
-  context: import("playwright").BrowserContext,
-): Promise<void> {
+function summarizeCallbackFailure(result: SubmitResult): string {
+  const bodyText = result.bodyText.replace(/\s+/g, " ").trim();
+  const blocked = bodyText.match(/temporarily blocked/i);
+  const rateLimit = bodyText.match(/rate limiting block/i);
+  const recaptcha = bodyText.match(/recaptcha verification failed/i);
+  const technical = bodyText.match(/technical difficulties/i);
+  const timeframe = bodyText.match(/allowed timeframe/i);
+  const reason =
+    blocked?.[0] ?? rateLimit?.[0] ?? recaptcha?.[0] ?? technical?.[0] ?? timeframe?.[0] ?? `HTTP ${result.status}`;
+
+  return `${reason} (csrf=${result.csrfTokenLength}, email=${result.emailLength}, turnstile=${result.turnstileLength})`;
+}
+
+async function submitLoginForm(page: Page): Promise<void> {
+  const result = await page.evaluate(
+    async ({
+      callbackEndpoint,
+      callbackUrl,
+    }: {
+      callbackEndpoint: string;
+      callbackUrl: string;
+    }) => {
+      const readValue = (selector: string) => {
+        const node = document.querySelector(selector);
+        return node instanceof HTMLInputElement ? node.value : "";
+      };
+
+      const email = readValue('input[name="email"]');
+      const password = readValue('input[name="password"]');
+      const turnstile = readValue('input[name="cf-turnstile-response"]');
+
+      let csrfToken = "";
+      try {
+        const csrfResponse = await fetch("https://www.myfitnesspal.com/api/auth/csrf", {
+          credentials: "include",
+          headers: {
+            Accept: "application/json",
+          },
+        });
+        const csrfJson = await csrfResponse.json();
+        csrfToken = typeof csrfJson?.csrfToken === "string" ? csrfJson.csrfToken : "";
+      } catch {
+        csrfToken = "";
+      }
+
+      const payload = new URLSearchParams({
+        callbackUrl,
+        csrfToken,
+        username: email,
+        password,
+        json: "true",
+        redirect: "false",
+        turnstile_token: turnstile,
+      });
+
+      const response = await fetch(callbackEndpoint, {
+        method: "POST",
+        credentials: "include",
+        headers: {
+          "Content-Type": "application/x-www-form-urlencoded",
+        },
+        body: payload.toString(),
+      });
+
+      return {
+        bodyText: await response.text(),
+        csrfTokenLength: csrfToken.length,
+        emailLength: email.length,
+        ok: response.ok,
+        recaptchaLength: 0,
+        status: response.status,
+        turnstileLength: turnstile.length,
+      };
+    },
+    {
+      callbackEndpoint: MFP_AUTH_CALLBACK_URL,
+      callbackUrl: MFP_SEARCH_URL,
+    },
+  );
+
+  if (!result.ok) {
+    throw new Error(`MyFitnessPal login callback failed: ${summarizeCallbackFailure(result)}`);
+  }
+}
+
+async function waitForAuthenticatedPage(page: Page, context: BrowserContext): Promise<void> {
   const startedAt = Date.now();
 
   while (Date.now() - startedAt < MFP_REFRESH_TIMEOUT_MS) {
-    if (!new URL(page.url()).pathname.startsWith("/account/login")) {
-      return;
-    }
-
     const cookies = await context.cookies(MFP_BASE_URL);
-    const hasSessionCookie = cookies.some((cookie) =>
-      cookie.name === "__Secure-next-auth.session-token" || cookie.name === "_mfp_session" || cookie.name === "remember_me"
+    const hasSessionCookie = cookies.some(
+      (cookie) =>
+        cookie.name === "__Secure-next-auth.session-token" ||
+        cookie.name === "_mfp_session" ||
+        cookie.name === "remember_me",
     );
     if (hasSessionCookie) {
       return;
@@ -468,57 +572,13 @@ async function waitForAuthenticatedPage(
 
 async function refreshWithPlaywright(): Promise<MfpRequestAuth> {
   const credentials = requireRefreshCredentials();
-
-  if (config.browserbaseApiKey?.trim()) {
-    const refreshed = await refreshWithBrowserbase();
-    const now = new Date();
-
-    await db
-      .insert(mfpAuthSessions)
-      .values({
-        provider: MFP_PROVIDER,
-        storageState: refreshed.storageState,
-        sessionStorage: refreshed.sessionStorage,
-        authorization: refreshed.authorization,
-        cookieHeader: refreshed.cookieHeader,
-        refreshedAt: now,
-        createdAt: now,
-        updatedAt: now,
-      })
-      .onConflictDoUpdate({
-        target: mfpAuthSessions.provider,
-        set: {
-          storageState: refreshed.storageState,
-          sessionStorage: refreshed.sessionStorage,
-          authorization: refreshed.authorization,
-          cookieHeader: refreshed.cookieHeader,
-          refreshedAt: now,
-          updatedAt: now,
-        },
-      });
-
-    return {
-      authorization: refreshed.authorization,
-      cookieHeader: refreshed.cookieHeader,
-    };
-  }
-
-  const { browser, page } = await createLocalStealthSession();
+  const { browser, context, page, profileDir } = await createLocalStealthSession();
 
   try {
-    const [context] = browser.contexts();
-    if (!context) {
-      throw new Error("Failed to create browser context for MyFitnessPal refresh.");
-    }
-
     let capturedAuthorization: string | null = null;
 
     context.on("request", (request) => {
-      if (capturedAuthorization) {
-        return;
-      }
-
-      if (!request.url().includes("myfitnesspal.com")) {
+      if (capturedAuthorization || !request.url().includes("myfitnesspal.com")) {
         return;
       }
 
@@ -530,14 +590,14 @@ async function refreshWithPlaywright(): Promise<MfpRequestAuth> {
       timeout: MFP_REFRESH_TIMEOUT_MS,
       waitUntil: "domcontentloaded",
     });
+    await page.waitForLoadState("networkidle", { timeout: 15_000 }).catch(() => undefined);
     await dismissConsentModal(page);
 
     await page.getByLabel(/email address/i).fill(credentials.username);
     await page.getByLabel(/^password$/i).fill(credentials.password);
     await maybeSolveTurnstile(page);
     await dismissConsentModal(page);
-
-    await page.getByRole("button", { name: /log in/i }).click();
+    await submitLoginForm(page);
     await waitForAuthenticatedPage(page, context);
 
     await page.goto(MFP_SEARCH_URL, {
@@ -595,7 +655,9 @@ async function refreshWithPlaywright(): Promise<MfpRequestAuth> {
       cookieHeader,
     };
   } finally {
-    await browser.close();
+    await context.close().catch(() => undefined);
+    await browser?.close().catch(() => undefined);
+    await rm(profileDir, { recursive: true, force: true }).catch(() => undefined);
   }
 }
 
