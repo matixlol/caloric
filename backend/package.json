@@ -9,7 +9,9 @@
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
-    "db:studio": "drizzle-kit studio"
+    "db:studio": "drizzle-kit studio",
+    "anmat:import-product-html": "bun src/import-anmat-product-html.ts",
+    "anmat:import-product-derived": "bun src/import-anmat-product-derived.ts"
   },
   "dependencies": {
     "drizzle-orm": "^0.44.5",

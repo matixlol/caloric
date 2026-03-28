@@ -145,7 +145,7 @@ function sourceRank(source: CandidateSource): number {
   }
 }
 
-function extractAroundLabels(text: string): string[] {
+export function extractAroundLabels(text: string): string[] {
   const snippets: string[] = [];
   for (const match of text.matchAll(BARCODE_LABEL_RE)) {
     const idx = match.index ?? 0;
@@ -156,7 +156,7 @@ function extractAroundLabels(text: string): string[] {
   return snippets;
 }
 
-function extractDigitCandidates(text: string): string[] {
+export function extractDigitCandidates(text: string): string[] {
   const seen = new Set<string>();
   const out: string[] = [];
   for (const m of text.matchAll(DIGIT_SEQ_RE)) {
@@ -167,6 +167,61 @@ function extractDigitCandidates(text: string): string[] {
     out.push(normalized);
   }
   return out;
+}
+
+export function parseEansFromHtmlText(
+  html: string,
+  options: {
+    includeHtmlAny?: boolean;
+    preferPrefix779?: boolean;
+  } = {},
+): {
+  bestEan: string | null;
+  bestSource: CandidateSource | null;
+  candidates: EanCandidate[];
+} {
+  const includeHtmlAny = options.includeHtmlAny ?? false;
+  const preferPrefix779 = options.preferPrefix779 ?? true;
+
+  const candidates: EanCandidate[] = [];
+  const seen = new Set<string>();
+  const push = (candidate: EanCandidate) => {
+    const key = `${candidate.code}|${candidate.source}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    candidates.push(candidate);
+  };
+
+  for (const snippet of extractAroundLabels(html)) {
+    for (const code of extractDigitCandidates(snippet)) {
+      push({ code, source: "html_label" });
+    }
+  }
+
+  if (includeHtmlAny) {
+    for (const code of extractDigitCandidates(html)) {
+      push({ code, source: "html_any" });
+    }
+  }
+
+  const ranked = [...candidates].sort((a, b) => {
+    const bySource = sourceRank(a.source) - sourceRank(b.source);
+    if (bySource !== 0) return bySource;
+
+    if (preferPrefix779) {
+      const a779 = a.code.startsWith("779") ? 1 : 0;
+      const b779 = b.code.startsWith("779") ? 1 : 0;
+      if (a779 !== b779) return b779 - a779;
+    }
+
+    return a.code.localeCompare(b.code);
+  });
+
+  return {
+    bestEan: ranked[0]?.code ?? null,
+    bestSource: ranked[0]?.source ?? null,
+    candidates: ranked,
+  };
 }
 
 async function runCommand(bin: string, args: string[], timeoutMs: number): Promise<RunResult> {
