@@ -1,4 +1,4 @@
-import { and, desc, eq, ilike, or } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNotNull, lt, or } from "drizzle-orm";
 import {
   buildRecentLogContextPrompt,
   buildRecentLogTranscriptionPrompt,
@@ -451,6 +451,10 @@ function toDetailPayload(
   };
 }
 
+function isSuccessfulMfpStatus(status: number): boolean {
+  return status >= 200 && status < 300;
+}
+
 async function findCachedSearch(params: {
   query: string;
   offset: number;
@@ -474,6 +478,9 @@ async function findCachedSearch(params: {
         eq(mfpSearchResponses.maxItems, params.maxItems),
         eq(mfpSearchResponses.countryCode, params.countryCode),
         eq(mfpSearchResponses.resourceType, params.resourceType),
+        gte(mfpSearchResponses.mfpStatus, 200),
+        lt(mfpSearchResponses.mfpStatus, 300),
+        isNotNull(mfpSearchResponses.responseJson),
       ),
     )
     .orderBy(desc(mfpSearchResponses.createdAt), desc(mfpSearchResponses.id))
@@ -491,7 +498,15 @@ async function findCachedDetail(foodId: string, version: string): Promise<Stored
       responseText: mfpFoodDetailResponses.responseText,
     })
     .from(mfpFoodDetailResponses)
-    .where(and(eq(mfpFoodDetailResponses.foodId, foodId), eq(mfpFoodDetailResponses.version, version)))
+    .where(
+      and(
+        eq(mfpFoodDetailResponses.foodId, foodId),
+        eq(mfpFoodDetailResponses.version, version),
+        gte(mfpFoodDetailResponses.mfpStatus, 200),
+        lt(mfpFoodDetailResponses.mfpStatus, 300),
+        isNotNull(mfpFoodDetailResponses.responseJson),
+      ),
+    )
     .orderBy(desc(mfpFoodDetailResponses.createdAt), desc(mfpFoodDetailResponses.id))
     .limit(1);
 
@@ -615,6 +630,13 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
     });
   } else {
     const searchResponse = await searchNutrition(searchLookup);
+
+    if (!isSuccessfulMfpStatus(searchResponse.status) || !searchResponse.json) {
+      throw new Error(
+        `MyFitnessPal search failed with status ${searchResponse.status}${searchResponse.text ? `: ${summarizeText(searchResponse.text)}` : ""}`,
+      );
+    }
+
     const [savedSearch] = await db
       .insert(mfpSearchResponses)
       .values({
