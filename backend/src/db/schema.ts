@@ -1,5 +1,23 @@
 import { bigint, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
+export const mfpAuthSessions = pgTable(
+  "mfp_auth_sessions",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    provider: text("provider").notNull(),
+    storageState: jsonb("storage_state"),
+    sessionStorage: jsonb("session_storage"),
+    authorization: text("authorization"),
+    cookieHeader: text("cookie_header"),
+    refreshedAt: timestamp("refreshed_at", { withTimezone: true }).defaultNow().notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    providerUnique: uniqueIndex("mfp_auth_sessions_provider_uidx").on(table.provider),
+  }),
+);
+
 export const mfpSearchResponses = pgTable(
   "mfp_search_responses",
   {

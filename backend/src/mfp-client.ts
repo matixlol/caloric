@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { getMfpAuthHeaders, MFP_BASE_URL, MFP_USER_AGENT } from "./mfp-session";
 
 type MfpResponse = {
   status: number;
@@ -7,30 +8,36 @@ type MfpResponse = {
   text: string | null;
 };
 
-function getMfpHeaders(): HeadersInit {
+async function getMfpHeaders(forceRefresh = false): Promise<HeadersInit> {
+  const auth = await getMfpAuthHeaders({ forceRefresh });
+
   const headers: Record<string, string> = {
     Accept: "application/json",
     "Accept-Language": "en-US,en;q=0.9",
-    "User-Agent":
-      "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-    Referer: `${config.mfpBaseUrl}/food/search`,
-    Authorization: config.mfpAuthorization,
+    "User-Agent": MFP_USER_AGENT,
+    Referer: `${MFP_BASE_URL}/food/search`,
+    Authorization: auth.authorization,
+    Cookie: auth.cookieHeader,
   };
-
-  if (config.mfpCookie) {
-    headers.Cookie = config.mfpCookie;
-  }
 
   return headers;
 }
 
-async function request(pathWithQuery: string): Promise<MfpResponse> {
-  const url = new URL(pathWithQuery, config.mfpBaseUrl);
-  const response = await fetch(url, {
+async function fetchMfp(url: URL, forceRefresh = false): Promise<Response> {
+  return fetch(url, {
     method: "GET",
-    headers: getMfpHeaders(),
+    headers: await getMfpHeaders(forceRefresh),
     signal: AbortSignal.timeout(config.requestTimeoutMs),
   });
+}
+
+async function request(pathWithQuery: string): Promise<MfpResponse> {
+  const url = new URL(pathWithQuery, MFP_BASE_URL);
+  let response = await fetchMfp(url);
+
+  if (response.status === 401 || response.status === 403) {
+    response = await fetchMfp(url, true);
+  }
 
   const text = await response.text();
   let json: unknown | null = null;

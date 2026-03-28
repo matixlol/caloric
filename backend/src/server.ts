@@ -8,6 +8,8 @@ import { config } from "./config";
 import { db } from "./db";
 import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
+import { getMfpAuthHeaders } from "./mfp-session";
+import { MFP_BASE_URL } from "./mfp-session";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -611,7 +613,7 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      const fallbackUrl = `${config.mfpBaseUrl}/api/services/foods/${key.foodId}?version=${key.version}`;
+      const fallbackUrl = `${MFP_BASE_URL}/api/services/foods/${key.foodId}?version=${key.version}`;
 
       await saveDetailForSearch({
         searchResponseId,
@@ -1200,6 +1202,7 @@ async function parseJsonBody(request: Request): Promise<Record<string, unknown> 
 const server = Bun.serve({
   hostname: "0.0.0.0",
   port: config.port,
+  idleTimeout: 120,
   async fetch(request: Request): Promise<Response> {
     const url = new URL(request.url);
 
@@ -1237,6 +1240,25 @@ const server = Bun.serve({
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: "search_failed", message }, 502);
+      }
+    }
+
+    if (url.pathname === "/mfp/session/refresh") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      try {
+        const auth = await getMfpAuthHeaders({ forceRefresh: true });
+        return json({
+          ok: true,
+          refreshed: true,
+          hasAuthorization: Boolean(auth.authorization),
+          hasCookie: Boolean(auth.cookieHeader),
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return json({ error: "mfp_session_refresh_failed", message }, 502);
       }
     }
 
