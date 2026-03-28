@@ -59,7 +59,7 @@ OpenRouter tracking fields are sent as `user` (client user id) and `session_id` 
    - fetching upstream only for detail keys not already cached
 6. Saves resolved detail payloads in `mfp_food_detail_responses` for the current `searchResponseId`
 
-The refresh path launches a single Rebrowser Playwright Chrome instance, signs in with username/password, captures cookies and auth state, stores them in `mfp_auth_sessions`, and closes the browser immediately after persistence.
+The refresh path launches the verified Rebrowser Playwright + 2Captcha login harness, captures the resulting cookie-backed session, stores it in `mfp_auth_sessions`, and closes the browser immediately after persistence.
 
 ## Environment
 
@@ -68,7 +68,6 @@ Copy `.env.example` to `.env` and set:
 - `DATABASE_URL`
 - `MFP_USERNAME`
 - `MFP_PASSWORD`
-- `MFP_PROXY_URL` (recommended; used by Rebrowser Playwright during MyFitnessPal login)
 - `TWO_CAPTCHA_API_KEY` (used to solve Cloudflare Turnstile during MyFitnessPal login)
 - `OPENROUTER_API_KEY`
 - `GROQ_API_KEY`
@@ -76,6 +75,8 @@ Copy `.env.example` to `.env` and set:
 Optional:
 
 - `PORT`
+- `MFP_PROXY_URL`
+- `MFP_BROWSER_HEADLESS`
 - `MFP_DETAIL_CONCURRENCY`
 - `MFP_REQUEST_TIMEOUT_MS`
 - `OPENROUTER_MODEL`
@@ -87,7 +88,6 @@ Optional:
 cd backend
 bun install
 bunx playwright install chrome
-bun run db:generate
-bun run db:migrate
+bun run db:push
 bun run dev
 ```

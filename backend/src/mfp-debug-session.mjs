@@ -1,4 +1,5 @@
 import { mkdir, rm, writeFile } from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 import { chromium } from "rebrowser-playwright";
 import { installTurnstileHook, solveTurnstileWith2Captcha } from "./mfp-turnstile.mjs";
@@ -10,7 +11,7 @@ const CALLBACK_URL = `${BASE_URL}/api/auth/callback/credentials`;
 const DESKTOP_CHROME_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
 const PROJECT_ROOT = path.resolve(new URL("..", import.meta.url).pathname, "..");
-const DEFAULT_OUTPUT_DIR = path.join(PROJECT_ROOT, "output", "mfp-debug");
+const DEFAULT_OUTPUT_DIR = path.join(os.tmpdir(), "mfp-debug");
 const DEFAULT_PROFILE_DIR = path.join(DEFAULT_OUTPUT_DIR, "profile");
 
 const mode = process.argv[2] ?? process.env.MFP_DEBUG_MODE ?? "run";
@@ -22,6 +23,131 @@ const shouldCheckIp = process.env.MFP_DEBUG_CHECK_IP === "1";
 const submitMode = process.env.MFP_DEBUG_SUBMIT_MODE ?? "fetch";
 const outputDir = path.resolve(process.env.MFP_DEBUG_OUTPUT_DIR ?? DEFAULT_OUTPUT_DIR);
 const profileDir = path.resolve(process.env.MFP_DEBUG_PROFILE_DIR ?? DEFAULT_PROFILE_DIR);
+
+function isRecord(value) {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+function tryParseJson(value) {
+  try {
+    return JSON.parse(value);
+  } catch {
+    return null;
+  }
+}
+
+function normalizeAuthorization(value, allowOpaqueToken = false) {
+  const normalized = value?.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^Bearer\s+/i.test(normalized)) {
+    return `Bearer ${normalized.replace(/^Bearer\s+/i, "").trim()}`;
+  }
+
+  if (/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(normalized)) {
+    return `Bearer ${normalized}`;
+  }
+
+  if (allowOpaqueToken && /^[A-Za-z0-9._~-]{24,}$/.test(normalized)) {
+    return `Bearer ${normalized}`;
+  }
+
+  return null;
+}
+
+function isAuthorizationLikeKey(key) {
+  return /authorization|access[_-]?token|token|auth/i.test(key);
+}
+
+function findAuthorizationValue(value, depth = 0, seen = new Set(), parentKey) {
+  if (depth > 8 || value === null || value === undefined) {
+    return null;
+  }
+
+  if (typeof value === "string") {
+    const direct = normalizeAuthorization(value, Boolean(parentKey && isAuthorizationLikeKey(parentKey)));
+    if (direct) {
+      return direct;
+    }
+
+    const parsed = tryParseJson(value);
+    if (parsed !== null) {
+      return findAuthorizationValue(parsed, depth + 1, seen, parentKey);
+    }
+
+    return null;
+  }
+
+  if (typeof value !== "object") {
+    return null;
+  }
+
+  if (seen.has(value)) {
+    return null;
+  }
+  seen.add(value);
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const nested = findAuthorizationValue(item, depth + 1, seen);
+      if (nested) {
+        return nested;
+      }
+    }
+    return null;
+  }
+
+  const priorityKeys = ["authorization", "auth", "accessToken", "access_token", "token"];
+  for (const key of priorityKeys) {
+    const nested = findAuthorizationValue(value[key], depth + 1, seen, key);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const nested = findAuthorizationValue(nestedValue, depth + 1, seen, key);
+    if (nested) {
+      return nested;
+    }
+  }
+
+  return null;
+}
+
+function cookieMatchesHostname(cookieDomain, hostname) {
+  const normalizedDomain = cookieDomain.replace(/^\./, "").toLowerCase();
+  const normalizedHostname = hostname.toLowerCase();
+  return normalizedHostname === normalizedDomain || normalizedHostname.endsWith(`.${normalizedDomain}`);
+}
+
+function buildCookieHeader(storageState) {
+  if (!isRecord(storageState) || !Array.isArray(storageState.cookies)) {
+    return null;
+  }
+
+  const hostname = new URL(BASE_URL).hostname;
+  const nowSeconds = Date.now() / 1000;
+  const cookies = storageState.cookies.filter((cookie) => {
+    if (!cookie?.name || !cookie?.value || !cookie?.domain) {
+      return false;
+    }
+
+    if (!cookieMatchesHostname(cookie.domain, hostname)) {
+      return false;
+    }
+
+    return cookie.expires === -1 || cookie.expires > nowSeconds;
+  });
+
+  if (cookies.length === 0) {
+    return null;
+  }
+
+  return cookies.map((cookie) => `${cookie.name}=${cookie.value}`).join("; ");
+}
 
 function getProxyConfig(proxyUrl) {
   const trimmed = proxyUrl?.trim();
@@ -199,6 +325,50 @@ async function inspectPage(page, context) {
   };
 }
 
+async function captureSessionStorage(page) {
+  return page.evaluate(() => {
+    const output = {};
+    for (let index = 0; index < window.sessionStorage.length; index += 1) {
+      const key = window.sessionStorage.key(index);
+      if (!key) {
+        continue;
+      }
+
+      const value = window.sessionStorage.getItem(key);
+      if (value !== null) {
+        output[key] = value;
+      }
+    }
+    return output;
+  });
+}
+
+async function fetchSessionPayload(page) {
+  const result = await page.evaluate(async (endpoint) => {
+    try {
+      const response = await fetch(endpoint, {
+        credentials: "include",
+        headers: {
+          Accept: "application/json",
+        },
+      });
+
+      return {
+        ok: response.ok,
+        text: await response.text(),
+      };
+    } catch {
+      return null;
+    }
+  }, `${BASE_URL}/api/auth/session`);
+
+  if (!result?.ok || !result.text) {
+    return null;
+  }
+
+  return tryParseJson(result.text);
+}
+
 async function inspectForm(page) {
   return page.evaluate(() => {
     const form = document.querySelector("form");
@@ -343,8 +513,10 @@ async function main() {
   });
   const page = context.pages()[0] ?? (await context.newPage());
   await installTurnstileHook(page);
+  let capturedAuthorization = null;
 
   const state = {
+    auth: null,
     callback: null,
     final: null,
     headless,
@@ -359,6 +531,10 @@ async function main() {
   };
 
   context.on("request", (request) => {
+    if (!capturedAuthorization && request.url().includes("myfitnesspal.com")) {
+      capturedAuthorization = normalizeAuthorization(request.headers().authorization) ?? capturedAuthorization;
+    }
+
     if (!request.url().includes("/api/auth/callback/credentials")) {
       return;
     }
@@ -440,6 +616,24 @@ async function main() {
     state.stage = "submitted";
     state.form = await inspectForm(page);
     state.final = await inspectPage(page, context);
+    const storageState = await context.storageState();
+    const sessionStorage = await captureSessionStorage(page);
+    const sessionPayload = await fetchSessionPayload(page);
+    const authorization =
+      capturedAuthorization ??
+      findAuthorizationValue(sessionPayload) ??
+      findAuthorizationValue(storageState) ??
+      findAuthorizationValue(sessionStorage);
+    const cookieHeader = buildCookieHeader(storageState);
+    state.auth = {
+      authorization,
+      cookieHeader,
+      hasAuthorization: Boolean(authorization),
+      hasCookieHeader: Boolean(cookieHeader),
+      sessionPayload,
+      sessionStorage,
+      storageState,
+    };
     await saveArtifacts(page, state);
     console.log(JSON.stringify(state, null, 2));
     await maybePause(page, state);

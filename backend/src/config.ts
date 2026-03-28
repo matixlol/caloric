@@ -38,7 +38,6 @@ function getBooleanEnv(name: string, fallback: boolean): boolean {
 export const config = {
   port: getNumberEnv("PORT", 8787),
   databaseUrl: getRequiredEnv("DATABASE_URL"),
-  browserlessApiToken: Bun.env.BROWSERLESS_API_TOKEN,
   mfpUsername: Bun.env.MFP_USERNAME,
   mfpPassword: Bun.env.MFP_PASSWORD,
   mfpProxyUrl: Bun.env.MFP_PROXY_URL,

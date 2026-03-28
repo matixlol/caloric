@@ -19,9 +19,12 @@ async function getMfpHeaders(forceRefresh = false): Promise<HeadersInit> {
     "Accept-Language": "en-US,en;q=0.9",
     "User-Agent": MFP_API_USER_AGENT,
     Referer: `${MFP_BASE_URL}/food/search`,
-    Authorization: auth.authorization,
     Cookie: auth.cookieHeader,
   };
+
+  if (auth.authorization) {
+    headers.Authorization = auth.authorization;
+  }
 
   return headers;
 }
