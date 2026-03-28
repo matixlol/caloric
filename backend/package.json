@@ -14,6 +14,7 @@
     "anmat:import-product-derived": "bun src/import-anmat-product-derived.ts"
   },
   "dependencies": {
+    "cheerio": "^1.1.2",
     "drizzle-orm": "^0.44.5",
     "playwright-core": "1.52.0",
     "postgres": "^3.4.7",

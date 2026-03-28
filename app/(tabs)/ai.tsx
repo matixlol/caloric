@@ -22,6 +22,7 @@ import {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
 import { localDateKeyFromTimestamp } from "../../src/date";
+import { type SearchFood as SharedSearchFood } from "../../src/food-search";
 import { CaloricAccount } from "../../src/jazz/schema";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel } from "../../src/portion";
@@ -40,21 +41,8 @@ type ApprovalOutput = {
 
 type ChatStatus = "ready" | "streaming" | "awaiting-approval";
 
-type SearchResultFood = {
+type SearchResultFood = SharedSearchFood & {
   resultId: string;
-  name: string;
-  brand?: string;
-  serving?: string;
-  nutrition?: {
-    calories?: number;
-    protein?: number;
-    carbs?: number;
-    fat?: number;
-    fiber?: number;
-    sugars?: number;
-    sodiumMg?: number;
-    potassiumMg?: number;
-  };
 };
 
 type ResolvedApprovalSuggestion = {
@@ -932,13 +920,18 @@ export default function AILogScreen() {
                 <View style={styles.toolCard}>
                   <Text style={styles.toolHeading}>Found foods</Text>
                   {message.foods.slice(0, 6).map((food) => (
-                    <Text key={food.resultId} style={styles.toolText}>
-                      {food.resultId} • {food.name}
-                      {food.brand ? ` • ${food.brand}` : ""}
-                      {food.nutrition?.calories !== undefined
-                        ? ` • ${formatCalories(food.nutrition.calories)} kcal`
-                        : ""}
-                    </Text>
+                    <View key={food.resultId} style={styles.suggestionCard}>
+                      <View style={styles.toolTitleRow}>
+                        <Text style={styles.sourceBadge}>{food.sourceLabel}</Text>
+                        <Text style={styles.toolText}>
+                          {food.resultId} • {food.name}
+                          {food.brand ? ` • ${food.brand}` : ""}
+                        </Text>
+                      </View>
+                      {food.nutrition?.calories !== undefined ? (
+                        <Text style={styles.toolMeta}>{`${formatCalories(food.nutrition.calories)} kcal`}</Text>
+                      ) : null}
+                    </View>
                   ))}
                 </View>
               </View>
@@ -955,10 +948,13 @@ export default function AILogScreen() {
 
                   return (
                     <View key={suggestion.suggestionId} style={styles.suggestionCard}>
-                      <Text style={styles.toolText}>
-                        {suggestion.food.name}
-                        {suggestion.food.brand ? ` • ${suggestion.food.brand}` : ""}
-                      </Text>
+                      <View style={styles.toolTitleRow}>
+                        <Text style={styles.sourceBadge}>{suggestion.food.sourceLabel}</Text>
+                        <Text style={styles.toolText}>
+                          {suggestion.food.name}
+                          {suggestion.food.brand ? ` • ${suggestion.food.brand}` : ""}
+                        </Text>
+                      </View>
                       {suggestion.food.serving ? (
                         <Text style={styles.toolMeta}>{suggestion.food.serving}</Text>
                       ) : null}
@@ -1215,6 +1211,11 @@ function createStyles({ palette }: AppTheme) {
       borderTopWidth: StyleSheet.hairlineWidth,
       borderTopColor: palette.separator,
     },
+    toolTitleRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 8,
+    },
     toolHeading: {
       fontSize: 13,
       lineHeight: 17,
@@ -1232,6 +1233,17 @@ function createStyles({ palette }: AppTheme) {
       fontSize: 12,
       lineHeight: 17,
       color: palette.secondaryLabel,
+    },
+    sourceBadge: {
+      paddingHorizontal: 7,
+      paddingVertical: 2,
+      borderRadius: 999,
+      overflow: "hidden",
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: "700",
+      color: palette.tint,
+      backgroundColor: "rgba(37,99,235,0.12)",
     },
     toolReason: {
       marginTop: 8,

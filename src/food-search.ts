@@ -1,53 +1,16 @@
 const SEARCH_MAX_ITEMS_DEFAULT = 20;
+const LIVE_ANMAT_MAX_ITEMS_DEFAULT = 8;
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
   "https://backend.caloric.mati.lol";
 
-type MfpNutritionalContents = {
-  energy?: {
-    value?: unknown;
-  };
-  protein?: unknown;
-  carbohydrates?: unknown;
-  fat?: unknown;
-  fiber?: unknown;
-  sugar?: unknown;
-  sodium?: unknown;
-  potassium?: unknown;
-};
-
-type MfpServingSize = {
-  value?: unknown;
-  unit?: unknown;
-};
-
-type MfpFood = {
-  id?: unknown;
-  version?: unknown;
-  description?: unknown;
-  brand_name?: unknown;
-  serving_sizes?: unknown;
-  nutritional_contents?: MfpNutritionalContents | null;
-};
-
-type SearchPayload = {
-  search?: {
-    data?: {
-      items?: { item?: MfpFood | null }[];
-    } | null;
-  } | null;
-  details?: {
-    foodId?: unknown;
-    version?: unknown;
-    status?: unknown;
-    data?: MfpFood | null;
-  }[] | null;
-  error?: unknown;
-  message?: unknown;
-};
+export type SearchFoodSource = "mfp" | "anmat";
 
 export type SearchFood = {
   id: string;
+  canonicalKey: string;
+  source: SearchFoodSource;
+  sourceLabel: "MFP" | "ANMAT";
   name: string;
   brand?: string;
   serving?: string;
@@ -61,6 +24,22 @@ export type SearchFood = {
     sodiumMg?: number;
     potassiumMg?: number;
   };
+};
+
+type SearchResponsePayload = {
+  query?: unknown;
+  foods?: SearchFood[] | null;
+  error?: unknown;
+  message?: unknown;
+};
+
+type LiveSearchPayload = {
+  query?: unknown;
+  foods?: SearchFood[] | null;
+  eanAttempted?: unknown;
+  eanStatus?: unknown;
+  error?: unknown;
+  message?: unknown;
 };
 
 function asString(value: unknown): string | undefined {
@@ -96,132 +75,69 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
-function formatServing(servingSizes: unknown): string | undefined {
-  if (!Array.isArray(servingSizes)) {
-    return undefined;
+function mapSearchFood(value: unknown): SearchFood | null {
+  if (!value || typeof value !== "object") {
+    return null;
   }
 
-  for (const candidate of servingSizes) {
-    if (!candidate || typeof candidate !== "object") {
-      continue;
-    }
+  const food = value as Record<string, unknown>;
+  const id = asString(food.id);
+  const canonicalKey = asString(food.canonicalKey);
+  const source = food.source === "anmat" ? "anmat" : food.source === "mfp" ? "mfp" : null;
+  const sourceLabel = food.sourceLabel === "ANMAT" ? "ANMAT" : food.sourceLabel === "MFP" ? "MFP" : null;
+  const name = asString(food.name);
 
-    const serving = candidate as MfpServingSize;
-    const value = asNumber(serving.value);
-    const unit = asString(serving.unit);
-
-    if (value !== undefined && unit) {
-      return `${value} ${unit}`;
-    }
-
-    if (value !== undefined) {
-      return String(value);
-    }
-
-    if (unit) {
-      return unit;
-    }
+  if (!id || !canonicalKey || !source || !sourceLabel || !name) {
+    return null;
   }
 
-  return undefined;
-}
+  const nutritionSource =
+    food.nutrition && typeof food.nutrition === "object" ? (food.nutrition as Record<string, unknown>) : null;
 
-function mapNutrition(contents: MfpNutritionalContents | null | undefined): SearchFood["nutrition"] {
-  if (!contents) {
-    return undefined;
-  }
+  const nutrition = nutritionSource
+    ? {
+        calories: asNumber(nutritionSource.calories),
+        protein: asNumber(nutritionSource.protein),
+        carbs: asNumber(nutritionSource.carbs),
+        fat: asNumber(nutritionSource.fat),
+        fiber: asNumber(nutritionSource.fiber),
+        sugars: asNumber(nutritionSource.sugars),
+        sodiumMg: asNumber(nutritionSource.sodiumMg),
+        potassiumMg: asNumber(nutritionSource.potassiumMg),
+      }
+    : undefined;
 
-  const nutrition = {
-    calories: asNumber(contents.energy?.value),
-    protein: asNumber(contents.protein),
-    carbs: asNumber(contents.carbohydrates),
-    fat: asNumber(contents.fat),
-    fiber: asNumber(contents.fiber),
-    sugars: asNumber(contents.sugar),
-    sodiumMg: asNumber(contents.sodium),
-    potassiumMg: asNumber(contents.potassium),
+  return {
+    id,
+    canonicalKey,
+    source,
+    sourceLabel,
+    name,
+    brand: asString(food.brand),
+    serving: asString(food.serving),
+    nutrition:
+      nutrition && Object.values(nutrition).some((entry) => entry !== undefined) ? nutrition : undefined,
   };
-
-  if (Object.values(nutrition).every((value) => value === undefined)) {
-    return undefined;
-  }
-
-  return nutrition;
 }
 
-function mapSearchResults(payload: SearchPayload): SearchFood[] {
-  const detailById = new Map<string, MfpFood>();
-  const details = payload.details ?? [];
-
-  for (const detail of details) {
-    if (!detail || typeof detail !== "object") {
-      continue;
-    }
-
-    const status = asNumber(detail.status);
-    if (status !== 200 || !detail.data || typeof detail.data !== "object") {
-      continue;
-    }
-
-    const foodId = asString(detail.foodId);
-    const version = asString(detail.version);
-    if (!foodId || !version) {
-      continue;
-    }
-
-    detailById.set(`${foodId}:${version}`, detail.data);
-  }
-
-  const items = payload.search?.data?.items;
-  if (!Array.isArray(items)) {
+function mapFoods(payload: { foods?: SearchFood[] | null } | null | undefined): SearchFood[] {
+  const rows = payload?.foods;
+  if (!Array.isArray(rows)) {
     return [];
   }
 
-  const results: SearchFood[] = [];
-  const seen = new Set<string>();
-
-  for (const row of items) {
-    const item = row?.item;
-    if (!item || typeof item !== "object") {
-      continue;
+  const foods: SearchFood[] = [];
+  for (const row of rows) {
+    const mapped = mapSearchFood(row);
+    if (mapped) {
+      foods.push(mapped);
     }
-
-    const foodId = asString(item.id);
-    const version = asString(item.version);
-    if (!foodId || !version) {
-      continue;
-    }
-
-    const compositeId = `${foodId}:${version}`;
-    if (seen.has(compositeId)) {
-      continue;
-    }
-    seen.add(compositeId);
-
-    const detail = detailById.get(compositeId);
-    const source = detail ?? item;
-    const name = asString(source.description) ?? asString(item.description);
-    if (!name) {
-      continue;
-    }
-
-    const brand = asString(source.brand_name) ?? asString(item.brand_name);
-    const serving = formatServing(source.serving_sizes) ?? formatServing(item.serving_sizes);
-    const nutrition = mapNutrition(source.nutritional_contents ?? item.nutritional_contents);
-
-    results.push({
-      id: compositeId,
-      name,
-      brand,
-      serving,
-      nutrition,
-    });
   }
 
-  return results;
+  return foods;
 }
 
-function getPayloadErrorMessage(payload: SearchPayload | null): string | undefined {
+function getPayloadErrorMessage(payload: SearchResponsePayload | LiveSearchPayload | null): string | undefined {
   if (!payload) {
     return undefined;
   }
@@ -237,26 +153,41 @@ function getPayloadErrorMessage(payload: SearchPayload | null): string | undefin
   return undefined;
 }
 
-export async function searchFoods(
+function mergeFoods(currentFoods: SearchFood[], nextFoods: SearchFood[], maxItems: number): SearchFood[] {
+  const merged: SearchFood[] = [];
+  const seen = new Set<string>();
+
+  for (const food of [...nextFoods, ...currentFoods]) {
+    if (seen.has(food.canonicalKey)) {
+      continue;
+    }
+    seen.add(food.canonicalKey);
+    merged.push(food);
+    if (merged.length >= maxItems) {
+      break;
+    }
+  }
+
+  return merged;
+}
+
+async function fetchBaseSearch(
   query: string,
-  options: {
-    signal?: AbortSignal;
-    maxItems?: number;
-  } = {},
+  signal: AbortSignal | undefined,
+  maxItems: number,
 ): Promise<SearchFood[]> {
   const url = new URL("/search", `${BACKEND_BASE_URL}/`);
   url.searchParams.set("query", query);
-  url.searchParams.set("maxItems", String(options.maxItems ?? SEARCH_MAX_ITEMS_DEFAULT));
-  url.searchParams.set("includeDetails", "true");
+  url.searchParams.set("maxItems", String(maxItems));
 
   const response = await fetch(url.toString(), {
     method: "GET",
-    signal: options.signal,
+    signal,
   });
 
-  let payload: SearchPayload | null = null;
+  let payload: SearchResponsePayload | null = null;
   try {
-    payload = (await response.json()) as SearchPayload;
+    payload = (await response.json()) as SearchResponsePayload;
   } catch {
     payload = null;
   }
@@ -265,5 +196,65 @@ export async function searchFoods(
     throw new Error(getPayloadErrorMessage(payload) ?? `Search request failed with ${response.status}`);
   }
 
-  return mapSearchResults(payload ?? {});
+  return mapFoods(payload);
+}
+
+async function refreshAnmatLive(
+  query: string,
+  signal: AbortSignal | undefined,
+  maxItems: number,
+): Promise<SearchFood[]> {
+  const response = await fetch(new URL("/search/anmat-live", `${BACKEND_BASE_URL}/`).toString(), {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query,
+      maxItems,
+    }),
+  });
+
+  let payload: LiveSearchPayload | null = null;
+  try {
+    payload = (await response.json()) as LiveSearchPayload;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(getPayloadErrorMessage(payload) ?? `Live ANMAT search failed with ${response.status}`);
+  }
+
+  return mapFoods(payload);
+}
+
+export async function searchFoods(
+  query: string,
+  options: {
+    signal?: AbortSignal;
+    maxItems?: number;
+    liveAnmatMaxItems?: number;
+    onBackgroundResults?: (foods: SearchFood[]) => void;
+  } = {},
+): Promise<SearchFood[]> {
+  const maxItems = options.maxItems ?? SEARCH_MAX_ITEMS_DEFAULT;
+  const liveAnmatMaxItems = options.liveAnmatMaxItems ?? LIVE_ANMAT_MAX_ITEMS_DEFAULT;
+  const baseFoods = await fetchBaseSearch(query, options.signal, maxItems);
+
+  if (options.onBackgroundResults) {
+    void refreshAnmatLive(query, options.signal, liveAnmatMaxItems)
+      .then((liveFoods) => {
+        if (options.signal?.aborted) {
+          return;
+        }
+        options.onBackgroundResults?.(mergeFoods(baseFoods, liveFoods, maxItems));
+      })
+      .catch(() => {
+        // Background refresh is opportunistic; keep the initial results if it fails.
+      });
+  }
+
+  return baseFoods;
 }

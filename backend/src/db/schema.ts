@@ -75,6 +75,7 @@ export const anmatProductHtmlBlobs = pgTable(
   {
     id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
     sourcePath: text("source_path").notNull(),
+    ingestSource: text("ingest_source").notNull().default("disk_import"),
     runKey: text("run_key").notNull(),
     detailKey: text("detail_key"),
     token: text("token"),
@@ -101,6 +102,7 @@ export const anmatProductHtmlBlobs = pgTable(
   },
   (table) => ({
     sourcePathUnique: uniqueIndex("anmat_product_html_blobs_source_path_uidx").on(table.sourcePath),
+    ingestSourceIdx: index("anmat_product_html_blobs_ingest_source_idx").on(table.ingestSource),
     detailKeyIdx: index("anmat_product_html_blobs_detail_key_idx").on(table.detailKey),
     rnpaIdx: index("anmat_product_html_blobs_rnpa_idx").on(table.rnpa),
     brandIdx: index("anmat_product_html_blobs_marca_idx").on(table.marca),
@@ -126,6 +128,8 @@ export const anmatProductDerivedData = pgTable(
     fiberGrams: text("fiber_grams"),
     sugarsGrams: text("sugars_grams"),
     sodiumMg: integer("sodium_mg"),
+    eanAttempted: boolean("ean_attempted").notNull().default(true),
+    eanStatus: text("ean_status").notNull().default("html_parsed"),
     ean: text("ean"),
     eanSource: text("ean_source"),
     eanCandidates: jsonb("ean_candidates"),
@@ -134,6 +138,7 @@ export const anmatProductDerivedData = pgTable(
   (table) => ({
     htmlBlobUnique: uniqueIndex("anmat_product_derived_data_html_blob_uidx").on(table.htmlBlobId),
     nutritionFoundIdx: index("anmat_product_derived_data_nutrition_found_idx").on(table.nutritionFound),
+    eanStatusIdx: index("anmat_product_derived_data_ean_status_idx").on(table.eanStatus),
     eanIdx: index("anmat_product_derived_data_ean_idx").on(table.ean),
   }),
 );

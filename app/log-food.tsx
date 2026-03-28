@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { normalizeLocalDateKey } from "../src/date";
+import { type SearchFood, searchFoods } from "../src/food-search";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 import { CaloricAccount } from "../src/jazz/schema";
 
@@ -35,228 +36,6 @@ const palette = {
 
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MAX_ITEMS = 20;
-const BACKEND_BASE_URL =
-  (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
-  "https://backend.caloric.mati.lol";
-
-type MfpNutritionalContents = {
-  energy?: {
-    value?: unknown;
-  };
-  protein?: unknown;
-  carbohydrates?: unknown;
-  fat?: unknown;
-  fiber?: unknown;
-  sugar?: unknown;
-  sodium?: unknown;
-  potassium?: unknown;
-};
-
-type MfpServingSize = {
-  value?: unknown;
-  unit?: unknown;
-};
-
-type MfpFood = {
-  id?: unknown;
-  version?: unknown;
-  description?: unknown;
-  brand_name?: unknown;
-  serving_sizes?: unknown;
-  nutritional_contents?: MfpNutritionalContents | null;
-};
-
-type SearchPayload = {
-  search?: {
-    data?: {
-      items?: { item?: MfpFood | null }[];
-    } | null;
-  } | null;
-  details?: {
-    foodId?: unknown;
-    version?: unknown;
-    status?: unknown;
-    data?: MfpFood | null;
-  }[] | null;
-  error?: unknown;
-  message?: unknown;
-};
-
-type SearchFood = {
-  id: string;
-  name: string;
-  brand?: string;
-  serving?: string;
-  nutrition?: {
-    calories?: number;
-    protein?: number;
-    carbs?: number;
-    fat?: number;
-    fiber?: number;
-    sugars?: number;
-    sodiumMg?: number;
-    potassiumMg?: number;
-  };
-};
-
-function asString(value: unknown): string | undefined {
-  if (typeof value === "string") {
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : undefined;
-  }
-
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
-
-  return undefined;
-}
-
-function asNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
-
-  if (typeof value === "string") {
-    const normalized = value.trim();
-    if (!normalized) {
-      return undefined;
-    }
-
-    const parsed = Number(normalized);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-function formatServing(servingSizes: unknown): string | undefined {
-  if (!Array.isArray(servingSizes)) {
-    return undefined;
-  }
-
-  for (const candidate of servingSizes) {
-    if (!candidate || typeof candidate !== "object") {
-      continue;
-    }
-
-    const serving = candidate as MfpServingSize;
-    const value = asNumber(serving.value);
-    const unit = asString(serving.unit);
-
-    if (value !== undefined && unit) {
-      return `${value} ${unit}`;
-    }
-
-    if (value !== undefined) {
-      return String(value);
-    }
-
-    if (unit) {
-      return unit;
-    }
-  }
-
-  return undefined;
-}
-
-function mapNutrition(contents: MfpNutritionalContents | null | undefined): SearchFood["nutrition"] {
-  if (!contents) {
-    return undefined;
-  }
-
-  const nutrition = {
-    calories: asNumber(contents.energy?.value),
-    protein: asNumber(contents.protein),
-    carbs: asNumber(contents.carbohydrates),
-    fat: asNumber(contents.fat),
-    fiber: asNumber(contents.fiber),
-    sugars: asNumber(contents.sugar),
-    sodiumMg: asNumber(contents.sodium),
-    potassiumMg: asNumber(contents.potassium),
-  };
-
-  if (Object.values(nutrition).every((value) => value === undefined)) {
-    return undefined;
-  }
-
-  return nutrition;
-}
-
-function mapSearchResults(payload: SearchPayload): SearchFood[] {
-  const detailById = new Map<string, MfpFood>();
-  const details = payload.details ?? [];
-
-  for (const detail of details) {
-    if (!detail || typeof detail !== "object") {
-      continue;
-    }
-
-    const status = asNumber(detail.status);
-    if (status !== 200 || !detail.data || typeof detail.data !== "object") {
-      continue;
-    }
-
-    const foodId = asString(detail.foodId);
-    const version = asString(detail.version);
-    if (!foodId || !version) {
-      continue;
-    }
-
-    detailById.set(`${foodId}:${version}`, detail.data);
-  }
-
-  const items = payload.search?.data?.items;
-  if (!Array.isArray(items)) {
-    return [];
-  }
-
-  const results: SearchFood[] = [];
-  const seen = new Set<string>();
-
-  for (const row of items) {
-    const item = row?.item;
-    if (!item || typeof item !== "object") {
-      continue;
-    }
-
-    const foodId = asString(item.id);
-    const version = asString(item.version);
-    if (!foodId || !version) {
-      continue;
-    }
-
-    const compositeId = `${foodId}:${version}`;
-    if (seen.has(compositeId)) {
-      continue;
-    }
-    seen.add(compositeId);
-
-    const detail = detailById.get(compositeId);
-    const source = detail ?? item;
-    const name = asString(source.description) ?? asString(item.description);
-    if (!name) {
-      continue;
-    }
-
-    const brand = asString(source.brand_name) ?? asString(item.brand_name);
-    const serving = formatServing(source.serving_sizes) ?? formatServing(item.serving_sizes);
-    const nutrition = mapNutrition(source.nutritional_contents ?? item.nutritional_contents);
-
-    results.push({
-      id: compositeId,
-      name,
-      brand,
-      serving,
-      nutrition,
-    });
-  }
-
-  return results;
-}
-
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -268,38 +47,8 @@ function getErrorMessage(error: unknown): string {
 
   return "Unable to search foods right now.";
 }
-
-async function searchFoods(query: string, signal: AbortSignal): Promise<SearchFood[]> {
-  const url = new URL("/search", `${BACKEND_BASE_URL}/`);
-  url.searchParams.set("query", query);
-  url.searchParams.set("maxItems", String(SEARCH_MAX_ITEMS));
-  url.searchParams.set("includeDetails", "true");
-
-  const response = await fetch(url.toString(), {
-    method: "GET",
-    signal,
-  });
-
-  let payload: SearchPayload | null = null;
-  try {
-    payload = (await response.json()) as SearchPayload;
-  } catch {
-    payload = null;
-  }
-
-  if (!response.ok) {
-    const apiMessage = payload ? asString(payload.message) : undefined;
-    throw new Error(apiMessage ?? `Search request failed with ${response.status}`);
-  }
-
-  if (payload?.error) {
-    throw new Error(asString(payload.message) ?? "Search request failed.");
-  }
-
-  return mapSearchResults(payload ?? {});
-}
-
 function FoodRow({
+  sourceLabel,
   name,
   meta,
   calories,
@@ -307,6 +56,7 @@ function FoodRow({
   isLast,
   onPress,
 }: {
+  sourceLabel: SearchFood["sourceLabel"];
   name: string;
   meta: string;
   calories: number;
@@ -321,7 +71,10 @@ function FoodRow({
       style={[styles.foodRow, !isLast && styles.foodRowDivider]}
     >
       <View style={styles.foodMain}>
-        <Text style={styles.foodName}>{name}</Text>
+        <View style={styles.foodTitleRow}>
+          <Text style={styles.sourceBadge}>{sourceLabel}</Text>
+          <Text style={styles.foodName}>{name}</Text>
+        </View>
         <Text style={styles.foodMeta}>{meta}</Text>
       </View>
       <View style={styles.foodRight}>
@@ -369,7 +122,16 @@ export default function LogFoodScreen() {
       setSearchError(null);
 
       try {
-        const nextFoods = await searchFoods(normalizedQuery, controller.signal);
+        const nextFoods = await searchFoods(normalizedQuery, {
+          signal: controller.signal,
+          maxItems: SEARCH_MAX_ITEMS,
+          onBackgroundResults: (refreshedFoods) => {
+            setFoods(refreshedFoods);
+            setSelectedFoodId((current) =>
+              current && refreshedFoods.some((food) => food.id === current) ? current : null,
+            );
+          },
+        });
         setFoods(nextFoods);
         setSelectedFoodId((current) =>
           current && nextFoods.some((food) => food.id === current) ? current : null,
@@ -502,6 +264,7 @@ export default function LogFoodScreen() {
               return (
                 <FoodRow
                   key={food.id}
+                  sourceLabel={food.sourceLabel}
                   name={food.name}
                   meta={meta}
                   calories={calories}
@@ -617,6 +380,22 @@ const styles = StyleSheet.create({
   },
   foodMain: {
     flex: 1,
+  },
+  foodTitleRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  sourceBadge: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 999,
+    overflow: "hidden",
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "700",
+    color: palette.tint,
+    backgroundColor: "rgba(37,99,235,0.12)",
   },
   foodName: {
     fontSize: 17,
