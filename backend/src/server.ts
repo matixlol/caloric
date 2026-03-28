@@ -31,6 +31,7 @@ import {
   mfpFoodDetailResponses,
   mfpSearchResponses,
 } from "./db/schema";
+import { logError, logInfo, redactSecret, summarizeText } from "./logging";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
@@ -199,6 +200,19 @@ type AgentSession = {
   pendingApprovals: Map<string, ResolvedApprovalSuggestion[]>;
   updatedAt: number;
 };
+
+function buildMfpSearchTraceId(): string {
+  return `mfp-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function countSearchItems(payload: unknown): number | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const items = (payload as { items?: unknown }).items;
+  return Array.isArray(items) ? items.length : null;
+}
 
 const openRouterTools = [
   {
@@ -557,6 +571,7 @@ function extractDetailKeys(searchJson: unknown): Array<{ foodId: string; version
 }
 
 async function executeSearch(params: SearchParams): Promise<SearchResponsePayload> {
+  const traceId = buildMfpSearchTraceId();
   const searchLookup = {
     query: params.query,
     offset: params.offset,
@@ -564,6 +579,18 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
     countryCode: params.countryCode,
     resourceType: params.resourceType,
   };
+  const startedAt = Date.now();
+
+  logInfo("mfp.search.start", {
+    traceId,
+    query: params.query,
+    offset: params.offset,
+    maxItems: params.maxItems,
+    countryCode: params.countryCode,
+    resourceType: params.resourceType,
+    includeDetails: params.includeDetails,
+    detailConcurrency: config.detailConcurrency,
+  });
 
   const cachedSearch = await findCachedSearch(searchLookup);
 
@@ -578,6 +605,14 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
   if (cachedSearch) {
     searchResponseId = cachedSearch.id;
     searchPayload = toSearchPayload(cachedSearch);
+    logInfo("mfp.search.cache_hit", {
+      traceId,
+      searchResponseId,
+      status: cachedSearch.mfpStatus,
+      url: cachedSearch.mfpUrl,
+      itemCount: countSearchItems(cachedSearch.responseJson),
+      textPreview: summarizeText(cachedSearch.responseText),
+    });
   } else {
     const searchResponse = await searchNutrition(searchLookup);
     const [savedSearch] = await db
@@ -602,9 +637,26 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
       data: searchResponse.json,
       text: searchResponse.text,
     };
+
+    logInfo("mfp.search.fetched", {
+      traceId,
+      searchResponseId,
+      status: searchResponse.status,
+      url: searchResponse.url,
+      itemCount: countSearchItems(searchResponse.json),
+      textPreview: summarizeText(searchResponse.text),
+    });
   }
 
   if (!params.includeDetails || !searchPayload.data) {
+    logInfo("mfp.search.complete", {
+      traceId,
+      searchResponseId,
+      detailCount: 0,
+      durationMs: Date.now() - startedAt,
+      resultItemCount: countSearchItems(searchPayload.data),
+      skippedDetails: !params.includeDetails ? "include_details_false" : "missing_search_data",
+    });
     return {
       searchResponseId,
       search: searchPayload,
@@ -615,9 +667,25 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
 
   const detailKeys = extractDetailKeys(searchPayload.data);
 
+  logInfo("mfp.search.detail_keys", {
+    traceId,
+    searchResponseId,
+    detailKeyCount: detailKeys.length,
+  });
+
   const detailTasks = detailKeys.map((key) => async () => {
     const cachedDetail = await findCachedDetail(key.foodId, key.version);
     if (cachedDetail) {
+      logInfo("mfp.detail.cache_hit", {
+        traceId,
+        searchResponseId,
+        foodId: key.foodId,
+        version: key.version,
+        status: cachedDetail.mfpStatus,
+        url: cachedDetail.mfpUrl,
+        textPreview: summarizeText(cachedDetail.responseText),
+      });
+
       await saveDetailForSearch({
         searchResponseId,
         foodId: key.foodId,
@@ -632,6 +700,13 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
     }
 
     try {
+      logInfo("mfp.detail.fetch_start", {
+        traceId,
+        searchResponseId,
+        foodId: key.foodId,
+        version: key.version,
+      });
+
       const detailResponse = await fetchFoodDetail(key.foodId, key.version);
 
       await saveDetailForSearch({
@@ -644,6 +719,16 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
         responseText: detailResponse.text,
       });
 
+      logInfo("mfp.detail.fetch_complete", {
+        traceId,
+        searchResponseId,
+        foodId: key.foodId,
+        version: key.version,
+        status: detailResponse.status,
+        url: detailResponse.url,
+        textPreview: summarizeText(detailResponse.text),
+      });
+
       return toDetailPayload(key, {
         mfpStatus: detailResponse.status,
         mfpUrl: detailResponse.url,
@@ -653,6 +738,14 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       const fallbackUrl = `${config.mfpBaseUrl}/api/services/foods/${key.foodId}?version=${key.version}`;
+
+      logError("mfp.detail.fetch_failed", error, {
+        traceId,
+        searchResponseId,
+        foodId: key.foodId,
+        version: key.version,
+        fallbackUrl,
+      });
 
       await saveDetailForSearch({
         searchResponseId,
@@ -674,6 +767,16 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
   });
 
   const details = await runWithConcurrency(detailTasks, config.detailConcurrency);
+
+  logInfo("mfp.search.complete", {
+    traceId,
+    searchResponseId,
+    searchStatus: searchPayload.status,
+    detailCount: details.length,
+    detailSuccessCount: details.filter((detail) => detail.status === 200).length,
+    durationMs: Date.now() - startedAt,
+    resultItemCount: countSearchItems(searchPayload.data),
+  });
 
   return {
     searchResponseId,
@@ -979,6 +1082,12 @@ async function searchLocalAnmatFoods(query: string, limit: number): Promise<Food
 }
 
 async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+  const startedAt = Date.now();
+  logInfo("mfp.search_foods.start", {
+    query,
+    limit,
+  });
+
   const searchPayload = await executeSearch({
     query,
     offset: 0,
@@ -988,7 +1097,18 @@ async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchR
     includeDetails: true,
   });
 
-  return mapMfpSearchResults(searchPayload).slice(0, limit);
+  const mappedResults = mapMfpSearchResults(searchPayload).slice(0, limit);
+
+  logInfo("mfp.search_foods.complete", {
+    query,
+    limit,
+    searchStatus: searchPayload.search.status,
+    detailCount: searchPayload.detailCount,
+    mappedCount: mappedResults.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return mappedResults;
 }
 
 function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): FoodSearchResult[] {
@@ -1038,11 +1158,34 @@ async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSea
 
   if (anmatFoods.length === 0 && mfpFoods.length === 0) {
     if (anmatResult.status === "rejected") {
+      logError("food_search.anmat_failed", anmatResult.reason, {
+        query,
+        limit,
+      });
       throw anmatResult.reason;
     }
     if (mfpResult.status === "rejected") {
+      logError("food_search.mfp_failed", mfpResult.reason, {
+        query,
+        limit,
+      });
       throw mfpResult.reason;
     }
+  }
+
+  if (mfpResult.status === "rejected") {
+    logError("food_search.mfp_partial_failure", mfpResult.reason, {
+      query,
+      limit,
+      anmatCount: anmatFoods.length,
+    });
+  } else {
+    logInfo("food_search.mfp_success", {
+      query,
+      limit,
+      mfpCount: mfpFoods.length,
+      anmatCount: anmatFoods.length,
+    });
   }
 
   return interleaveFoodResults([anmatFoods, mfpFoods], limit);
@@ -2066,4 +2209,15 @@ const server = Bun.serve({
   },
 });
 
+logInfo("backend.startup", {
+  host: server.hostname,
+  port: server.port,
+  mfpBaseUrl: config.mfpBaseUrl,
+  hasMfpAuthorization: Boolean(config.mfpAuthorization),
+  mfpAuthorizationPreview: redactSecret(config.mfpAuthorization),
+  hasMfpCookie: Boolean(config.mfpCookie),
+  mfpCookiePreview: redactSecret(config.mfpCookie),
+  mfpDetailConcurrency: config.detailConcurrency,
+  mfpRequestTimeoutMs: config.requestTimeoutMs,
+});
 console.log(`backend listening on http://${server.hostname}:${server.port}`);

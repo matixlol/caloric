@@ -1,4 +1,5 @@
 import { config } from "./config";
+import { logError, logInfo, redactSecret, summarizeText } from "./logging";
 
 type MfpResponse = {
   status: number;
@@ -14,8 +15,11 @@ function getMfpHeaders(): HeadersInit {
     "User-Agent":
       "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
     Referer: `${config.mfpBaseUrl}/food/search`,
-    Authorization: config.mfpAuthorization,
   };
+
+  if (config.mfpAuthorization) {
+    headers.Authorization = config.mfpAuthorization;
+  }
 
   if (config.mfpCookie) {
     headers.Cookie = config.mfpCookie;
@@ -26,11 +30,33 @@ function getMfpHeaders(): HeadersInit {
 
 async function request(pathWithQuery: string): Promise<MfpResponse> {
   const url = new URL(pathWithQuery, config.mfpBaseUrl);
-  const response = await fetch(url, {
-    method: "GET",
-    headers: getMfpHeaders(),
-    signal: AbortSignal.timeout(config.requestTimeoutMs),
+  const headers = getMfpHeaders();
+  const startedAt = Date.now();
+
+  logInfo("mfp.request.start", {
+    url: url.toString(),
+    timeoutMs: config.requestTimeoutMs,
+    hasAuthorization: Boolean(config.mfpAuthorization),
+    authorizationPreview: redactSecret(config.mfpAuthorization),
+    hasCookie: Boolean(config.mfpCookie),
+    cookiePreview: redactSecret(config.mfpCookie),
+    headers: Object.keys(headers).sort(),
   });
+
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      method: "GET",
+      headers,
+      signal: AbortSignal.timeout(config.requestTimeoutMs),
+    });
+  } catch (error) {
+    logError("mfp.request.fetch_failed", error, {
+      url: url.toString(),
+      durationMs: Date.now() - startedAt,
+    });
+    throw error;
+  }
 
   const text = await response.text();
   let json: unknown | null = null;
@@ -40,6 +66,17 @@ async function request(pathWithQuery: string): Promise<MfpResponse> {
   } catch {
     json = null;
   }
+
+  logInfo("mfp.request.complete", {
+    url: url.toString(),
+    responseUrl: response.url,
+    status: response.status,
+    ok: response.ok,
+    durationMs: Date.now() - startedAt,
+    contentType: response.headers.get("content-type"),
+    jsonParsed: json !== null,
+    textPreview: json ? null : summarizeText(text),
+  });
 
   return {
     status: response.status,
