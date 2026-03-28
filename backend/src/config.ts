@@ -21,12 +21,15 @@ function getNumberEnv(name: string, fallback: number): number {
 export const config = {
   port: getNumberEnv("PORT", 8787),
   databaseUrl: getRequiredEnv("DATABASE_URL"),
-  mfpAuthorization: getRequiredEnv("MFP_AUTHORIZATION"),
+  mfpAuthorization: Bun.env.MFP_AUTHORIZATION,
   groqApiKey: Bun.env.GROQ_API_KEY,
   mfpBaseUrl: Bun.env.MFP_BASE_URL ?? "https://www.myfitnesspal.com",
   mfpCookie: Bun.env.MFP_COOKIE,
   detailConcurrency: Math.max(1, getNumberEnv("MFP_DETAIL_CONCURRENCY", 10)),
-  requestTimeoutMs: Math.max(1000, getNumberEnv("MFP_REQUEST_TIMEOUT_MS", 20_000)),
+  requestTimeoutMs: Math.max(
+    1000,
+    getNumberEnv("MFP_REQUEST_TIMEOUT_MS", 20_000),
+  ),
   openRouterApiKey: getRequiredEnv("OPENROUTER_API_KEY"),
   openRouterModel: Bun.env.OPENROUTER_MODEL ?? "moonshotai/kimi-k2-0905",
   openRouterProviderOnly: Bun.env.OPENROUTER_PROVIDER_ONLY ?? "groq",

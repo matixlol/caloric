@@ -1,12 +1,36 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, ilike, or } from "drizzle-orm";
 import {
   buildRecentLogContextPrompt,
   buildRecentLogTranscriptionPrompt,
   parseRecentLogHints,
 } from "./ai-log-context";
+import {
+  buildDetailContentUrl,
+  buildDetailWrapperUrl,
+  createSessionCookie,
+  extractDetailToken,
+  fetchSearchXml,
+  fetchText as fetchAnmatText,
+  parseProductsFromHtml,
+  parseSearchResponse,
+  type Product as AnmatProduct,
+} from "./anmat-client";
+import {
+  compressHtmlWithZstd,
+  extractProductMetadataFromHtml,
+  htmlToText,
+  normalizeTextValue,
+  parseNutritionFromHtml,
+  sha256Hex,
+} from "./anmat-html";
 import { config } from "./config";
 import { db } from "./db";
-import { mfpFoodDetailResponses, mfpSearchResponses } from "./db/schema";
+import {
+  anmatProductDerivedData,
+  anmatProductHtmlBlobs,
+  mfpFoodDetailResponses,
+  mfpSearchResponses,
+} from "./db/schema";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
@@ -87,21 +111,32 @@ type MfpFood = {
   nutritional_contents?: MfpNutritionalContents | null;
 };
 
-type SearchResultFood = {
-  resultId: string;
+type SearchSource = "mfp" | "anmat";
+
+type FoodNutrition = {
+  calories?: number;
+  protein?: number;
+  carbs?: number;
+  fat?: number;
+  fiber?: number;
+  sugars?: number;
+  sodiumMg?: number;
+  potassiumMg?: number;
+};
+
+type FoodSearchResult = {
+  id: string;
+  canonicalKey: string;
+  source: SearchSource;
+  sourceLabel: "MFP" | "ANMAT";
   name: string;
   brand?: string;
   serving?: string;
-  nutrition?: {
-    calories?: number;
-    protein?: number;
-    carbs?: number;
-    fat?: number;
-    fiber?: number;
-    sugars?: number;
-    sodiumMg?: number;
-    potassiumMg?: number;
-  };
+  nutrition?: FoodNutrition;
+};
+
+type SearchResultFood = FoodSearchResult & {
+  resultId: string;
 };
 
 type OpenRouterToolCall = {
@@ -642,7 +677,7 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
   };
 }
 
-function mapSearchResults(payload: SearchResponsePayload): SearchResultFood[] {
+function mapMfpSearchResults(payload: SearchResponsePayload): FoodSearchResult[] {
   const detailById = new Map<string, MfpFood>();
 
   for (const detail of payload.details ?? []) {
@@ -668,7 +703,7 @@ function mapSearchResults(payload: SearchResponsePayload): SearchResultFood[] {
     return [];
   }
 
-  const results: SearchResultFood[] = [];
+  const results: FoodSearchResult[] = [];
   const seen = new Set<string>();
 
   for (const row of items) {
@@ -701,7 +736,10 @@ function mapSearchResults(payload: SearchResponsePayload): SearchResultFood[] {
     const nutrition = mapNutrition(source.nutritional_contents ?? item.nutritional_contents);
 
     results.push({
-      resultId: compositeId,
+      id: `mfp:${compositeId}`,
+      canonicalKey: `mfp:${compositeId}`,
+      source: "mfp",
+      sourceLabel: "MFP",
       name,
       brand,
       serving,
@@ -710,6 +748,528 @@ function mapSearchResults(payload: SearchResponsePayload): SearchResultFood[] {
   }
 
   return results;
+}
+
+function parseTextNumber(value: string | null | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function normalizeSearchText(value: string | null | undefined): string {
+  return (value ?? "").trim().toLowerCase();
+}
+
+function buildAnmatCanonicalKey(fields: {
+  detailKey?: string | null;
+  rnpa?: string | null;
+  nombreFantasia?: string | null;
+  denominacion?: string | null;
+  marca?: string | null;
+}): string {
+  const detailKey = normalizeSearchText(fields.detailKey);
+  if (detailKey) {
+    return `anmat:detail:${detailKey}`;
+  }
+
+  const rnpa = normalizeSearchText(fields.rnpa);
+  if (rnpa) {
+    return `anmat:rnpa:${rnpa}`;
+  }
+
+  return `anmat:text:${[
+    normalizeSearchText(fields.nombreFantasia),
+    normalizeSearchText(fields.denominacion),
+    normalizeSearchText(fields.marca),
+  ]
+    .filter(Boolean)
+    .join("|")}`;
+}
+
+function scoreSearchField(value: string | null | undefined, queryLower: string, queryTokens: string[]): number {
+  const normalized = normalizeSearchText(value);
+  if (!normalized) {
+    return 0;
+  }
+
+  if (normalized === queryLower) {
+    return 140;
+  }
+
+  if (normalized.startsWith(queryLower)) {
+    return 90;
+  }
+
+  if (queryTokens.length > 1 && queryTokens.every((token) => normalized.includes(token))) {
+    return 60;
+  }
+
+  if (normalized.includes(queryLower)) {
+    return 40;
+  }
+
+  const matchedTokens = queryTokens.filter((token) => normalized.includes(token)).length;
+  return matchedTokens * 8;
+}
+
+function mapAnmatRowToFood(row: {
+  htmlBlobId: number;
+  detailKey: string | null;
+  rnpa: string | null;
+  denominacion: string | null;
+  nombreFantasia: string | null;
+  marca: string | null;
+  servingText: string | null;
+  servingQuantity: number | null;
+  servingUnit: string | null;
+  calories: number | null;
+  proteinGrams: string | null;
+  carbsGrams: string | null;
+  fatGrams: string | null;
+  fiberGrams: string | null;
+  sugarsGrams: string | null;
+  sodiumMg: number | null;
+}): FoodSearchResult | null {
+  const name = row.nombreFantasia?.trim() || row.denominacion?.trim() || null;
+  if (!name) {
+    return null;
+  }
+
+  const serving =
+    row.servingText?.trim() ||
+    (row.servingQuantity !== null && row.servingQuantity !== undefined && row.servingUnit
+      ? `${row.servingQuantity} ${row.servingUnit}`
+      : undefined);
+
+  const nutrition = {
+    calories: row.calories ?? undefined,
+    protein: parseTextNumber(row.proteinGrams),
+    carbs: parseTextNumber(row.carbsGrams),
+    fat: parseTextNumber(row.fatGrams),
+    fiber: parseTextNumber(row.fiberGrams),
+    sugars: parseTextNumber(row.sugarsGrams),
+    sodiumMg: row.sodiumMg ?? undefined,
+  };
+
+  return {
+    id: `anmat:${row.htmlBlobId}`,
+    canonicalKey: buildAnmatCanonicalKey(row),
+    source: "anmat",
+    sourceLabel: "ANMAT",
+    name,
+    brand: row.marca ?? undefined,
+    serving,
+    nutrition: Object.values(nutrition).every((value) => value === undefined) ? undefined : nutrition,
+  };
+}
+
+async function searchLocalAnmatFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+  const normalizedQuery = query.trim();
+  const queryLower = normalizedQuery.toLowerCase();
+  const queryTokens = queryLower.split(/\s+/).filter(Boolean);
+  const pattern = `%${normalizedQuery}%`;
+
+  const rows = await db
+    .select({
+      htmlBlobId: anmatProductHtmlBlobs.id,
+      ingestSource: anmatProductHtmlBlobs.ingestSource,
+      detailKey: anmatProductHtmlBlobs.detailKey,
+      rnpa: anmatProductHtmlBlobs.rnpa,
+      denominacion: anmatProductHtmlBlobs.denominacion,
+      nombreFantasia: anmatProductHtmlBlobs.nombreFantasia,
+      marca: anmatProductHtmlBlobs.marca,
+      titular: anmatProductHtmlBlobs.titular,
+      importedAt: anmatProductHtmlBlobs.importedAt,
+      nutritionFound: anmatProductDerivedData.nutritionFound,
+      servingText: anmatProductDerivedData.servingText,
+      servingQuantity: anmatProductDerivedData.servingQuantity,
+      servingUnit: anmatProductDerivedData.servingUnit,
+      calories: anmatProductDerivedData.calories,
+      proteinGrams: anmatProductDerivedData.proteinGrams,
+      carbsGrams: anmatProductDerivedData.carbsGrams,
+      fatGrams: anmatProductDerivedData.fatGrams,
+      fiberGrams: anmatProductDerivedData.fiberGrams,
+      sugarsGrams: anmatProductDerivedData.sugarsGrams,
+      sodiumMg: anmatProductDerivedData.sodiumMg,
+    })
+    .from(anmatProductHtmlBlobs)
+    .leftJoin(anmatProductDerivedData, eq(anmatProductDerivedData.htmlBlobId, anmatProductHtmlBlobs.id))
+    .where(
+      or(
+        ilike(anmatProductHtmlBlobs.denominacion, pattern),
+        ilike(anmatProductHtmlBlobs.nombreFantasia, pattern),
+        ilike(anmatProductHtmlBlobs.marca, pattern),
+        ilike(anmatProductHtmlBlobs.titular, pattern),
+        ilike(anmatProductHtmlBlobs.rnpa, pattern),
+      ),
+    )
+    .orderBy(desc(anmatProductHtmlBlobs.importedAt), desc(anmatProductHtmlBlobs.id))
+    .limit(Math.max(limit * 8, 64));
+
+  const deduped = new Map<
+    string,
+    {
+      score: number;
+      liveRank: number;
+      importedAtMs: number;
+      food: FoodSearchResult;
+    }
+  >();
+
+  for (const row of rows) {
+    const food = mapAnmatRowToFood(row);
+    if (!food) {
+      continue;
+    }
+
+    const score =
+      scoreSearchField(row.nombreFantasia, queryLower, queryTokens) * 1.2 +
+      scoreSearchField(row.denominacion, queryLower, queryTokens) +
+      scoreSearchField(row.marca, queryLower, queryTokens) * 0.85 +
+      scoreSearchField(row.titular, queryLower, queryTokens) * 0.35 +
+      scoreSearchField(row.rnpa, queryLower, queryTokens) * 0.5 +
+      (row.nutritionFound ? 12 : 0) +
+      (row.ingestSource === "live_search" ? 6 : 0);
+
+    if (score <= 0) {
+      continue;
+    }
+
+    const liveRank = row.ingestSource === "live_search" ? 1 : 0;
+    const importedAtMs = row.importedAt instanceof Date ? row.importedAt.getTime() : 0;
+    const current = deduped.get(food.canonicalKey);
+
+    if (
+      !current ||
+      score > current.score ||
+      (score === current.score && liveRank > current.liveRank) ||
+      (score === current.score && liveRank === current.liveRank && importedAtMs > current.importedAtMs)
+    ) {
+      deduped.set(food.canonicalKey, { score, liveRank, importedAtMs, food });
+    }
+  }
+
+  return [...deduped.values()]
+    .sort((left, right) => {
+      if (right.score !== left.score) {
+        return right.score - left.score;
+      }
+      if (right.liveRank !== left.liveRank) {
+        return right.liveRank - left.liveRank;
+      }
+      return right.importedAtMs - left.importedAtMs;
+    })
+    .slice(0, limit)
+    .map((entry) => entry.food);
+}
+
+async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+  const searchPayload = await executeSearch({
+    query,
+    offset: 0,
+    maxItems: Math.min(20, Math.max(limit * 2, 8)),
+    countryCode: "US",
+    resourceType: "foods",
+    includeDetails: true,
+  });
+
+  return mapMfpSearchResults(searchPayload).slice(0, limit);
+}
+
+function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): FoodSearchResult[] {
+  const merged: FoodSearchResult[] = [];
+  const seen = new Set<string>();
+  const cursors = new Array(sources.length).fill(0);
+
+  while (merged.length < limit) {
+    let advanced = false;
+
+    for (let sourceIndex = 0; sourceIndex < sources.length; sourceIndex += 1) {
+      const source = sources[sourceIndex];
+
+      while (cursors[sourceIndex] < source.length) {
+        const candidate = source[cursors[sourceIndex]];
+        cursors[sourceIndex] += 1;
+        if (seen.has(candidate.canonicalKey)) {
+          continue;
+        }
+        seen.add(candidate.canonicalKey);
+        merged.push(candidate);
+        advanced = true;
+        break;
+      }
+
+      if (merged.length >= limit) {
+        break;
+      }
+    }
+
+    if (!advanced) {
+      break;
+    }
+  }
+
+  return merged;
+}
+
+async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+  const [anmatResult, mfpResult] = await Promise.allSettled([
+    searchLocalAnmatFoods(query, limit),
+    searchMfpFoods(query, limit),
+  ]);
+
+  const anmatFoods = anmatResult.status === "fulfilled" ? anmatResult.value : [];
+  const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value : [];
+
+  if (anmatFoods.length === 0 && mfpFoods.length === 0) {
+    if (anmatResult.status === "rejected") {
+      throw anmatResult.reason;
+    }
+    if (mfpResult.status === "rejected") {
+      throw mfpResult.reason;
+    }
+  }
+
+  return interleaveFoodResults([anmatFoods, mfpFoods], limit);
+}
+
+function buildLiveSourcePath(product: AnmatProduct, detailKey: string | null, htmlSha256: string): string {
+  const stableKey = detailKey || normalizeTextValue(product.rnpa) || htmlSha256.slice(0, 16);
+  return `live-search/${product.searchMode}/${stableKey}.html`;
+}
+
+async function cacheLiveAnmatProduct(
+  query: string,
+  cookie: string,
+  product: AnmatProduct,
+  page: number,
+): Promise<FoodSearchResult | null> {
+  const wrapperUrl = buildDetailWrapperUrl(product.detailUrl);
+  const contentUrl = buildDetailContentUrl(product.detailUrl);
+
+  if (!contentUrl) {
+    return null;
+  }
+
+  const response = await fetchAnmatText(contentUrl, config.requestTimeoutMs, {
+    cookie,
+    referer: wrapperUrl ?? contentUrl,
+  });
+  const html = response.text;
+  const htmlBytes = new TextEncoder().encode(html);
+  const htmlText = htmlToText(html);
+  const metadata = extractProductMetadataFromHtml(htmlText, {
+    searchMode: product.searchMode,
+    province: product.province,
+    rnpa: product.rnpa,
+    denominacion: product.denominacion,
+    nombreFantasia: product.nombreFantasia,
+    marca: product.marca,
+    titular: product.titular,
+    estado: product.estado,
+  });
+  const detailKey = normalizeTextValue(extractDetailToken(product.detailUrl));
+  const compressed = await compressHtmlWithZstd(html);
+  const htmlSha256 = sha256Hex(htmlBytes);
+  const now = new Date();
+
+  const [savedBlob] = await db
+    .insert(anmatProductHtmlBlobs)
+    .values({
+      sourcePath: buildLiveSourcePath(product, detailKey, htmlSha256),
+      ingestSource: "live_search",
+      runKey: "live-cache",
+      detailKey,
+      token: detailKey,
+      query,
+      queryIndex: null,
+      page,
+      wrapperUrl: normalizeTextValue(wrapperUrl),
+      contentUrl: normalizeTextValue(response.url),
+      searchMode: metadata.searchMode ?? normalizeTextValue(product.searchMode),
+      province: metadata.province,
+      rnpa: metadata.rnpa,
+      denominacion: metadata.denominacion,
+      nombreFantasia: metadata.nombreFantasia,
+      marca: metadata.marca,
+      titular: metadata.titular,
+      estado: metadata.estado,
+      compressionAlgo: "zstd",
+      htmlZstd: compressed,
+      htmlSha256,
+      uncompressedBytes: htmlBytes.byteLength,
+      compressedBytes: compressed.byteLength,
+      savedAt: now,
+    })
+    .onConflictDoUpdate({
+      target: anmatProductHtmlBlobs.sourcePath,
+      set: {
+        ingestSource: "live_search",
+        runKey: "live-cache",
+        detailKey,
+        token: detailKey,
+        query,
+        queryIndex: null,
+        page,
+        wrapperUrl: normalizeTextValue(wrapperUrl),
+        contentUrl: normalizeTextValue(response.url),
+        searchMode: metadata.searchMode ?? normalizeTextValue(product.searchMode),
+        province: metadata.province,
+        rnpa: metadata.rnpa,
+        denominacion: metadata.denominacion,
+        nombreFantasia: metadata.nombreFantasia,
+        marca: metadata.marca,
+        titular: metadata.titular,
+        estado: metadata.estado,
+        compressionAlgo: "zstd",
+        htmlZstd: compressed,
+        htmlSha256,
+        uncompressedBytes: htmlBytes.byteLength,
+        compressedBytes: compressed.byteLength,
+        savedAt: now,
+        importedAt: now,
+      },
+    })
+    .returning({
+      id: anmatProductHtmlBlobs.id,
+      detailKey: anmatProductHtmlBlobs.detailKey,
+      rnpa: anmatProductHtmlBlobs.rnpa,
+      denominacion: anmatProductHtmlBlobs.denominacion,
+      nombreFantasia: anmatProductHtmlBlobs.nombreFantasia,
+      marca: anmatProductHtmlBlobs.marca,
+    });
+
+  const nutrition = parseNutritionFromHtml(html);
+
+  await db
+    .insert(anmatProductDerivedData)
+    .values({
+      htmlBlobId: savedBlob.id,
+      nutritionFound: nutrition.nutritionFound,
+      servingText: nutrition.servingText,
+      servingQuantity: nutrition.servingQuantity,
+      servingUnit: nutrition.servingUnit,
+      calories: nutrition.calories,
+      proteinGrams: nutrition.proteinGrams,
+      carbsGrams: nutrition.carbsGrams,
+      fatGrams: nutrition.fatGrams,
+      fiberGrams: nutrition.fiberGrams,
+      sugarsGrams: nutrition.sugarsGrams,
+      sodiumMg: nutrition.sodiumMg,
+      eanAttempted: false,
+      eanStatus: "not_attempted_live_pdf_skipped",
+      ean: null,
+      eanSource: null,
+      eanCandidates: null,
+    })
+    .onConflictDoUpdate({
+      target: anmatProductDerivedData.htmlBlobId,
+      set: {
+        nutritionFound: nutrition.nutritionFound,
+        servingText: nutrition.servingText,
+        servingQuantity: nutrition.servingQuantity,
+        servingUnit: nutrition.servingUnit,
+        calories: nutrition.calories,
+        proteinGrams: nutrition.proteinGrams,
+        carbsGrams: nutrition.carbsGrams,
+        fatGrams: nutrition.fatGrams,
+        fiberGrams: nutrition.fiberGrams,
+        sugarsGrams: nutrition.sugarsGrams,
+        sodiumMg: nutrition.sodiumMg,
+        eanAttempted: false,
+        eanStatus: "not_attempted_live_pdf_skipped",
+        ean: null,
+        eanSource: null,
+        eanCandidates: null,
+        parsedAt: now,
+      },
+    });
+
+  return mapAnmatRowToFood({
+    htmlBlobId: savedBlob.id,
+    detailKey: savedBlob.detailKey,
+    rnpa: savedBlob.rnpa,
+    denominacion: savedBlob.denominacion,
+    nombreFantasia: savedBlob.nombreFantasia,
+    marca: savedBlob.marca,
+    servingText: nutrition.servingText,
+    servingQuantity: nutrition.servingQuantity,
+    servingUnit: nutrition.servingUnit,
+    calories: nutrition.calories,
+    proteinGrams: nutrition.proteinGrams,
+    carbsGrams: nutrition.carbsGrams,
+    fatGrams: nutrition.fatGrams,
+    fiberGrams: nutrition.fiberGrams,
+    sugarsGrams: nutrition.sugarsGrams,
+    sodiumMg: nutrition.sodiumMg,
+  });
+}
+
+async function fetchLiveAnmatFoodsAndCache(query: string, limit: number): Promise<FoodSearchResult[]> {
+  const cookie = await createSessionCookie(config.requestTimeoutMs);
+  const candidateMap = new Map<string, { product: AnmatProduct; page: number }>();
+  const searches = [
+    { denominacion: query, fantasia: "", marca: "" },
+    { denominacion: "", fantasia: query, marca: "" },
+    { denominacion: "", fantasia: "", marca: query },
+  ];
+
+  for (const search of searches) {
+    const xml = await fetchSearchXml(
+      cookie,
+      {
+        ...search,
+        mode: "informacionNutricional",
+      },
+      1,
+      config.requestTimeoutMs,
+    );
+    const parsed = parseSearchResponse(xml.text);
+    const products = parseProductsFromHtml(parsed.resultsHtml, "informacionNutricional");
+
+    for (const product of products) {
+      if (!product.detailUrl) {
+        continue;
+      }
+
+      const key =
+        extractDetailToken(product.detailUrl) ||
+        `${normalizeTextValue(product.rnpa) || ""}|${normalizeTextValue(product.marca) || ""}|${normalizeTextValue(product.denominacion) || ""}`;
+
+      if (!candidateMap.has(key)) {
+        candidateMap.set(key, { product, page: 1 });
+      }
+
+      if (candidateMap.size >= Math.max(limit * 2, 8)) {
+        break;
+      }
+    }
+
+    if (candidateMap.size >= Math.max(limit * 2, 8)) {
+      break;
+    }
+  }
+
+  const tasks = [...candidateMap.values()]
+    .slice(0, limit)
+    .map(({ product, page }) => async () => cacheLiveAnmatProduct(query, cookie, product, page));
+
+  const results = await runWithConcurrency(tasks, 3);
+  const foods: FoodSearchResult[] = [];
+  const seen = new Set<string>();
+
+  for (const food of results) {
+    if (!food || seen.has(food.canonicalKey)) {
+      continue;
+    }
+    seen.add(food.canonicalKey);
+    foods.push(food);
+  }
+
+  return foods;
 }
 
 function normalizeMeal(meal: unknown): Meal {
@@ -933,26 +1493,14 @@ async function runToolCall(
       };
     }
 
-    const searchPayload = await executeSearch({
-      query: query.trim(),
-      offset: 0,
-      maxItems: Math.min(20, Math.max(limit * 2, 8)),
-      countryCode: "US",
-      resourceType: "foods",
-      includeDetails: true,
-    });
-
-    const topFoods = mapSearchResults(searchPayload).slice(0, limit);
+    const topFoods = await searchUnifiedFoods(query.trim(), limit);
     const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
       const resultId = `r${session.searchResultCounter}`;
       session.searchResultCounter += 1;
 
       const mapped: SearchResultFood = {
+        ...food,
         resultId,
-        name: food.name,
-        brand: food.brand,
-        serving: food.serving,
-        nutrition: food.nutrition,
       };
 
       session.searchResultsByLocalId.set(resultId, mapped);
@@ -1217,26 +1765,44 @@ const server = Bun.serve({
         return json({ error: "query is required" }, 400);
       }
 
-      const offset = Math.max(0, parseInteger(url.searchParams.get("offset"), 0));
-      const maxItems = Math.max(1, Math.min(1000, parseInteger(url.searchParams.get("maxItems"), 100)));
-      const countryCode = (url.searchParams.get("countryCode") ?? "US").toUpperCase();
-      const resourceType = (url.searchParams.get("resourceType") ?? "foods").toLowerCase();
-      const includeDetails = parseBoolean(url.searchParams.get("includeDetails"), true);
+      const maxItems = Math.max(1, Math.min(100, parseInteger(url.searchParams.get("maxItems"), 20)));
 
       try {
-        const payload = await executeSearch({
+        const foods = await searchUnifiedFoods(query, maxItems);
+        return json({
           query,
-          offset,
-          maxItems,
-          countryCode,
-          resourceType,
-          includeDetails,
+          foods,
         });
-
-        return json(payload);
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
         return json({ error: "search_failed", message }, 502);
+      }
+    }
+
+    if (url.pathname === "/search/anmat-live") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      const body = await parseJsonBody(request);
+      const query = asString(body?.query)?.trim() ?? "";
+      const maxItems = Math.max(1, Math.min(20, Math.round(asNumber(body?.maxItems) ?? 8)));
+
+      if (query.length < 2) {
+        return json({ error: "query is required" }, 400);
+      }
+
+      try {
+        const foods = await fetchLiveAnmatFoodsAndCache(query, maxItems);
+        return json({
+          query,
+          foods,
+          eanAttempted: false,
+          eanStatus: "not_attempted_live_pdf_skipped",
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        return json({ error: "anmat_live_search_failed", message }, 502);
       }
     }
 

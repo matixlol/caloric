@@ -236,6 +236,7 @@ async function main() {
         .insert(anmatProductHtmlBlobs)
         .values({
           sourcePath: relativePath,
+          ingestSource: "disk_import",
           runKey: getRunKey(rootDir, htmlPath),
           detailKey: normalizeTextValue(metadata.detailKey) || getDetailKeyFromPath(htmlPath),
           token: normalizedToken,
@@ -262,6 +263,7 @@ async function main() {
         .onConflictDoUpdate({
           target: anmatProductHtmlBlobs.sourcePath,
           set: {
+            ingestSource: "disk_import",
             runKey: getRunKey(rootDir, htmlPath),
             detailKey: normalizeTextValue(metadata.detailKey) || getDetailKeyFromPath(htmlPath),
             token: normalizedToken,

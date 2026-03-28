@@ -14,6 +14,7 @@
     "anmat:import-product-derived": "bun src/import-anmat-product-derived.ts"
   },
   "dependencies": {
+    "cheerio": "^1.1.2",
     "drizzle-orm": "^0.44.5",
     "postgres": "^3.4.7"
   },
