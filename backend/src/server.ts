@@ -398,6 +398,12 @@ function mapNutrition(contents: MfpNutritionalContents | null | undefined): Sear
   return nutrition;
 }
 
+function hasNutrition(
+  nutrition: FoodSearchResult["nutrition"],
+): nutrition is NonNullable<FoodSearchResult["nutrition"]> {
+  return !!nutrition && Object.values(nutrition).some((value) => value !== undefined);
+}
+
 function toSearchPayload(record: StoredSearchResponse): {
   status: number;
   url: string;
@@ -734,6 +740,9 @@ function mapMfpSearchResults(payload: SearchResponsePayload): FoodSearchResult[]
     const brand = asString(source.brand_name) ?? asString(item.brand_name);
     const serving = formatServing(source.serving_sizes) ?? formatServing(item.serving_sizes);
     const nutrition = mapNutrition(source.nutritional_contents ?? item.nutritional_contents);
+    if (!hasNutrition(nutrition)) {
+      continue;
+    }
 
     results.push({
       id: `mfp:${compositeId}`,
@@ -853,6 +862,9 @@ function mapAnmatRowToFood(row: {
     sugars: parseTextNumber(row.sugarsGrams),
     sodiumMg: row.sodiumMg ?? undefined,
   };
+  if (!hasNutrition(nutrition)) {
+    return null;
+  }
 
   return {
     id: `anmat:${row.htmlBlobId}`,
@@ -862,7 +874,7 @@ function mapAnmatRowToFood(row: {
     name,
     brand: row.marca ?? undefined,
     serving,
-    nutrition: Object.values(nutrition).every((value) => value === undefined) ? undefined : nutrition,
+    nutrition,
   };
 }
 

@@ -75,6 +75,12 @@ function asNumber(value: unknown): number | undefined {
   return undefined;
 }
 
+function hasNutrition(
+  nutrition: SearchFood["nutrition"],
+): nutrition is NonNullable<SearchFood["nutrition"]> {
+  return !!nutrition && Object.values(nutrition).some((value) => value !== undefined);
+}
+
 function mapSearchFood(value: unknown): SearchFood | null {
   if (!value || typeof value !== "object") {
     return null;
@@ -106,6 +112,9 @@ function mapSearchFood(value: unknown): SearchFood | null {
         potassiumMg: asNumber(nutritionSource.potassiumMg),
       }
     : undefined;
+  if (!hasNutrition(nutrition)) {
+    return null;
+  }
 
   return {
     id,
@@ -115,8 +124,7 @@ function mapSearchFood(value: unknown): SearchFood | null {
     name,
     brand: asString(food.brand),
     serving: asString(food.serving),
-    nutrition:
-      nutrition && Object.values(nutrition).some((entry) => entry !== undefined) ? nutrition : undefined,
+    nutrition,
   };
 }
 
