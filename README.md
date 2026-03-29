@@ -5,9 +5,14 @@ A basic app for calorie/macros tracking that aims to get out of your way as soon
 ## Stack
 This project now uses Clerk for user login and `JazzExpoProviderWithClerk` for Jazz account auth.
 
+## Repo Layout
+
+- `mobile/`: Expo app
+- `backend/`: Bun runtime service with `pnpm` for package management
+
 ### Local env
 
-Create `.env.local` with:
+Create `mobile/.env.local` with:
 
 ```bash
 EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your-clerk-publishable-key
@@ -22,15 +27,23 @@ You can create a publishable key in the [Clerk Dashboard](https://dashboard.cler
 
 This repo also includes a Bun backend in `backend/` that proxies MyFitnessPal and OpenFoodFacts search, merges those with local ANMAT results, and stores upstream responses in Postgres using Drizzle migrations.
 
+To run the mobile app:
+
+```bash
+cd mobile
+pnpm install
+pnpm start
+```
+
 Quick start:
 
 ```bash
 cd backend
-bun install
+pnpm install
 cp .env.example .env
-bun run db:generate
-bun run db:migrate
-bun run dev
+pnpm run db:generate
+pnpm run db:migrate
+pnpm run dev
 ```
 
 ## Deployed Backend API

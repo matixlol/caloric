@@ -91,8 +91,8 @@ Optional:
 
 ```bash
 cd backend
-bun install
-bunx playwright install chrome
-bun run db:push
-bun run dev
+pnpm install
+pnpm exec playwright install chrome
+pnpm run db:push
+pnpm run dev
 ```
