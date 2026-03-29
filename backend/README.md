@@ -42,31 +42,41 @@ Bun microservice that proxies MyFitnessPal search/detail APIs and persists every
     - `status` (`ready` or `awaiting-approval`)
     - `events` (`assistant`, `search`, `approval`)
     - `resolvedUserMessage` (present for user-message actions)
+- `POST /mfp/session/refresh`
+  - forces a Playwright login refresh and updates the stored MyFitnessPal session in Postgres
+  - returns whether auth headers were refreshed successfully
 
 `/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
 OpenRouter tracking fields are sent as `user` (client user id) and `session_id` (backend session id).
 
 `/search` does this:
 1. Looks up the latest cached search response for the exact request tuple (`query`, `offset`, `maxItems`, `countryCode`, `resourceType`)
-2. If not cached, calls MyFitnessPal `/api/nutrition` and saves the response in `mfp_search_responses`
-3. If `includeDetails=true`, resolves each food detail by:
+2. Reuses the latest MyFitnessPal auth session from `mfp_auth_sessions`, or refreshes it with Rebrowser Playwright when missing/expired
+3. If not cached, calls MyFitnessPal `/api/nutrition` and saves the response in `mfp_search_responses`
+4. Retries once after an automatic auth refresh when MyFitnessPal responds with `401` or `403`
+5. If `includeDetails=true`, resolves each food detail by:
    - reusing the latest cached detail for (`foodId`, `version`) when available
    - fetching upstream only for detail keys not already cached
-4. Saves resolved detail payloads in `mfp_food_detail_responses` for the current `searchResponseId`
+6. Saves resolved detail payloads in `mfp_food_detail_responses` for the current `searchResponseId`
+
+The refresh path launches the verified Rebrowser Playwright + 2Captcha login harness, captures the resulting cookie-backed session, stores it in `mfp_auth_sessions`, and closes the browser immediately after persistence.
 
 ## Environment
 
 Copy `.env.example` to `.env` and set:
 
 - `DATABASE_URL`
+- `MFP_USERNAME`
+- `MFP_PASSWORD`
+- `TWO_CAPTCHA_API_KEY` (used to solve Cloudflare Turnstile during MyFitnessPal login)
 - `OPENROUTER_API_KEY`
 - `GROQ_API_KEY`
 
 Optional:
 
-- `MFP_COOKIE`
 - `PORT`
-- `MFP_BASE_URL`
+- `MFP_PROXY_URL`
+- `MFP_BROWSER_HEADLESS`
 - `MFP_DETAIL_CONCURRENCY`
 - `MFP_REQUEST_TIMEOUT_MS`
 - `OPENROUTER_MODEL`
@@ -77,7 +87,7 @@ Optional:
 ```bash
 cd backend
 bun install
-bun run db:generate
-bun run db:migrate
+bunx playwright install chrome
+bun run db:push
 bun run dev
 ```
