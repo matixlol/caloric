@@ -94,6 +94,7 @@ export default function LogFoodScreen() {
     resolve: { root: { logs: true } },
   });
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [foods, setFoods] = useState<SearchFood[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
@@ -102,11 +103,21 @@ export default function LogFoodScreen() {
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
   useEffect(() => {
+    const timeout = setTimeout(() => {
+      setDebouncedQuery(query);
+    }, SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      clearTimeout(timeout);
+    };
+  }, [query]);
+
+  useEffect(() => {
     if (!me.$isLoaded) {
       return;
     }
 
-    const normalizedQuery = query.trim();
+    const normalizedQuery = debouncedQuery.trim();
 
     if (normalizedQuery.length < 2) {
       setFoods([]);
@@ -117,7 +128,7 @@ export default function LogFoodScreen() {
     }
 
     const controller = new AbortController();
-    const timeout = setTimeout(async () => {
+    void (async () => {
       setIsSearching(true);
       setSearchError(null);
 
@@ -125,12 +136,6 @@ export default function LogFoodScreen() {
         const nextFoods = await searchFoods(normalizedQuery, {
           signal: controller.signal,
           maxItems: SEARCH_MAX_ITEMS,
-          onBackgroundResults: (refreshedFoods) => {
-            setFoods(refreshedFoods);
-            setSelectedFoodId((current) =>
-              current && refreshedFoods.some((food) => food.id === current) ? current : null,
-            );
-          },
         });
         setFoods(nextFoods);
         setSelectedFoodId((current) =>
@@ -149,13 +154,12 @@ export default function LogFoodScreen() {
           setIsSearching(false);
         }
       }
-    }, SEARCH_DEBOUNCE_MS);
+    })();
 
     return () => {
       controller.abort();
-      clearTimeout(timeout);
     };
-  }, [me.$isLoaded, query]);
+  }, [debouncedQuery, me.$isLoaded]);
 
   if (!me.$isLoaded) {
     return (

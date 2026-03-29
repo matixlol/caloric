@@ -70,6 +70,24 @@ export const mfpFoodDetailResponses = pgTable(
   }),
 );
 
+export const openFoodFactsSearchResponses = pgTable(
+  "open_food_facts_search_responses",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    query: text("query").notNull(),
+    page: integer("page").notNull(),
+    pageSize: integer("page_size").notNull(),
+    offUrl: text("off_url").notNull(),
+    offStatus: integer("off_status").notNull(),
+    responseJson: jsonb("response_json"),
+    responseText: text("response_text"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    queryCreatedAtIdx: index("open_food_facts_search_responses_query_created_at_idx").on(table.query, table.createdAt),
+  }),
+);
+
 export const anmatProductHtmlBlobs = pgTable(
   "anmat_product_html_blobs",
   {

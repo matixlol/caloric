@@ -30,11 +30,13 @@ import {
   anmatProductHtmlBlobs,
   mfpFoodDetailResponses,
   mfpSearchResponses,
+  openFoodFactsSearchResponses,
 } from "./db/schema";
 import { logError, logInfo, redactSecret, summarizeText } from "./logging";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
 import { getMfpAuthHeaders } from "./mfp-session";
 import { MFP_BASE_URL } from "./mfp-session";
+import { OPEN_FOOD_FACTS_BASE_URL, searchOpenFoodFacts } from "./openfoodfacts-client";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -56,6 +58,14 @@ type StoredSearchResponse = {
 type StoredDetailResponse = {
   mfpStatus: number;
   mfpUrl: string;
+  responseJson: unknown | null;
+  responseText: string | null;
+};
+
+type StoredOpenFoodFactsSearchResponse = {
+  id: number;
+  offStatus: number;
+  offUrl: string;
   responseJson: unknown | null;
   responseText: string | null;
 };
@@ -114,7 +124,7 @@ type MfpFood = {
   nutritional_contents?: MfpNutritionalContents | null;
 };
 
-type SearchSource = "mfp" | "anmat";
+type SearchSource = "mfp" | "anmat" | "openfoodfacts";
 
 type FoodNutrition = {
   calories?: number;
@@ -131,7 +141,7 @@ type FoodSearchResult = {
   id: string;
   canonicalKey: string;
   source: SearchSource;
-  sourceLabel: "MFP" | "ANMAT";
+  sourceLabel: "MFP" | "ANMAT" | "OFF";
   name: string;
   brand?: string;
   serving?: string;
@@ -420,6 +430,10 @@ function hasNutrition(
   return !!nutrition && Object.values(nutrition).some((value) => value !== undefined);
 }
 
+function getSearchCacheCutoff(): Date {
+  return new Date(Date.now() - config.searchCacheTtlDays * 24 * 60 * 60 * 1000);
+}
+
 function toSearchPayload(record: StoredSearchResponse): {
   status: number;
   url: string;
@@ -429,6 +443,20 @@ function toSearchPayload(record: StoredSearchResponse): {
   return {
     status: record.mfpStatus,
     url: record.mfpUrl,
+    data: record.responseJson,
+    text: record.responseText,
+  };
+}
+
+function toOpenFoodFactsSearchPayload(record: StoredOpenFoodFactsSearchResponse): {
+  status: number;
+  url: string;
+  data: unknown | null;
+  text: string | null;
+} {
+  return {
+    status: record.offStatus,
+    url: record.offUrl,
     data: record.responseJson,
     text: record.responseText,
   };
@@ -464,6 +492,7 @@ async function findCachedSearch(params: {
   countryCode: string;
   resourceType: string;
 }): Promise<StoredSearchResponse | null> {
+  const cacheCutoff = getSearchCacheCutoff();
   const [cachedSearch] = await db
     .select({
       id: mfpSearchResponses.id,
@@ -483,6 +512,7 @@ async function findCachedSearch(params: {
         gte(mfpSearchResponses.mfpStatus, 200),
         lt(mfpSearchResponses.mfpStatus, 300),
         isNotNull(mfpSearchResponses.responseJson),
+        gte(mfpSearchResponses.createdAt, cacheCutoff),
       ),
     )
     .orderBy(desc(mfpSearchResponses.createdAt), desc(mfpSearchResponses.id))
@@ -492,6 +522,7 @@ async function findCachedSearch(params: {
 }
 
 async function findCachedDetail(foodId: string, version: string): Promise<StoredDetailResponse | null> {
+  const cacheCutoff = getSearchCacheCutoff();
   const [cachedDetail] = await db
     .select({
       mfpStatus: mfpFoodDetailResponses.mfpStatus,
@@ -507,12 +538,45 @@ async function findCachedDetail(foodId: string, version: string): Promise<Stored
         gte(mfpFoodDetailResponses.mfpStatus, 200),
         lt(mfpFoodDetailResponses.mfpStatus, 300),
         isNotNull(mfpFoodDetailResponses.responseJson),
+        gte(mfpFoodDetailResponses.createdAt, cacheCutoff),
       ),
     )
     .orderBy(desc(mfpFoodDetailResponses.createdAt), desc(mfpFoodDetailResponses.id))
     .limit(1);
 
   return cachedDetail ?? null;
+}
+
+async function findCachedOpenFoodFactsSearch(params: {
+  query: string;
+  page: number;
+  pageSize: number;
+}): Promise<StoredOpenFoodFactsSearchResponse | null> {
+  const cacheCutoff = getSearchCacheCutoff();
+  const [cachedSearch] = await db
+    .select({
+      id: openFoodFactsSearchResponses.id,
+      offStatus: openFoodFactsSearchResponses.offStatus,
+      offUrl: openFoodFactsSearchResponses.offUrl,
+      responseJson: openFoodFactsSearchResponses.responseJson,
+      responseText: openFoodFactsSearchResponses.responseText,
+    })
+    .from(openFoodFactsSearchResponses)
+    .where(
+      and(
+        eq(openFoodFactsSearchResponses.query, params.query),
+        eq(openFoodFactsSearchResponses.page, params.page),
+        eq(openFoodFactsSearchResponses.pageSize, params.pageSize),
+        gte(openFoodFactsSearchResponses.offStatus, 200),
+        lt(openFoodFactsSearchResponses.offStatus, 300),
+        isNotNull(openFoodFactsSearchResponses.responseJson),
+        gte(openFoodFactsSearchResponses.createdAt, cacheCutoff),
+      ),
+    )
+    .orderBy(desc(openFoodFactsSearchResponses.createdAt), desc(openFoodFactsSearchResponses.id))
+    .limit(1);
+
+  return cachedSearch ?? null;
 }
 
 async function saveDetailForSearch(params: {
@@ -536,6 +600,26 @@ async function saveDetailForSearch(params: {
       responseText: params.responseText,
     })
     .onConflictDoNothing();
+}
+
+async function saveOpenFoodFactsSearch(params: {
+  query: string;
+  page: number;
+  pageSize: number;
+  offUrl: string;
+  offStatus: number;
+  responseJson: unknown | null;
+  responseText: string | null;
+}): Promise<void> {
+  await db.insert(openFoodFactsSearchResponses).values({
+    query: params.query,
+    page: params.page,
+    pageSize: params.pageSize,
+    offUrl: params.offUrl,
+    offStatus: params.offStatus,
+    responseJson: params.responseJson,
+    responseText: params.responseText,
+  });
 }
 
 async function runWithConcurrency<T>(tasks: Array<() => Promise<T>>, concurrency: number): Promise<T[]> {
@@ -886,6 +970,122 @@ function mapMfpSearchResults(payload: SearchResponsePayload): FoodSearchResult[]
   return results;
 }
 
+type OpenFoodFactsNutriments = Record<string, unknown>;
+
+type OpenFoodFactsProduct = {
+  code?: unknown;
+  product_name?: unknown;
+  brands?: unknown;
+  quantity?: unknown;
+  serving_size?: unknown;
+  nutriments?: OpenFoodFactsNutriments | null;
+};
+
+function getOpenFoodFactsValue(
+  nutriments: OpenFoodFactsNutriments | null | undefined,
+  key: string,
+): number | undefined {
+  if (!nutriments) {
+    return undefined;
+  }
+
+  return (
+    asNumber(nutriments[`${key}_100g`]) ??
+    asNumber(nutriments[`${key}_value`]) ??
+    asNumber(nutriments[key])
+  );
+}
+
+function convertOpenFoodFactsMineralToMg(
+  nutriments: OpenFoodFactsNutriments | null | undefined,
+  key: string,
+): number | undefined {
+  const value =
+    asNumber(nutriments?.[`${key}_100g`]) ??
+    asNumber(nutriments?.[`${key}_value`]) ??
+    asNumber(nutriments?.[key]);
+  if (value === undefined) {
+    return undefined;
+  }
+
+  const normalizedUnit = asString(nutriments?.[`${key}_unit`])?.toLowerCase();
+  if (!normalizedUnit || normalizedUnit === "mg") {
+    return value;
+  }
+  if (normalizedUnit === "g") {
+    return value * 1000;
+  }
+  if (normalizedUnit === "kg") {
+    return value * 1_000_000;
+  }
+  if (normalizedUnit === "µg" || normalizedUnit === "ug") {
+    return value / 1000;
+  }
+
+  return value;
+}
+
+function mapOpenFoodFactsNutrition(
+  nutriments: OpenFoodFactsNutriments | null | undefined,
+): FoodSearchResult["nutrition"] {
+  const nutrition = {
+    calories: getOpenFoodFactsValue(nutriments, "energy-kcal"),
+    protein: getOpenFoodFactsValue(nutriments, "proteins"),
+    carbs: getOpenFoodFactsValue(nutriments, "carbohydrates"),
+    fat: getOpenFoodFactsValue(nutriments, "fat"),
+    fiber: getOpenFoodFactsValue(nutriments, "fiber"),
+    sugars: getOpenFoodFactsValue(nutriments, "sugars"),
+    sodiumMg: convertOpenFoodFactsMineralToMg(nutriments, "sodium"),
+    potassiumMg: convertOpenFoodFactsMineralToMg(nutriments, "potassium"),
+  };
+
+  return hasNutrition(nutrition) ? nutrition : undefined;
+}
+
+function mapOpenFoodFactsSearchResults(payload: {
+  status: number;
+  url: string;
+  data: unknown | null;
+  text: string | null;
+}): FoodSearchResult[] {
+  if (payload.status < 200 || payload.status >= 300) {
+    return [];
+  }
+
+  const body = asRecord(payload.data);
+  const products = Array.isArray(body?.products) ? body.products : [];
+  const results: FoodSearchResult[] = [];
+  const seen = new Set<string>();
+
+  for (const value of products) {
+    const product = asRecord(value) as OpenFoodFactsProduct | null;
+    const code = asString(product?.code);
+    const name = asString(product?.product_name);
+    if (!code || !name || seen.has(code)) {
+      continue;
+    }
+
+    const nutrition = mapOpenFoodFactsNutrition(product?.nutriments ?? null);
+    if (!nutrition) {
+      continue;
+    }
+
+    seen.add(code);
+    results.push({
+      id: `off:${code}`,
+      canonicalKey: `off:${code}`,
+      source: "openfoodfacts",
+      sourceLabel: "OFF",
+      name,
+      brand: asString(product?.brands),
+      serving: asString(product?.serving_size) ?? asString(product?.quantity),
+      nutrition,
+    });
+  }
+
+  return results;
+}
+
 function parseTextNumber(value: string | null | undefined): number | undefined {
   if (!value) {
     return undefined;
@@ -1135,6 +1335,94 @@ async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchR
   return mappedResults;
 }
 
+async function executeOpenFoodFactsSearch(params: {
+  query: string;
+  page: number;
+  pageSize: number;
+}): Promise<{
+  status: number;
+  url: string;
+  data: unknown | null;
+  text: string | null;
+}> {
+  const startedAt = Date.now();
+  const cachedSearch = await findCachedOpenFoodFactsSearch(params);
+
+  if (cachedSearch) {
+    logInfo("open_food_facts.search.cache_hit", {
+      query: params.query,
+      page: params.page,
+      pageSize: params.pageSize,
+      searchResponseId: cachedSearch.id,
+      status: cachedSearch.offStatus,
+      url: cachedSearch.offUrl,
+      durationMs: Date.now() - startedAt,
+    });
+    return toOpenFoodFactsSearchPayload(cachedSearch);
+  }
+
+  const searchResponse = await searchOpenFoodFacts(params);
+  await saveOpenFoodFactsSearch({
+    query: params.query,
+    page: params.page,
+    pageSize: params.pageSize,
+    offUrl: searchResponse.url,
+    offStatus: searchResponse.status,
+    responseJson: searchResponse.json,
+    responseText: searchResponse.text,
+  });
+
+  logInfo("open_food_facts.search.fetched", {
+    query: params.query,
+    page: params.page,
+    pageSize: params.pageSize,
+    status: searchResponse.status,
+    url: searchResponse.url,
+    durationMs: Date.now() - startedAt,
+  });
+
+  if (searchResponse.status < 200 || searchResponse.status >= 300 || !searchResponse.json) {
+    throw new Error(
+      `OpenFoodFacts search failed with status ${searchResponse.status}${searchResponse.text ? `: ${summarizeText(searchResponse.text)}` : ""}`,
+    );
+  }
+
+  return {
+    status: searchResponse.status,
+    url: searchResponse.url,
+    data: searchResponse.json,
+    text: searchResponse.text,
+  };
+}
+
+async function searchOpenFoodFactsFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+  const startedAt = Date.now();
+  logInfo("open_food_facts.search_foods.start", {
+    query,
+    limit,
+    cacheTtlDays: config.searchCacheTtlDays,
+    baseUrl: OPEN_FOOD_FACTS_BASE_URL,
+  });
+
+  const payload = await executeOpenFoodFactsSearch({
+    query,
+    page: 1,
+    pageSize: Math.min(20, Math.max(limit * 2, 8)),
+  });
+
+  const mappedResults = mapOpenFoodFactsSearchResults(payload).slice(0, limit);
+
+  logInfo("open_food_facts.search_foods.complete", {
+    query,
+    limit,
+    status: payload.status,
+    mappedCount: mappedResults.length,
+    durationMs: Date.now() - startedAt,
+  });
+
+  return mappedResults;
+}
+
 function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): FoodSearchResult[] {
   const merged: FoodSearchResult[] = [];
   const seen = new Set<string>();
@@ -1172,13 +1460,15 @@ function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): Fo
 }
 
 async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
-  const [anmatResult, mfpResult] = await Promise.allSettled([
+  const [anmatResult, mfpResult, openFoodFactsResult] = await Promise.allSettled([
     searchLocalAnmatFoods(query, limit),
     searchMfpFoods(query, limit),
+    searchOpenFoodFactsFoods(query, limit),
   ]);
 
   const anmatFoods = anmatResult.status === "fulfilled" ? anmatResult.value : [];
   const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value : [];
+  const openFoodFactsFoods = openFoodFactsResult.status === "fulfilled" ? openFoodFactsResult.value : [];
 
   if (anmatResult.status === "rejected") {
     logError("food_search.anmat_failed", anmatResult.reason, {
@@ -1195,27 +1485,40 @@ async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSea
     });
   }
 
-  if (anmatResult.status === "rejected" && mfpResult.status === "rejected") {
-    throw anmatResult.reason;
-  }
-
-  if (mfpResult.status === "rejected") {
-    logInfo("food_search.complete_without_mfp", {
+  if (openFoodFactsResult.status === "rejected") {
+    logError("food_search.open_food_facts_failed", openFoodFactsResult.reason, {
       query,
       limit,
       anmatCount: anmatFoods.length,
-      mfpCount: 0,
+      mfpCount: mfpFoods.length,
+    });
+  }
+
+  if (anmatResult.status === "rejected" && mfpResult.status === "rejected" && openFoodFactsResult.status === "rejected") {
+    throw anmatResult.reason;
+  }
+
+  if (mfpResult.status === "rejected" || openFoodFactsResult.status === "rejected") {
+    logInfo("food_search.complete_with_partial_sources", {
+      query,
+      limit,
+      anmatCount: anmatFoods.length,
+      mfpCount: mfpFoods.length,
+      openFoodFactsCount: openFoodFactsFoods.length,
+      mfpFailed: mfpResult.status === "rejected",
+      openFoodFactsFailed: openFoodFactsResult.status === "rejected",
     });
   } else {
-    logInfo("food_search.mfp_success", {
+    logInfo("food_search.remote_sources_success", {
       query,
       limit,
       mfpCount: mfpFoods.length,
       anmatCount: anmatFoods.length,
+      openFoodFactsCount: openFoodFactsFoods.length,
     });
   }
 
-  return interleaveFoodResults([anmatFoods, mfpFoods], limit);
+  return interleaveFoodResults([anmatFoods, openFoodFactsFoods, mfpFoods], limit);
 }
 
 function buildLiveSourcePath(product: AnmatProduct, detailKey: string | null, htmlSha256: string): string {

@@ -1,16 +1,15 @@
 const SEARCH_MAX_ITEMS_DEFAULT = 20;
-const LIVE_ANMAT_MAX_ITEMS_DEFAULT = 8;
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
   "https://backend.caloric.mati.lol";
 
-export type SearchFoodSource = "mfp" | "anmat";
+export type SearchFoodSource = "mfp" | "anmat" | "openfoodfacts";
 
 export type SearchFood = {
   id: string;
   canonicalKey: string;
   source: SearchFoodSource;
-  sourceLabel: "MFP" | "ANMAT";
+  sourceLabel: "MFP" | "ANMAT" | "OFF";
   name: string;
   brand?: string;
   serving?: string;
@@ -29,15 +28,6 @@ export type SearchFood = {
 type SearchResponsePayload = {
   query?: unknown;
   foods?: SearchFood[] | null;
-  error?: unknown;
-  message?: unknown;
-};
-
-type LiveSearchPayload = {
-  query?: unknown;
-  foods?: SearchFood[] | null;
-  eanAttempted?: unknown;
-  eanStatus?: unknown;
   error?: unknown;
   message?: unknown;
 };
@@ -89,8 +79,22 @@ function mapSearchFood(value: unknown): SearchFood | null {
   const food = value as Record<string, unknown>;
   const id = asString(food.id);
   const canonicalKey = asString(food.canonicalKey);
-  const source = food.source === "anmat" ? "anmat" : food.source === "mfp" ? "mfp" : null;
-  const sourceLabel = food.sourceLabel === "ANMAT" ? "ANMAT" : food.sourceLabel === "MFP" ? "MFP" : null;
+  const source =
+    food.source === "anmat"
+      ? "anmat"
+      : food.source === "mfp"
+        ? "mfp"
+        : food.source === "openfoodfacts"
+          ? "openfoodfacts"
+          : null;
+  const sourceLabel =
+    food.sourceLabel === "ANMAT"
+      ? "ANMAT"
+      : food.sourceLabel === "MFP"
+        ? "MFP"
+        : food.sourceLabel === "OFF"
+          ? "OFF"
+          : null;
   const name = asString(food.name);
 
   if (!id || !canonicalKey || !source || !sourceLabel || !name) {
@@ -145,7 +149,7 @@ function mapFoods(payload: { foods?: SearchFood[] | null } | null | undefined): 
   return foods;
 }
 
-function getPayloadErrorMessage(payload: SearchResponsePayload | LiveSearchPayload | null): string | undefined {
+function getPayloadErrorMessage(payload: SearchResponsePayload | null): string | undefined {
   if (!payload) {
     return undefined;
   }
@@ -159,24 +163,6 @@ function getPayloadErrorMessage(payload: SearchResponsePayload | LiveSearchPaylo
   }
 
   return undefined;
-}
-
-function mergeFoods(currentFoods: SearchFood[], nextFoods: SearchFood[], maxItems: number): SearchFood[] {
-  const merged: SearchFood[] = [];
-  const seen = new Set<string>();
-
-  for (const food of [...nextFoods, ...currentFoods]) {
-    if (seen.has(food.canonicalKey)) {
-      continue;
-    }
-    seen.add(food.canonicalKey);
-    merged.push(food);
-    if (merged.length >= maxItems) {
-      break;
-    }
-  }
-
-  return merged;
 }
 
 async function fetchBaseSearch(
@@ -207,62 +193,13 @@ async function fetchBaseSearch(
   return mapFoods(payload);
 }
 
-async function refreshAnmatLive(
-  query: string,
-  signal: AbortSignal | undefined,
-  maxItems: number,
-): Promise<SearchFood[]> {
-  const response = await fetch(new URL("/search/anmat-live", `${BACKEND_BASE_URL}/`).toString(), {
-    method: "POST",
-    signal,
-    headers: {
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      query,
-      maxItems,
-    }),
-  });
-
-  let payload: LiveSearchPayload | null = null;
-  try {
-    payload = (await response.json()) as LiveSearchPayload;
-  } catch {
-    payload = null;
-  }
-
-  if (!response.ok) {
-    throw new Error(getPayloadErrorMessage(payload) ?? `Live ANMAT search failed with ${response.status}`);
-  }
-
-  return mapFoods(payload);
-}
-
 export async function searchFoods(
   query: string,
   options: {
     signal?: AbortSignal;
     maxItems?: number;
-    liveAnmatMaxItems?: number;
-    onBackgroundResults?: (foods: SearchFood[]) => void;
   } = {},
 ): Promise<SearchFood[]> {
   const maxItems = options.maxItems ?? SEARCH_MAX_ITEMS_DEFAULT;
-  const liveAnmatMaxItems = options.liveAnmatMaxItems ?? LIVE_ANMAT_MAX_ITEMS_DEFAULT;
-  const baseFoods = await fetchBaseSearch(query, options.signal, maxItems);
-
-  if (options.onBackgroundResults) {
-    void refreshAnmatLive(query, options.signal, liveAnmatMaxItems)
-      .then((liveFoods) => {
-        if (options.signal?.aborted) {
-          return;
-        }
-        options.onBackgroundResults?.(mergeFoods(baseFoods, liveFoods, maxItems));
-      })
-      .catch(() => {
-        // Background refresh is opportunistic; keep the initial results if it fails.
-      });
-  }
-
-  return baseFoods;
+  return fetchBaseSearch(query, options.signal, maxItems);
 }

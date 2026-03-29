@@ -38,6 +38,7 @@ function getBooleanEnv(name: string, fallback: boolean): boolean {
 export const config = {
   port: getNumberEnv("PORT", 8787),
   databaseUrl: getRequiredEnv("DATABASE_URL"),
+  searchCacheTtlDays: Math.max(1, getNumberEnv("SEARCH_CACHE_TTL_DAYS", 30)),
   mfpUsername: Bun.env.MFP_USERNAME,
   mfpPassword: Bun.env.MFP_PASSWORD,
   mfpProxyUrl: Bun.env.MFP_PROXY_URL,
@@ -49,6 +50,10 @@ export const config = {
     1000,
     getNumberEnv("MFP_REQUEST_TIMEOUT_MS", 20_000),
   ),
+  openFoodFactsBaseUrl: Bun.env.OPEN_FOOD_FACTS_BASE_URL ?? "https://world.openfoodfacts.net",
+  openFoodFactsUserAgent:
+    Bun.env.OPEN_FOOD_FACTS_USER_AGENT ?? "Caloric/1.0 (OpenFoodFacts integration; contact required)",
+  openFoodFactsUserEmail: Bun.env.OPEN_FOOD_FACTS_USER_EMAIL,
   openRouterApiKey: getRequiredEnv("OPENROUTER_API_KEY"),
   openRouterModel: Bun.env.OPENROUTER_MODEL ?? "moonshotai/kimi-k2-0905",
   openRouterProviderOnly: Bun.env.OPENROUTER_PROVIDER_ONLY ?? "groq",
