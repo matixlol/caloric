@@ -20,7 +20,7 @@ You can create a publishable key in the [Clerk Dashboard](https://dashboard.cler
 
 ## Backend Service
 
-This repo also includes a Bun backend in `backend/` that proxies MyFitnessPal search/detail APIs and stores all upstream responses in Postgres using Drizzle migrations.
+This repo also includes a Bun backend in `backend/` that proxies MyFitnessPal and OpenFoodFacts search, merges those with local ANMAT results, and stores upstream responses in Postgres using Drizzle migrations.
 
 Quick start:
 
