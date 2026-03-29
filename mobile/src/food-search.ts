@@ -1,15 +1,16 @@
 const SEARCH_MAX_ITEMS_DEFAULT = 20;
+const SEARCH_SOURCE_ORDER: SearchFoodSource[] = ["anmat", "anmatlive", "openfoodfacts", "mfp"];
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
   "https://backend.caloric.mati.lol";
 
-export type SearchFoodSource = "mfp" | "anmat" | "openfoodfacts";
+export type SearchFoodSource = "mfp" | "anmat" | "anmatlive" | "openfoodfacts";
 
 export type SearchFood = {
   id: string;
   canonicalKey: string;
   source: SearchFoodSource;
-  sourceLabel: "MFP" | "ANMAT" | "OFF";
+  sourceLabel: "MFP" | "ANMAT" | "ANMAT Live" | "OFF";
   name: string;
   brand?: string;
   serving?: string;
@@ -27,10 +28,28 @@ export type SearchFood = {
 
 type SearchResponsePayload = {
   query?: unknown;
+  provider?: unknown;
   foods?: SearchFood[] | null;
   error?: unknown;
   message?: unknown;
 };
+
+export type SearchFoodsBySource = Record<SearchFoodSource, SearchFood[]>;
+
+export type SearchFoodsProgress = {
+  foods: SearchFood[];
+  foodsBySource: SearchFoodsBySource;
+  completedSource: SearchFoodSource;
+};
+
+function createEmptyFoodsBySource(): SearchFoodsBySource {
+  return {
+    anmat: [],
+    anmatlive: [],
+    openfoodfacts: [],
+    mfp: [],
+  };
+}
 
 function asString(value: unknown): string | undefined {
   if (typeof value === "string") {
@@ -169,10 +188,14 @@ async function fetchBaseSearch(
   query: string,
   signal: AbortSignal | undefined,
   maxItems: number,
+  source?: Exclude<SearchFoodSource, "anmatlive">,
 ): Promise<SearchFood[]> {
   const url = new URL("/search", `${BACKEND_BASE_URL}/`);
   url.searchParams.set("query", query);
   url.searchParams.set("maxItems", String(maxItems));
+  if (source) {
+    url.searchParams.set("provider", source);
+  }
 
   const response = await fetch(url.toString(), {
     method: "GET",
@@ -193,13 +216,136 @@ async function fetchBaseSearch(
   return mapFoods(payload);
 }
 
+async function fetchLiveAnmatSearch(
+  query: string,
+  signal: AbortSignal | undefined,
+  maxItems: number,
+): Promise<SearchFood[]> {
+  const response = await fetch(new URL("/search/anmat-live", `${BACKEND_BASE_URL}/`).toString(), {
+    method: "POST",
+    signal,
+    headers: {
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      query,
+      maxItems,
+    }),
+  });
+
+  let payload: SearchResponsePayload | null = null;
+  try {
+    payload = (await response.json()) as SearchResponsePayload;
+  } catch {
+    payload = null;
+  }
+
+  if (!response.ok) {
+    throw new Error(getPayloadErrorMessage(payload) ?? `Search request failed with ${response.status}`);
+  }
+
+  return mapFoods(payload).map((food) => ({
+    ...food,
+    id: `anmatlive:${food.id}`,
+    source: "anmatlive",
+    sourceLabel: "ANMAT Live",
+  }));
+}
+
+function interleaveFoodResults(foodsBySource: SearchFoodsBySource, maxItems: number): SearchFood[] {
+  const merged: SearchFood[] = [];
+  const seen = new Set<string>();
+  const cursors = new Map<SearchFoodSource, number>(SEARCH_SOURCE_ORDER.map((source) => [source, 0]));
+
+  while (merged.length < maxItems) {
+    let advanced = false;
+
+    for (const source of SEARCH_SOURCE_ORDER) {
+      const foods = foodsBySource[source];
+      let cursor = cursors.get(source) ?? 0;
+
+      while (cursor < foods.length) {
+        const candidate = foods[cursor];
+        cursor += 1;
+
+        if (seen.has(candidate.canonicalKey)) {
+          continue;
+        }
+
+        seen.add(candidate.canonicalKey);
+        merged.push(candidate);
+        advanced = true;
+        break;
+      }
+
+      cursors.set(source, cursor);
+
+      if (merged.length >= maxItems) {
+        break;
+      }
+    }
+
+    if (!advanced) {
+      break;
+    }
+  }
+
+  return merged;
+}
+
+function snapshotFoodsBySource(foodsBySource: SearchFoodsBySource): SearchFoodsBySource {
+  return {
+    anmat: foodsBySource.anmat,
+    anmatlive: foodsBySource.anmatlive,
+    openfoodfacts: foodsBySource.openfoodfacts,
+    mfp: foodsBySource.mfp,
+  };
+}
+
+function createAbortError(): Error {
+  const error = new Error("The operation was aborted.");
+  error.name = "AbortError";
+  return error;
+}
+
 export async function searchFoods(
   query: string,
   options: {
     signal?: AbortSignal;
     maxItems?: number;
+    onProgress?: (progress: SearchFoodsProgress) => void;
   } = {},
 ): Promise<SearchFood[]> {
   const maxItems = options.maxItems ?? SEARCH_MAX_ITEMS_DEFAULT;
-  return fetchBaseSearch(query, options.signal, maxItems);
+  const foodsBySource = createEmptyFoodsBySource();
+  const tasks: Array<Promise<SearchFood[]>> = [
+    fetchBaseSearch(query, options.signal, maxItems, "anmat"),
+    fetchLiveAnmatSearch(query, options.signal, maxItems),
+    fetchBaseSearch(query, options.signal, maxItems, "openfoodfacts"),
+    fetchBaseSearch(query, options.signal, maxItems, "mfp"),
+  ];
+
+  const results = await Promise.allSettled(
+    SEARCH_SOURCE_ORDER.map(async (source, index) => {
+      const foods = await tasks[index];
+      foodsBySource[source] = foods;
+      options.onProgress?.({
+        completedSource: source,
+        foodsBySource: snapshotFoodsBySource(foodsBySource),
+        foods: interleaveFoodResults(foodsBySource, maxItems),
+      });
+      return foods;
+    }),
+  );
+
+  if (options.signal?.aborted) {
+    throw createAbortError();
+  }
+
+  if (!results.some((result) => result.status === "fulfilled")) {
+    const rejected = results.find((result) => result.status === "rejected");
+    throw rejected?.reason ?? new Error("Unable to search foods right now.");
+  }
+
+  return interleaveFoodResults(foodsBySource, maxItems);
 }

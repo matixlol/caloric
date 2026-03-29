@@ -126,6 +126,14 @@ type MfpFood = {
 
 type SearchSource = "mfp" | "anmat" | "openfoodfacts";
 
+function parseSearchSource(value: string | null | undefined): SearchSource | null {
+  if (value === "mfp" || value === "anmat" || value === "openfoodfacts") {
+    return value;
+  }
+
+  return null;
+}
+
 type FoodNutrition = {
   calories?: number;
   protein?: number;
@@ -1520,6 +1528,22 @@ async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSea
   return interleaveFoodResults([anmatFoods, openFoodFactsFoods, mfpFoods], limit);
 }
 
+async function searchFoodsBySource(
+  source: SearchSource,
+  query: string,
+  limit: number,
+): Promise<FoodSearchResult[]> {
+  if (source === "anmat") {
+    return searchLocalAnmatFoods(query, limit);
+  }
+
+  if (source === "openfoodfacts") {
+    return searchOpenFoodFactsFoods(query, limit);
+  }
+
+  return searchMfpFoods(query, limit);
+}
+
 function buildLiveSourcePath(product: AnmatProduct, detailKey: string | null, htmlSha256: string): string {
   const stableKey = detailKey || normalizeTextValue(product.rnpa) || htmlSha256.slice(0, 16);
   return `live-search/${product.searchMode}/${stableKey}.html`;
@@ -2251,11 +2275,15 @@ const server = Bun.serve({
       }
 
       const maxItems = Math.max(1, Math.min(100, parseInteger(url.searchParams.get("maxItems"), 20)));
+      const provider = parseSearchSource(url.searchParams.get("provider"));
 
       try {
-        const foods = await searchUnifiedFoods(query, maxItems);
+        const foods = provider
+          ? await searchFoodsBySource(provider, query, maxItems)
+          : await searchUnifiedFoods(query, maxItems);
         return json({
           query,
+          provider,
           foods,
         });
       } catch (error) {

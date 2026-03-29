@@ -14,7 +14,12 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { normalizeLocalDateKey } from "../src/date";
-import { type SearchFood, searchFoods } from "../src/food-search";
+import {
+  type SearchFood,
+  type SearchFoodsBySource,
+  type SearchFoodSource,
+  searchFoods,
+} from "../src/food-search";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 import { CaloricAccount } from "../src/jazz/schema";
 
@@ -29,6 +34,10 @@ const palette = {
   separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
   tintDisabled: "#D1D5DB",
+  badgeBackground: iosColor("quaternarySystemFill", "#E5E7EB"),
+  badgeSelectedBackground: "#E8EEFF",
+  badgeSelectedBorder: "#BDD0FF",
+  badgeText: iosColor("tertiaryLabel", "#6B7280"),
   buttonText: "#FFFFFF",
   searchInputBackground: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
   error: "#B91C1C",
@@ -36,6 +45,25 @@ const palette = {
 
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MAX_ITEMS = 20;
+type SearchProviderFilter = "all" | SearchFoodSource;
+
+const PROVIDER_FILTERS: Array<{ key: SearchProviderFilter; label: string }> = [
+  { key: "all", label: "All" },
+  { key: "mfp", label: "MFP" },
+  { key: "openfoodfacts", label: "OFF" },
+  { key: "anmat", label: "ANMAT DB" },
+  { key: "anmatlive", label: "ANMAT Live" },
+];
+
+function createEmptyFoodsBySource(): SearchFoodsBySource {
+  return {
+    anmat: [],
+    anmatlive: [],
+    openfoodfacts: [],
+    mfp: [],
+  };
+}
+
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim().length > 0) {
     return error.message;
@@ -50,7 +78,8 @@ function getErrorMessage(error: unknown): string {
 function FoodRow({
   sourceLabel,
   name,
-  meta,
+  brand,
+  serving,
   calories,
   selected,
   isLast,
@@ -58,7 +87,8 @@ function FoodRow({
 }: {
   sourceLabel: SearchFood["sourceLabel"];
   name: string;
-  meta: string;
+  brand?: string;
+  serving?: string;
   calories: number;
   selected: boolean;
   isLast: boolean;
@@ -71,11 +101,13 @@ function FoodRow({
       style={[styles.foodRow, !isLast && styles.foodRowDivider]}
     >
       <View style={styles.foodMain}>
-        <View style={styles.foodTitleRow}>
-          <Text style={styles.sourceBadge}>{sourceLabel}</Text>
-          <Text style={styles.foodName}>{name}</Text>
+        <Text style={styles.foodName}>{name}</Text>
+        <View style={styles.foodMetaRow}>
+          {brand ? <Text style={styles.foodMeta}>{brand}</Text> : null}
+          <Text style={styles.inlineSourceBadge}>{sourceLabel}</Text>
+          {serving ? <Text style={styles.foodMeta}>{brand ? `• ${serving}` : serving}</Text> : null}
+          {!brand && !serving ? <Text style={styles.foodMeta}>No serving details</Text> : null}
         </View>
-        <Text style={styles.foodMeta}>{meta}</Text>
       </View>
       <View style={styles.foodRight}>
         <Text style={styles.foodCalories}>{calories.toLocaleString()}</Text>
@@ -96,9 +128,11 @@ export default function LogFoodScreen() {
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [foods, setFoods] = useState<SearchFood[]>([]);
+  const [foodsBySource, setFoodsBySource] = useState<SearchFoodsBySource>(createEmptyFoodsBySource);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedFoodId, setSelectedFoodId] = useState<string | null>(null);
+  const [activeProviderFilter, setActiveProviderFilter] = useState<SearchProviderFilter>("all");
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
@@ -121,6 +155,7 @@ export default function LogFoodScreen() {
 
     if (normalizedQuery.length < 2) {
       setFoods([]);
+      setFoodsBySource(createEmptyFoodsBySource());
       setSelectedFoodId(null);
       setSearchError(null);
       setIsSearching(false);
@@ -129,6 +164,9 @@ export default function LogFoodScreen() {
 
     const controller = new AbortController();
     void (async () => {
+      setFoods([]);
+      setFoodsBySource(createEmptyFoodsBySource());
+      setSelectedFoodId(null);
       setIsSearching(true);
       setSearchError(null);
 
@@ -136,17 +174,19 @@ export default function LogFoodScreen() {
         const nextFoods = await searchFoods(normalizedQuery, {
           signal: controller.signal,
           maxItems: SEARCH_MAX_ITEMS,
+          onProgress: (progress) => {
+            setFoods(progress.foods);
+            setFoodsBySource(progress.foodsBySource);
+          },
         });
         setFoods(nextFoods);
-        setSelectedFoodId((current) =>
-          current && nextFoods.some((food) => food.id === current) ? current : null,
-        );
       } catch (error) {
         if (error instanceof Error && error.name === "AbortError") {
           return;
         }
 
         setFoods([]);
+        setFoodsBySource(createEmptyFoodsBySource());
         setSelectedFoodId(null);
         setSearchError(getErrorMessage(error));
       } finally {
@@ -173,9 +213,22 @@ export default function LogFoodScreen() {
   const selectedDay = Array.isArray(params.day) ? params.day[0] : params.day;
   const selectedDateKey = normalizeLocalDateKey(selectedDay, Date.now());
   const selectedMealLabel = mealLabelFor(selectedMeal);
-  const selectedFood = foods.find((food) => food.id === selectedFoodId) || null;
   const trimmedQuery = query.trim();
   const canShowResults = trimmedQuery.length >= 2;
+  const allFetchedFoods = [
+    ...foodsBySource.anmat,
+    ...foodsBySource.anmatlive,
+    ...foodsBySource.openfoodfacts,
+    ...foodsBySource.mfp,
+  ];
+  const selectedFood = allFetchedFoods.find((food) => food.id === selectedFoodId) || null;
+  const providerCounts: Record<SearchFoodSource, number> = {
+    anmat: foodsBySource.anmat.length,
+    anmatlive: foodsBySource.anmatlive.length,
+    openfoodfacts: foodsBySource.openfoodfacts.length,
+    mfp: foodsBySource.mfp.length,
+  };
+  const visibleFoods = activeProviderFilter === "all" ? foods : foodsBySource[activeProviderFilter];
 
   const handleAddToLog = () => {
     if (!selectedFood) return;
@@ -250,30 +303,63 @@ export default function LogFoodScreen() {
         {!canShowResults ? (
           <Text style={styles.helperText}>Enter at least 2 characters to search.</Text>
         ) : null}
-        {canShowResults && isSearching ? <Text style={styles.helperText}>Searching…</Text> : null}
+        {canShowResults ? (
+          <ScrollView
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.providerFilterRow}
+          >
+            {PROVIDER_FILTERS.map((filter) => {
+              const isActive = activeProviderFilter === filter.key;
+              const count = filter.key === "all" ? foods.length : providerCounts[filter.key];
+
+              return (
+                <Pressable
+                  key={filter.key}
+                  accessibilityRole="button"
+                  onPress={() => setActiveProviderFilter(filter.key)}
+                  style={[styles.providerChip, isActive && styles.providerChipActive]}
+                >
+                  <Text style={[styles.providerChipText, isActive && styles.providerChipTextActive]}>
+                    {filter.label}
+                  </Text>
+                  <Text style={[styles.providerChipCount, isActive && styles.providerChipCountActive]}>
+                    {count}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </ScrollView>
+        ) : null}
+        {canShowResults && isSearching ? (
+          <Text style={styles.helperText}>
+            Searching MFP, OpenFoodFacts, ANMAT DB, and ANMAT live. Results appear as each source returns.
+          </Text>
+        ) : null}
         {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
 
         {canShowResults && !isSearching && !searchError && foods.length === 0 ? (
           <Text style={styles.helperText}>{`No foods found for "${trimmedQuery}".`}</Text>
         ) : null}
+        {canShowResults && !isSearching && !searchError && foods.length > 0 && visibleFoods.length === 0 ? (
+          <Text style={styles.helperText}>{`No results from that source for "${trimmedQuery}".`}</Text>
+        ) : null}
 
-        {foods.length > 0 ? (
+        {visibleFoods.length > 0 ? (
           <View style={styles.card}>
-            {foods.map((food, index) => {
+            {visibleFoods.map((food, index) => {
               const calories = food.nutrition?.calories ?? 0;
-              const meta =
-                [food.brand, food.serving].filter(Boolean).join(" • ") ||
-                "No serving details";
 
               return (
                 <FoodRow
                   key={food.id}
                   sourceLabel={food.sourceLabel}
                   name={food.name}
-                  meta={meta}
+                  brand={food.brand}
+                  serving={food.serving}
                   calories={calories}
                   selected={selectedFoodId === food.id}
-                  isLast={index === foods.length - 1}
+                  isLast={index === visibleFoods.length - 1}
                   onPress={() => setSelectedFoodId(food.id)}
                 />
               );
@@ -371,6 +457,43 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: palette.error,
   },
+  providerFilterRow: {
+    gap: 8,
+    paddingHorizontal: 4,
+    paddingTop: 10,
+  },
+  providerChip: {
+    minHeight: 32,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    borderWidth: 1,
+    borderColor: palette.separator,
+    borderRadius: 9,
+    backgroundColor: palette.card,
+    paddingHorizontal: 10,
+  },
+  providerChipActive: {
+    borderColor: palette.badgeSelectedBorder,
+    backgroundColor: palette.badgeSelectedBackground,
+  },
+  providerChipText: {
+    fontSize: 13,
+    lineHeight: 16,
+    fontWeight: "600",
+    color: palette.label,
+  },
+  providerChipTextActive: {
+    color: palette.tint,
+  },
+  providerChipCount: {
+    fontSize: 12,
+    lineHeight: 14,
+    color: palette.secondaryLabel,
+  },
+  providerChipCountActive: {
+    color: palette.tint,
+  },
   foodRow: {
     minHeight: 64,
     flexDirection: "row",
@@ -385,32 +508,33 @@ const styles = StyleSheet.create({
   foodMain: {
     flex: 1,
   },
-  foodTitleRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  sourceBadge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 999,
-    overflow: "hidden",
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "700",
-    color: palette.tint,
-    backgroundColor: "rgba(37,99,235,0.12)",
-  },
   foodName: {
     fontSize: 17,
     lineHeight: 22,
     color: palette.label,
   },
-  foodMeta: {
+  foodMetaRow: {
     marginTop: 2,
+    flexDirection: "row",
+    alignItems: "center",
+    flexWrap: "wrap",
+    gap: 6,
+  },
+  foodMeta: {
     fontSize: 13,
     lineHeight: 18,
     color: palette.secondaryLabel,
+  },
+  inlineSourceBadge: {
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    overflow: "hidden",
+    fontSize: 10,
+    lineHeight: 12,
+    fontWeight: "700",
+    color: palette.badgeText,
+    backgroundColor: palette.badgeBackground,
   },
   foodRight: {
     alignItems: "flex-end",
