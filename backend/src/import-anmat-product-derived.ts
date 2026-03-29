@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { and, asc, gt } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/postgres-js";
+import zstd from "@foxglove/wasm-zstd";
 import postgres from "postgres";
 import { parseEansFromHtmlText } from "./anmat-ean-parser";
 import { anmatProductDerivedData, anmatProductHtmlBlobs } from "./db/schema";
@@ -49,31 +50,14 @@ function parseArgs(argv: string[]): CliArgs {
   return args;
 }
 
-async function decompressZstd(bytes: Uint8Array): Promise<string> {
-  const tempDir = await mkdtemp(join(tmpdir(), "anmat-html-zstd-"));
-  const inputPath = join(tempDir, "input.zst");
-
-  try {
-    await Bun.write(inputPath, bytes);
-    const proc = Bun.spawn(["zstd", "-d", "-q", "-c", "--", inputPath], {
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-
-    const [stdoutText, stderrText, exitCode] = await Promise.all([
-      new Response(proc.stdout).text(),
-      new Response(proc.stderr).text(),
-      proc.exited,
-    ]);
-
-    if (exitCode !== 0) {
-      throw new Error(`zstd failed with exit code ${exitCode}: ${stderrText.trim()}`);
-    }
-
-    return stdoutText;
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
+async function decompressZstd(bytes: Uint8Array, uncompressedBytes: number): Promise<string | null> {
+  if (uncompressedBytes <= 0) {
+    return null;
   }
+
+  await zstd.isLoaded;
+  const decompressed = zstd.decompress(bytes, uncompressedBytes);
+  return new TextDecoder().decode(decompressed);
 }
 
 function decodeEntities(input: string): string {
@@ -228,6 +212,7 @@ async function main() {
         .select({
           id: anmatProductHtmlBlobs.id,
           htmlZstd: anmatProductHtmlBlobs.htmlZstd,
+          uncompressedBytes: anmatProductHtmlBlobs.uncompressedBytes,
         })
         .from(anmatProductHtmlBlobs)
         .where(gt(anmatProductHtmlBlobs.id, lastId))
@@ -239,7 +224,11 @@ async function main() {
       }
 
       for (const row of rows) {
-        const html = await decompressZstd(row.htmlZstd);
+        const html = await decompressZstd(row.htmlZstd, row.uncompressedBytes);
+        if (!html) {
+          lastId = row.id;
+          continue;
+        }
         const nutrition = parseNutritionFromHtml(html);
         const ean = parseEansFromHtmlText(html, { includeHtmlAny: true });
 

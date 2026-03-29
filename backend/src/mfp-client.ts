@@ -12,6 +12,17 @@ type MfpResponse = {
   text: string | null;
 };
 
+function isAuthorizationErrorResponse(response: MfpResponse): boolean {
+  if (response.status !== 400 || !response.json || typeof response.json !== "object") {
+    return false;
+  }
+
+  const payload = response.json as { error?: unknown; error_description?: unknown };
+  return payload.error === "validation/3" &&
+    typeof payload.error_description === "string" &&
+    payload.error_description.includes("Missing HTTP header: Authorization");
+}
+
 async function getMfpHeaders(forceRefresh = false): Promise<Record<string, string>> {
   const auth = await getMfpAuthHeaders({ forceRefresh });
   const headers: Record<string, string> = {
@@ -33,7 +44,7 @@ async function request(pathWithQuery: string): Promise<MfpResponse> {
   const url = new URL(pathWithQuery, MFP_BASE_URL);
   const startedAt = Date.now();
 
-  const fetchMfp = async (forceRefresh = false): Promise<Response> => {
+  const fetchMfp = async (forceRefresh = false): Promise<MfpResponse> => {
     const headers = await getMfpHeaders(forceRefresh);
 
     logInfo("mfp.request.start", {
@@ -47,17 +58,44 @@ async function request(pathWithQuery: string): Promise<MfpResponse> {
       headers: Object.keys(headers).sort(),
     });
 
-    return fetch(url, {
+    const response = await fetch(url, {
       method: "GET",
       headers,
       signal: AbortSignal.timeout(config.requestTimeoutMs),
     });
+
+    const text = await response.text();
+    let json: unknown | null = null;
+
+    try {
+      json = JSON.parse(text);
+    } catch {
+      json = null;
+    }
+
+    logInfo("mfp.request.complete", {
+      url: url.toString(),
+      responseUrl: response.url,
+      status: response.status,
+      ok: response.ok,
+      durationMs: Date.now() - startedAt,
+      contentType: response.headers.get("content-type"),
+      jsonParsed: json !== null,
+      textPreview: json ? null : summarizeText(text),
+    });
+
+    return {
+      status: response.status,
+      url: response.url,
+      json,
+      text: json ? null : text,
+    };
   };
 
-  let response: Response;
+  let response: MfpResponse;
   try {
     response = await fetchMfp();
-    if (response.status === 401 || response.status === 403) {
+    if (response.status === 401 || response.status === 403 || isAuthorizationErrorResponse(response)) {
       response = await fetchMfp(true);
     }
   } catch (error) {
@@ -68,32 +106,7 @@ async function request(pathWithQuery: string): Promise<MfpResponse> {
     throw error;
   }
 
-  const text = await response.text();
-  let json: unknown | null = null;
-
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = null;
-  }
-
-  logInfo("mfp.request.complete", {
-    url: url.toString(),
-    responseUrl: response.url,
-    status: response.status,
-    ok: response.ok,
-    durationMs: Date.now() - startedAt,
-    contentType: response.headers.get("content-type"),
-    jsonParsed: json !== null,
-    textPreview: json ? null : summarizeText(text),
-  });
-
-  return {
-    status: response.status,
-    url: response.url,
-    json,
-    text: json ? null : text,
-  };
+  return response;
 }
 
 export type SearchParams = {

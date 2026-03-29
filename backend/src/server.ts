@@ -1045,8 +1045,7 @@ async function searchLocalAnmatFoods(query: string, limit: number): Promise<Food
         ilike(anmatProductHtmlBlobs.rnpa, pattern),
       ),
     )
-    .orderBy(desc(anmatProductHtmlBlobs.importedAt), desc(anmatProductHtmlBlobs.id))
-    .limit(Math.max(limit * 8, 64));
+    .orderBy(desc(anmatProductHtmlBlobs.importedAt), desc(anmatProductHtmlBlobs.id));
 
   const deduped = new Map<
     string,

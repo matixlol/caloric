@@ -498,7 +498,6 @@ async function main() {
   await ensureDir(profileDir);
 
   const context = await chromium.launchPersistentContext(profileDir, {
-    channel: "chrome",
     headless,
     proxy: getProxyConfig(process.env.MFP_PROXY_URL),
     locale: "en-US",
@@ -509,6 +508,8 @@ async function main() {
       "--disable-blink-features=AutomationControlled",
       "--no-first-run",
       "--no-default-browser-check",
+      "--disable-dev-shm-usage",
+      "--no-sandbox",
     ],
   });
   const page = context.pages()[0] ?? (await context.newPage());
