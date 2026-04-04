@@ -7,6 +7,7 @@ import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
+import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
 import { CaloricAccount } from "../src/jazz/schema";
 
 const jazzApiKey = process.env.EXPO_PUBLIC_JAZZ_API_KEY?.trim() || "you@example.com";
@@ -63,6 +64,7 @@ export default function RootLayout() {
       <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
         <JazzProvider>
           <ClerkAuthGate>
+            <AutoBackupCoordinator />
             <AppNavigator />
           </ClerkAuthGate>
         </JazzProvider>

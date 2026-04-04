@@ -12,7 +12,15 @@
       "bundleIdentifier": "lol.mati.caloric",
       "infoPlist": {
         "ITSAppUsesNonExemptEncryption": false,
-        "NSMicrophoneUsageDescription": "Caloric uses your microphone so you can log food with voice."
+        "NSMicrophoneUsageDescription": "Caloric uses your microphone so you can log food with voice.",
+        "LSSupportsOpeningDocumentsInPlace": true,
+        "NSUbiquitousContainers": {
+          "iCloud.lol.mati.caloric": {
+            "NSUbiquitousContainerIsDocumentScopePublic": true,
+            "NSUbiquitousContainerName": "Caloric",
+            "NSUbiquitousContainerSupportedFolderLevels": "Any"
+          }
+        }
       }
     },
     "android": {
@@ -53,7 +61,8 @@
           "enableBackgroundPlayback": false
         }
       ],
-      "expo-sqlite"
+      "expo-sqlite",
+      "./plugins/withICloudBackup"
     ],
     "experiments": {
       "typedRoutes": true,
