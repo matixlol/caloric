@@ -19,19 +19,16 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: read
-    defaults:
-      run:
-        working-directory: mobile
     steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
       - name: Check for EXPO_TOKEN
         run: |
           if [ -z "${{ secrets.EXPO_TOKEN }}" ]; then
             echo "Missing EXPO_TOKEN GitHub Actions secret."
             exit 1
           fi
-
-      - name: Checkout repository
-        uses: actions/checkout@v5
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
@@ -52,7 +49,9 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Install dependencies
+        working-directory: mobile
         run: pnpm install --frozen-lockfile
 
       - name: Publish update
+        working-directory: mobile
         run: eas update --platform ios --channel production --environment production --message "main@${{ github.sha }}" --non-interactive
