@@ -37,6 +37,9 @@ const palette = {
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
+  macroProtein: "#2563EB",
+  macroCarbs: "#F59E0B",
+  macroFat: "#14B8A6",
   destructive: iosColor("systemRed", "#DC2626"),
   destructiveText: "#FFFFFF",
 };
@@ -103,8 +106,7 @@ function formatCalories(value: number) {
 }
 
 function formatGrams(value: number) {
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded.toFixed(0)}g` : `${rounded.toFixed(1)}g`;
+  return Math.round(value).toLocaleString();
 }
 
 function estimateItemHeight(item: MealListItem) {
@@ -680,10 +682,16 @@ export default function HomeScreen() {
               <Text style={styles.macroLabel}>Protein</Text>
               <Text style={styles.macroValue}>
                 {formatGrams(protein)}
-                <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
+                <Text style={styles.macroGoal}> / {proteinGoal}</Text>
               </Text>
               <View style={styles.macroTrack}>
-                <View style={[styles.macroFill, { width: `${proteinProgress}%` }]} />
+                <View
+                  style={[
+                    styles.macroFill,
+                    styles.macroProteinFill,
+                    { width: `${proteinProgress}%` },
+                  ]}
+                />
               </View>
             </View>
 
@@ -691,10 +699,16 @@ export default function HomeScreen() {
               <Text style={styles.macroLabel}>Carbs</Text>
               <Text style={styles.macroValue}>
                 {formatGrams(carbs)}
-                <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
+                <Text style={styles.macroGoal}> / {carbsGoal}</Text>
               </Text>
               <View style={styles.macroTrack}>
-                <View style={[styles.macroFill, { width: `${carbsProgress}%` }]} />
+                <View
+                  style={[
+                    styles.macroFill,
+                    styles.macroCarbsFill,
+                    { width: `${carbsProgress}%` },
+                  ]}
+                />
               </View>
             </View>
 
@@ -702,10 +716,16 @@ export default function HomeScreen() {
               <Text style={styles.macroLabel}>Fat</Text>
               <Text style={styles.macroValue}>
                 {formatGrams(fat)}
-                <Text style={styles.macroGoal}> / {fatGoal}g</Text>
+                <Text style={styles.macroGoal}> / {fatGoal}</Text>
               </Text>
               <View style={styles.macroTrack}>
-                <View style={[styles.macroFill, { width: `${fatProgress}%` }]} />
+                <View
+                  style={[
+                    styles.macroFill,
+                    styles.macroFatFill,
+                    { width: `${fatProgress}%` },
+                  ]}
+                />
               </View>
             </View>
           </View>
@@ -818,10 +838,16 @@ export default function HomeScreen() {
                 <Text style={styles.macroLabel}>Protein</Text>
                 <Text style={styles.macroValue}>
                   {formatGrams(preview.protein)}
-                  <Text style={styles.macroGoal}> / {proteinGoal}g</Text>
+                  <Text style={styles.macroGoal}> / {proteinGoal}</Text>
                 </Text>
                 <View style={styles.macroTrack}>
-                  <View style={[styles.macroFill, { width: `${preview.proteinProgress}%` }]} />
+                  <View
+                    style={[
+                      styles.macroFill,
+                      styles.macroProteinFill,
+                      { width: `${preview.proteinProgress}%` },
+                    ]}
+                  />
                 </View>
               </View>
 
@@ -829,10 +855,16 @@ export default function HomeScreen() {
                 <Text style={styles.macroLabel}>Carbs</Text>
                 <Text style={styles.macroValue}>
                   {formatGrams(preview.carbs)}
-                  <Text style={styles.macroGoal}> / {carbsGoal}g</Text>
+                  <Text style={styles.macroGoal}> / {carbsGoal}</Text>
                 </Text>
                 <View style={styles.macroTrack}>
-                  <View style={[styles.macroFill, { width: `${preview.carbsProgress}%` }]} />
+                  <View
+                    style={[
+                      styles.macroFill,
+                      styles.macroCarbsFill,
+                      { width: `${preview.carbsProgress}%` },
+                    ]}
+                  />
                 </View>
               </View>
 
@@ -840,10 +872,16 @@ export default function HomeScreen() {
                 <Text style={styles.macroLabel}>Fat</Text>
                 <Text style={styles.macroValue}>
                   {formatGrams(preview.fat)}
-                  <Text style={styles.macroGoal}> / {fatGoal}g</Text>
+                  <Text style={styles.macroGoal}> / {fatGoal}</Text>
                 </Text>
                 <View style={styles.macroTrack}>
-                  <View style={[styles.macroFill, { width: `${preview.fatProgress}%` }]} />
+                  <View
+                    style={[
+                      styles.macroFill,
+                      styles.macroFatFill,
+                      { width: `${preview.fatProgress}%` },
+                    ]}
+                  />
                 </View>
               </View>
             </View>
@@ -1127,7 +1165,15 @@ const styles = StyleSheet.create({
   },
   macroFill: {
     height: "100%",
-    backgroundColor: palette.tint,
+  },
+  macroProteinFill: {
+    backgroundColor: palette.macroProtein,
+  },
+  macroCarbsFill: {
+    backgroundColor: palette.macroCarbs,
+  },
+  macroFatFill: {
+    backgroundColor: palette.macroFat,
   },
   mealRow: {
     position: "relative",
