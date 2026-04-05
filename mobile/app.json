@@ -3,10 +3,20 @@
     "name": "caloric",
     "slug": "caloric",
     "version": "1.0.0",
+    "runtimeVersion": {
+      "policy": "fingerprint"
+    },
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
     "scheme": "caloric",
     "userInterfaceStyle": "automatic",
+    "updates": {
+      "url": "https://u.expo.dev/7e5b3130-5a61-430b-ba37-1958e9248b32",
+      "checkAutomatically": "ON_LOAD",
+      "fallbackToCacheTimeout": 0,
+      "useEmbeddedUpdate": true,
+      "enableBsdiffPatchSupport": true
+    },
     "ios": {
       "supportsTablet": true,
       "bundleIdentifier": "lol.mati.caloric",
@@ -62,7 +72,11 @@
         }
       ],
       "expo-sqlite",
-      "./plugins/withICloudBackup"
+      "./plugins/withICloudBackup",
+      "expo-asset",
+      "expo-font",
+      "expo-image",
+      "expo-web-browser"
     ],
     "experiments": {
       "typedRoutes": true,

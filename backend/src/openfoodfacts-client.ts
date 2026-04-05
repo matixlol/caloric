@@ -1,5 +1,6 @@
 import { config } from "./config";
 import { logError, logInfo, summarizeText } from "./logging";
+import { SpanKind, SpanStatusCode, withSpan } from "./tracing";
 
 export const OPEN_FOOD_FACTS_BASE_URL = config.openFoodFactsBaseUrl.replace(/\/+$/, "");
 
@@ -51,52 +52,80 @@ export async function searchOpenFoodFacts(params: OpenFoodFactsSearchParams): Pr
 
   const startedAt = Date.now();
 
-  logInfo("open_food_facts.request.start", {
-    url: url.toString(),
-    page: params.page,
-    pageSize: params.pageSize,
-    timeoutMs: config.requestTimeoutMs,
-  });
+  return withSpan(
+    "open_food_facts.request",
+    {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        "server.address": url.hostname,
+        "server.port": Number(url.port || 443),
+        "http.request.method": "GET",
+        "url.full": url.toString(),
+        "app.search.page": params.page,
+        "app.search.page_size": params.pageSize,
+        "app.request.timeout_ms": config.requestTimeoutMs,
+      },
+    },
+    async (span) => {
+      logInfo("open_food_facts.request.start", {
+        url: url.toString(),
+        page: params.page,
+        pageSize: params.pageSize,
+        timeoutMs: config.requestTimeoutMs,
+      });
 
-  let response: Response;
-  try {
-    response = await fetch(url, {
-      method: "GET",
-      headers: buildHeaders(),
-      signal: AbortSignal.timeout(config.requestTimeoutMs),
-    });
-  } catch (error) {
-    logError("open_food_facts.request.fetch_failed", error, {
-      url: url.toString(),
-      durationMs: Date.now() - startedAt,
-    });
-    throw error;
-  }
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: "GET",
+          headers: buildHeaders(),
+          signal: AbortSignal.timeout(config.requestTimeoutMs),
+        });
+      } catch (error) {
+        logError("open_food_facts.request.fetch_failed", error, {
+          url: url.toString(),
+          durationMs: Date.now() - startedAt,
+        });
+        throw error;
+      }
 
-  const text = await response.text();
-  let json: unknown | null = null;
+      const text = await response.text();
+      let json: unknown | null = null;
 
-  try {
-    json = JSON.parse(text);
-  } catch {
-    json = null;
-  }
+      try {
+        json = JSON.parse(text);
+      } catch {
+        json = null;
+      }
 
-  logInfo("open_food_facts.request.complete", {
-    url: url.toString(),
-    responseUrl: response.url,
-    status: response.status,
-    ok: response.ok,
-    durationMs: Date.now() - startedAt,
-    contentType: response.headers.get("content-type"),
-    jsonParsed: json !== null,
-    textPreview: json ? null : summarizeText(text),
-  });
+      span.setAttribute("http.response.status_code", response.status);
+      span.setAttribute("app.response.json_parsed", json !== null);
+      span.setAttribute("url.response", response.url);
 
-  return {
-    status: response.status,
-    url: response.url,
-    json,
-    text: json ? null : text,
-  };
+      if (!response.ok) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: `Open Food Facts request failed with status ${response.status}`,
+        });
+      }
+
+      logInfo("open_food_facts.request.complete", {
+        url: url.toString(),
+        responseUrl: response.url,
+        status: response.status,
+        ok: response.ok,
+        durationMs: Date.now() - startedAt,
+        contentType: response.headers.get("content-type"),
+        jsonParsed: json !== null,
+        textPreview: json ? null : summarizeText(text),
+      });
+
+      return {
+        status: response.status,
+        url: response.url,
+        json,
+        text: json ? null : text,
+      };
+    },
+  );
 }

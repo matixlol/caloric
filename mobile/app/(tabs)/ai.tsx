@@ -10,6 +10,7 @@ import {
 } from "expo-audio";
 import { useAccount } from "jazz-tools/expo";
 import {
+  type ColorValue,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
@@ -20,6 +21,15 @@ import {
   TextInput,
   View,
 } from "react-native";
+import Animated, {
+  useAnimatedStyle,
+  useSharedValue,
+  withDelay,
+  withRepeat,
+  withSequence,
+  withTiming,
+  Easing,
+} from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
 import { localDateKeyFromTimestamp } from "../../src/date";
@@ -398,6 +408,65 @@ function buildRecentLogHints(logs: unknown, now = Date.now()): RecentLogHintPayl
 
   output.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0));
   return output;
+}
+
+function TypingDot({ delay, color }: { delay: number; color: ColorValue }) {
+  const opacity = useSharedValue(0.3);
+  const scale = useSharedValue(0.8);
+
+  useEffect(() => {
+    opacity.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.3, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+        ),
+        -1,
+        false,
+      ),
+    );
+    scale.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0.8, { duration: 400, easing: Easing.inOut(Easing.ease) }),
+        ),
+        -1,
+        false,
+      ),
+    );
+  }, [delay, opacity, scale]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: opacity.value,
+    transform: [{ scale: scale.value }],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: 8,
+          height: 8,
+          borderRadius: 4,
+          backgroundColor: color,
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+}
+
+function TypingIndicator({ color }: { color: ColorValue }) {
+  return (
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 5, paddingVertical: 4 }}>
+      <TypingDot delay={0} color={color} />
+      <TypingDot delay={160} color={color} />
+      <TypingDot delay={320} color={color} />
+    </View>
+  );
 }
 
 export default function AILogScreen() {
@@ -1056,8 +1125,9 @@ export default function AILogScreen() {
 
         {messages.length === 0 ? (
           <View style={styles.emptyCard}>
+            <Ionicons name="chatbubbles-outline" size={28} color={palette.tertiaryLabel} style={{ marginBottom: 8 }} />
             <Text style={styles.emptyText}>
-              {"Try: \"I had a protein bar for breakfast\" or \"Find grilled chicken for lunch\""}
+              {"\"I had a protein bar for breakfast\"\n\"Find grilled chicken for lunch\""}
             </Text>
           </View>
         ) : null}
@@ -1089,7 +1159,7 @@ export default function AILogScreen() {
                     </StreamdownRN>
                   )
                 ) : (
-                  <Text style={styles.typingText}>Thinking...</Text>
+                  <TypingIndicator color={palette.secondaryLabel} />
                 )}
               </View>
             );
@@ -1192,6 +1262,12 @@ export default function AILogScreen() {
           );
         })}
 
+        {isStreaming && (messages.length === 0 || (() => { const last = messages[messages.length - 1]; return !last || last.kind !== "text" || last.role !== "assistant"; })()) ? (
+          <View style={[styles.messageBubble, styles.assistantBubble]}>
+            <TypingIndicator color={palette.secondaryLabel} />
+          </View>
+        ) : null}
+
         {error ? (
           <View style={styles.errorCard}>
             <Text style={styles.errorText}>{error}</Text>
@@ -1239,7 +1315,7 @@ export default function AILogScreen() {
               (!canUseComposerActions || !hasInputText) && styles.buttonDisabled,
             ]}
           >
-            <Ionicons name="send" size={18} color={palette.buttonText} />
+            <Ionicons name="send" size={16} color={palette.buttonText} />
           </Pressable>
           {!hasInputText ? (
             <Pressable
@@ -1259,7 +1335,7 @@ export default function AILogScreen() {
             >
               <Ionicons
                 name={isRecording ? "radio-button-on" : "mic"}
-                size={18}
+                size={16}
                 color={palette.buttonText}
               />
             </Pressable>
@@ -1337,35 +1413,40 @@ function createStyles({ palette }: AppTheme) {
     },
     emptyCard: {
       backgroundColor: palette.card,
-      borderRadius: 14,
-      padding: 14,
+      borderRadius: 16,
+      padding: 20,
+      marginTop: 8,
       marginBottom: 10,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: palette.separator,
+      alignItems: "center",
     },
     emptyText: {
-      fontSize: 14,
-      lineHeight: 19,
+      fontSize: 15,
+      lineHeight: 21,
       color: palette.secondaryLabel,
+      textAlign: "center",
     },
     messageBubble: {
-      borderRadius: 14,
-      paddingHorizontal: 12,
+      borderRadius: 18,
+      paddingHorizontal: 14,
       paddingVertical: 10,
-      marginBottom: 10,
-      maxWidth: "92%",
+      marginBottom: 6,
+      maxWidth: "85%",
     },
     userBubble: {
       alignSelf: "flex-end",
       backgroundColor: palette.userBubble,
+      borderBottomRightRadius: 6,
     },
     assistantBubble: {
       alignSelf: "flex-start",
       backgroundColor: palette.assistantBubble,
+      borderBottomLeftRadius: 6,
     },
     messageText: {
-      fontSize: 15,
-      lineHeight: 20,
+      fontSize: 16,
+      lineHeight: 22,
       color: palette.label,
     },
     userMessageText: {
@@ -1375,12 +1456,6 @@ function createStyles({ palette }: AppTheme) {
       flex: 0,
       width: "100%",
       marginBottom: -12,
-    },
-    typingText: {
-      fontSize: 14,
-      lineHeight: 18,
-      color: palette.secondaryLabel,
-      fontStyle: "italic",
     },
     toolCard: {
       borderRadius: 10,
@@ -1496,15 +1571,16 @@ function createStyles({ palette }: AppTheme) {
       fontFamily: Platform.select({ ios: "Menlo", default: "monospace" }),
     },
     composerContainer: {
-      paddingHorizontal: 16,
-      paddingTop: 10,
+      paddingHorizontal: 12,
+      paddingTop: 8,
       backgroundColor: palette.overlay,
     },
     composerCard: {
       backgroundColor: palette.card,
-      borderRadius: 14,
-      padding: 6,
-      paddingLeft: 10,
+      borderRadius: 22,
+      paddingVertical: 6,
+      paddingLeft: 16,
+      paddingRight: 6,
       flexDirection: "row",
       alignItems: "flex-end",
       gap: 6,
@@ -1515,26 +1591,24 @@ function createStyles({ palette }: AppTheme) {
       flex: 1,
       minHeight: 36,
       maxHeight: 140,
-      borderRadius: 10,
-      backgroundColor: palette.inputBackground,
       color: palette.label,
-      paddingHorizontal: 6,
+      paddingHorizontal: 0,
       paddingVertical: 8,
       fontSize: 16,
       lineHeight: 20,
     },
     sendButton: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: palette.tint,
     },
     voiceButton: {
-      width: 34,
-      height: 34,
-      borderRadius: 17,
+      width: 32,
+      height: 32,
+      borderRadius: 16,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: palette.tint,
