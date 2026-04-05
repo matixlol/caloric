@@ -37,11 +37,11 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `userId` (required)
     - `actionType` (required, set to `user-message`)
     - `audio` (required for voice-only requests)
-    - `message` (optional fallback text)
-  - returns:
-    - `status` (`ready` or `awaiting-approval`)
-    - `events` (`assistant`, `search`, `approval`)
-    - `resolvedUserMessage` (present for user-message actions)
+    - `message` (optional companion text)
+  - returns `text/event-stream` SSE chunks:
+    - `type: "status"` with `status` (`ready` or `awaiting-approval`)
+    - `type: "event"` with `event` (`assistant-delta`, `assistant`, `search`, `approval`)
+    - `type: "resolved-user-message"` when a typed companion message was sent
 - `POST /mfp/session/refresh`
   - forces a Playwright login refresh and updates the stored MyFitnessPal session in Postgres
   - returns whether auth headers were refreshed successfully
@@ -71,7 +71,6 @@ Copy `.env.example` to `.env` and set:
 - `MFP_PASSWORD`
 - `TWO_CAPTCHA_API_KEY` (used to solve Cloudflare Turnstile during MyFitnessPal login)
 - `OPENROUTER_API_KEY`
-- `GROQ_API_KEY`
 
 Optional:
 

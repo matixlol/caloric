@@ -1,3 +1,4 @@
+import { fetch as expoFetch } from "expo/fetch";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
@@ -93,6 +94,10 @@ type AgentEvent =
       text: string;
     }
   | {
+      kind: "assistant-delta";
+      text: string;
+    }
+  | {
       kind: "search";
       foods: SearchResultFood[];
     }
@@ -120,6 +125,12 @@ type AudioUpload = {
   fileName: string;
 };
 
+type StreamingTurnResult = {
+  status: ChatStatus;
+  events: AgentEvent[];
+  resolvedUserMessage?: string;
+};
+
 type RecentLogHintPayload = {
   foodName: string;
   meal?: string;
@@ -137,6 +148,15 @@ type MaybeLoadedLogEntry = {
   serving?: string;
   createdAt?: number;
   dateKey?: string;
+};
+
+type StreamingPayload = {
+  type?: unknown;
+  status?: unknown;
+  event?: unknown;
+  resolvedUserMessage?: unknown;
+  error?: unknown;
+  message?: unknown;
 };
 
 const recentLogWindowMs = 3 * 24 * 60 * 60 * 1000;
@@ -201,6 +221,97 @@ function getErrorDetails(error: unknown): string | null {
   }
 
   return null;
+}
+
+function isStreamingPayload(value: unknown): value is StreamingPayload {
+  return Boolean(value && typeof value === "object");
+}
+
+function normalizeStreamingPayloadEvent(value: unknown): AgentEvent | null {
+  if (!value || typeof value !== "object") {
+    return null;
+  }
+
+  return value as AgentEvent;
+}
+
+function parseSseEventsFromChunk(chunk: string): StreamingPayload[] {
+  const normalized = chunk.replace(/\r\n/g, "\n");
+  const segments = normalized.split("\n\n");
+  const payloads: StreamingPayload[] = [];
+
+  for (const segment of segments) {
+    const dataLines = segment
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim());
+
+    if (dataLines.length === 0) {
+      continue;
+    }
+
+    const data = dataLines.join("\n");
+    if (!data || data === "[DONE]") {
+      continue;
+    }
+
+    try {
+      const parsed = JSON.parse(data);
+      if (isStreamingPayload(parsed)) {
+        payloads.push(parsed);
+      }
+    } catch {
+      // Ignore malformed SSE chunks.
+    }
+  }
+
+  return payloads;
+}
+
+function buildStreamingResult(payloads: StreamingPayload[]): StreamingTurnResult {
+  let status: ChatStatus = "ready";
+  let resolvedUserMessage: string | undefined;
+  const events: AgentEvent[] = [];
+
+  for (const payload of payloads) {
+    if (payload.type === "status") {
+      if (payload.status === "awaiting-approval" || payload.status === "ready") {
+        status = payload.status;
+      }
+      continue;
+    }
+
+    if (payload.type === "resolved-user-message") {
+      if (typeof payload.resolvedUserMessage === "string") {
+        resolvedUserMessage = payload.resolvedUserMessage;
+      }
+      continue;
+    }
+
+    if (payload.type === "event") {
+      const event = normalizeStreamingPayloadEvent(payload.event);
+      if (event) {
+        events.push(event);
+      }
+      continue;
+    }
+
+    if (payload.type === "error") {
+      const backendMessage =
+        typeof payload.message === "string"
+          ? payload.message
+          : typeof payload.error === "string"
+            ? payload.error
+            : "AI request failed.";
+      throw new UIError(backendMessage);
+    }
+  }
+
+  return {
+    status,
+    events,
+    resolvedUserMessage,
+  };
 }
 
 function buildErrorDetails(options: {
@@ -517,9 +628,10 @@ export default function AILogScreen() {
     action: AgentAction,
     options?: {
       audio?: AudioUpload;
+      onEvent?: (event: AgentEvent) => void;
     },
     retry = true,
-  ): Promise<{ status: ChatStatus; events: AgentEvent[]; resolvedUserMessage?: string }> => {
+  ): Promise<StreamingTurnResult> => {
     const sessionId = await ensureSessionId(currentUserId);
 
     const usingAudio = Boolean(options?.audio && action.type === "user-message");
@@ -555,13 +667,16 @@ export default function AILogScreen() {
     const turnUrl = `${BACKEND_BASE_URL}/ai/turn`;
     let response: Response;
     try {
-      response = await fetch(turnUrl, {
+      response = await expoFetch(turnUrl, {
         method: "POST",
-        headers: usingAudio
-          ? undefined
-          : {
-              "Content-Type": "application/json",
-            },
+        headers: {
+          Accept: "text/event-stream",
+          ...(usingAudio
+            ? {}
+            : {
+                "Content-Type": "application/json",
+              }),
+        },
         body,
       });
     } catch (networkError) {
@@ -575,17 +690,14 @@ export default function AILogScreen() {
       );
     }
 
-    const payload = (await response.json().catch(() => null)) as
-      | {
-          status?: unknown;
-          events?: unknown;
-          resolvedUserMessage?: unknown;
-          error?: unknown;
-          message?: unknown;
-        }
-      | null;
-
     if (!response.ok) {
+      const payload = (await response.json().catch(() => null)) as
+        | {
+            error?: unknown;
+            message?: unknown;
+          }
+        | null;
+
       if (response.status === 403 && retry) {
         sessionIdRef.current = null;
         return requestTurn(currentUserId, action, options, false);
@@ -608,19 +720,60 @@ export default function AILogScreen() {
       );
     }
 
-    const nextStatus =
-      payload?.status === "awaiting-approval" || payload?.status === "ready"
-        ? payload.status
-        : "ready";
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new UIError(
+        "Backend AI response was not streamable.",
+        buildErrorDetails({
+          method: "POST",
+          url: turnUrl,
+          status: response.status,
+        }),
+      );
+    }
 
-    const events = Array.isArray(payload?.events) ? (payload.events as AgentEvent[]) : [];
+    const decoder = new TextDecoder();
+    let pending = "";
+    const payloads: StreamingPayload[] = [];
 
-    return {
-      status: nextStatus,
-      events,
-      resolvedUserMessage:
-        typeof payload?.resolvedUserMessage === "string" ? payload.resolvedUserMessage : undefined,
-    };
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      pending += decoder.decode(value, { stream: true });
+      const chunks = pending.split("\n\n");
+      pending = chunks.pop() ?? "";
+
+      for (const chunk of chunks) {
+        const nextPayloads = parseSseEventsFromChunk(`${chunk}\n\n`);
+        for (const payload of nextPayloads) {
+          payloads.push(payload);
+          if (payload.type === "event") {
+            const event = normalizeStreamingPayloadEvent(payload.event);
+            if (event) {
+              options?.onEvent?.(event);
+            }
+          }
+        }
+      }
+    }
+
+    if (pending.trim()) {
+      const finalPayloads = parseSseEventsFromChunk(pending);
+      for (const payload of finalPayloads) {
+        payloads.push(payload);
+        if (payload.type === "event") {
+          const event = normalizeStreamingPayloadEvent(payload.event);
+          if (event) {
+            options?.onEvent?.(event);
+          }
+        }
+      }
+    }
+
+    return buildStreamingResult(payloads);
   };
 
   const applyAgentEvents = (events: AgentEvent[]) => {
@@ -638,17 +791,41 @@ export default function AILogScreen() {
       const next = [...current];
 
       for (const event of events) {
+        if (event.kind === "assistant-delta") {
+          if (!event.text) {
+            continue;
+          }
+
+          const lastMessage = next[next.length - 1];
+          if (lastMessage?.kind === "text" && lastMessage.role === "assistant") {
+            lastMessage.text += event.text;
+          } else {
+            next.push({
+              id: createMessageId(),
+              kind: "text",
+              role: "assistant",
+              text: event.text,
+            });
+          }
+          continue;
+        }
+
         if (event.kind === "assistant") {
           if (!event.text.trim()) {
             continue;
           }
 
-          next.push({
-            id: createMessageId(),
-            kind: "text",
-            role: "assistant",
-            text: event.text,
-          });
+          const lastMessage = next[next.length - 1];
+          if (lastMessage?.kind === "text" && lastMessage.role === "assistant") {
+            lastMessage.text = event.text;
+          } else {
+            next.push({
+              id: createMessageId(),
+              kind: "text",
+              role: "assistant",
+              text: event.text,
+            });
+          }
           continue;
         }
 
@@ -699,7 +876,14 @@ export default function AILogScreen() {
 
     try {
       setStatus("streaming");
-      const result = await requestTurn(userId, action, options);
+      const streamedEventsJson = new Set<string>();
+      const result = await requestTurn(userId, action, {
+        ...options,
+        onEvent: (event) => {
+          streamedEventsJson.add(JSON.stringify(event));
+          applyAgentEvents([event]);
+        },
+      });
       const resolvedUserMessage = result.resolvedUserMessage?.trim();
 
       if (options?.appendResolvedUserMessage && resolvedUserMessage) {
@@ -714,7 +898,8 @@ export default function AILogScreen() {
         ]);
       }
 
-      applyAgentEvents(result.events);
+      const remainingEvents = result.events.filter((event) => !streamedEventsJson.has(JSON.stringify(event)));
+      applyAgentEvents(remainingEvents);
       nextStatus = result.status;
     } catch (loopError) {
       showError(loopError);
