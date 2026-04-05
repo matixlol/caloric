@@ -34,6 +34,15 @@ import {
 } from "./db/schema";
 import { logError, logInfo, redactSecret, summarizeText } from "./logging";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
+import {
+  SENTRY_ENABLE_LOGS,
+  SENTRY_SERVICE_NAME,
+  SENTRY_TRACES_SAMPLE_RATE,
+  SpanKind,
+  SpanStatusCode,
+  setActiveSpanAttributes,
+  withSpan,
+} from "./tracing";
 import { getMfpAuthHeaders } from "./mfp-session";
 import { MFP_BASE_URL } from "./mfp-session";
 import { OPEN_FOOD_FACTS_BASE_URL, searchOpenFoodFacts } from "./openfoodfacts-client";
@@ -1215,131 +1224,163 @@ function mapAnmatRowToFood(row: {
 
 async function searchLocalAnmatFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
   const normalizedQuery = query.trim();
-  const queryLower = normalizedQuery.toLowerCase();
-  const queryTokens = queryLower.split(/\s+/).filter(Boolean);
-  const pattern = `%${normalizedQuery}%`;
 
-  const rows = await db
-    .select({
-      htmlBlobId: anmatProductHtmlBlobs.id,
-      ingestSource: anmatProductHtmlBlobs.ingestSource,
-      detailKey: anmatProductHtmlBlobs.detailKey,
-      rnpa: anmatProductHtmlBlobs.rnpa,
-      denominacion: anmatProductHtmlBlobs.denominacion,
-      nombreFantasia: anmatProductHtmlBlobs.nombreFantasia,
-      marca: anmatProductHtmlBlobs.marca,
-      titular: anmatProductHtmlBlobs.titular,
-      importedAt: anmatProductHtmlBlobs.importedAt,
-      nutritionFound: anmatProductDerivedData.nutritionFound,
-      servingText: anmatProductDerivedData.servingText,
-      servingQuantity: anmatProductDerivedData.servingQuantity,
-      servingUnit: anmatProductDerivedData.servingUnit,
-      calories: anmatProductDerivedData.calories,
-      proteinGrams: anmatProductDerivedData.proteinGrams,
-      carbsGrams: anmatProductDerivedData.carbsGrams,
-      fatGrams: anmatProductDerivedData.fatGrams,
-      fiberGrams: anmatProductDerivedData.fiberGrams,
-      sugarsGrams: anmatProductDerivedData.sugarsGrams,
-      sodiumMg: anmatProductDerivedData.sodiumMg,
-    })
-    .from(anmatProductHtmlBlobs)
-    .leftJoin(anmatProductDerivedData, eq(anmatProductDerivedData.htmlBlobId, anmatProductHtmlBlobs.id))
-    .where(
-      or(
-        ilike(anmatProductHtmlBlobs.denominacion, pattern),
-        ilike(anmatProductHtmlBlobs.nombreFantasia, pattern),
-        ilike(anmatProductHtmlBlobs.marca, pattern),
-        ilike(anmatProductHtmlBlobs.titular, pattern),
-        ilike(anmatProductHtmlBlobs.rnpa, pattern),
-      ),
-    )
-    .orderBy(desc(anmatProductHtmlBlobs.importedAt), desc(anmatProductHtmlBlobs.id));
-
-  const deduped = new Map<
-    string,
+  return withSpan(
+    "food_search.anmat.local",
     {
-      score: number;
-      liveRank: number;
-      importedAtMs: number;
-      food: FoodSearchResult;
-    }
-  >();
+      attributes: {
+        "app.search.query_length": normalizedQuery.length,
+        "app.search.limit": limit,
+      },
+    },
+    async (span) => {
+      const queryLower = normalizedQuery.toLowerCase();
+      const queryTokens = queryLower.split(/\s+/).filter(Boolean);
+      const pattern = `%${normalizedQuery}%`;
 
-  for (const row of rows) {
-    const food = mapAnmatRowToFood(row);
-    if (!food) {
-      continue;
-    }
+      const rows = await db
+        .select({
+          htmlBlobId: anmatProductHtmlBlobs.id,
+          ingestSource: anmatProductHtmlBlobs.ingestSource,
+          detailKey: anmatProductHtmlBlobs.detailKey,
+          rnpa: anmatProductHtmlBlobs.rnpa,
+          denominacion: anmatProductHtmlBlobs.denominacion,
+          nombreFantasia: anmatProductHtmlBlobs.nombreFantasia,
+          marca: anmatProductHtmlBlobs.marca,
+          titular: anmatProductHtmlBlobs.titular,
+          importedAt: anmatProductHtmlBlobs.importedAt,
+          nutritionFound: anmatProductDerivedData.nutritionFound,
+          servingText: anmatProductDerivedData.servingText,
+          servingQuantity: anmatProductDerivedData.servingQuantity,
+          servingUnit: anmatProductDerivedData.servingUnit,
+          calories: anmatProductDerivedData.calories,
+          proteinGrams: anmatProductDerivedData.proteinGrams,
+          carbsGrams: anmatProductDerivedData.carbsGrams,
+          fatGrams: anmatProductDerivedData.fatGrams,
+          fiberGrams: anmatProductDerivedData.fiberGrams,
+          sugarsGrams: anmatProductDerivedData.sugarsGrams,
+          sodiumMg: anmatProductDerivedData.sodiumMg,
+        })
+        .from(anmatProductHtmlBlobs)
+        .leftJoin(anmatProductDerivedData, eq(anmatProductDerivedData.htmlBlobId, anmatProductHtmlBlobs.id))
+        .where(
+          or(
+            ilike(anmatProductHtmlBlobs.denominacion, pattern),
+            ilike(anmatProductHtmlBlobs.nombreFantasia, pattern),
+            ilike(anmatProductHtmlBlobs.marca, pattern),
+            ilike(anmatProductHtmlBlobs.titular, pattern),
+            ilike(anmatProductHtmlBlobs.rnpa, pattern),
+          ),
+        )
+        .orderBy(desc(anmatProductHtmlBlobs.importedAt), desc(anmatProductHtmlBlobs.id));
 
-    const score =
-      scoreSearchField(row.nombreFantasia, queryLower, queryTokens) * 1.2 +
-      scoreSearchField(row.denominacion, queryLower, queryTokens) +
-      scoreSearchField(row.marca, queryLower, queryTokens) * 0.85 +
-      scoreSearchField(row.titular, queryLower, queryTokens) * 0.35 +
-      scoreSearchField(row.rnpa, queryLower, queryTokens) * 0.5 +
-      (row.nutritionFound ? 12 : 0) +
-      (row.ingestSource === "live_search" ? 6 : 0);
+      const deduped = new Map<
+        string,
+        {
+          score: number;
+          liveRank: number;
+          importedAtMs: number;
+          food: FoodSearchResult;
+        }
+      >();
 
-    if (score <= 0) {
-      continue;
-    }
+      for (const row of rows) {
+        const food = mapAnmatRowToFood(row);
+        if (!food) {
+          continue;
+        }
 
-    const liveRank = row.ingestSource === "live_search" ? 1 : 0;
-    const importedAtMs = row.importedAt instanceof Date ? row.importedAt.getTime() : 0;
-    const current = deduped.get(food.canonicalKey);
+        const score =
+          scoreSearchField(row.nombreFantasia, queryLower, queryTokens) * 1.2 +
+          scoreSearchField(row.denominacion, queryLower, queryTokens) +
+          scoreSearchField(row.marca, queryLower, queryTokens) * 0.85 +
+          scoreSearchField(row.titular, queryLower, queryTokens) * 0.35 +
+          scoreSearchField(row.rnpa, queryLower, queryTokens) * 0.5 +
+          (row.nutritionFound ? 12 : 0) +
+          (row.ingestSource === "live_search" ? 6 : 0);
 
-    if (
-      !current ||
-      score > current.score ||
-      (score === current.score && liveRank > current.liveRank) ||
-      (score === current.score && liveRank === current.liveRank && importedAtMs > current.importedAtMs)
-    ) {
-      deduped.set(food.canonicalKey, { score, liveRank, importedAtMs, food });
-    }
-  }
+        if (score <= 0) {
+          continue;
+        }
 
-  return [...deduped.values()]
-    .sort((left, right) => {
-      if (right.score !== left.score) {
-        return right.score - left.score;
+        const liveRank = row.ingestSource === "live_search" ? 1 : 0;
+        const importedAtMs = row.importedAt instanceof Date ? row.importedAt.getTime() : 0;
+        const current = deduped.get(food.canonicalKey);
+
+        if (
+          !current ||
+          score > current.score ||
+          (score === current.score && liveRank > current.liveRank) ||
+          (score === current.score && liveRank === current.liveRank && importedAtMs > current.importedAtMs)
+        ) {
+          deduped.set(food.canonicalKey, { score, liveRank, importedAtMs, food });
+        }
       }
-      if (right.liveRank !== left.liveRank) {
-        return right.liveRank - left.liveRank;
-      }
-      return right.importedAtMs - left.importedAtMs;
-    })
-    .slice(0, limit)
-    .map((entry) => entry.food);
+
+      const results = [...deduped.values()]
+        .sort((left, right) => {
+          if (right.score !== left.score) {
+            return right.score - left.score;
+          }
+          if (right.liveRank !== left.liveRank) {
+            return right.liveRank - left.liveRank;
+          }
+          return right.importedAtMs - left.importedAtMs;
+        })
+        .slice(0, limit)
+        .map((entry) => entry.food);
+
+      span.setAttribute("app.search.result_count", results.length);
+      span.setAttribute("app.search.db_row_count", rows.length);
+      return results;
+    },
+  );
 }
 
 async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
   const startedAt = Date.now();
-  logInfo("mfp.search_foods.start", {
-    query,
-    limit,
-  });
 
-  const searchPayload = await executeSearch({
-    query,
-    offset: 0,
-    maxItems: Math.min(20, Math.max(limit * 2, 8)),
-    countryCode: "US",
-    resourceType: "foods",
-    includeDetails: true,
-  });
+  return withSpan(
+    "food_search.mfp",
+    {
+      attributes: {
+        "app.search.query_length": query.trim().length,
+        "app.search.limit": limit,
+      },
+    },
+    async (span) => {
+      logInfo("mfp.search_foods.start", {
+        query,
+        limit,
+      });
 
-  const mappedResults = mapMfpSearchResults(searchPayload).slice(0, limit);
+      const searchPayload = await executeSearch({
+        query,
+        offset: 0,
+        maxItems: Math.min(20, Math.max(limit * 2, 8)),
+        countryCode: "US",
+        resourceType: "foods",
+        includeDetails: true,
+      });
 
-  logInfo("mfp.search_foods.complete", {
-    query,
-    limit,
-    searchStatus: searchPayload.search.status,
-    detailCount: searchPayload.detailCount,
-    mappedCount: mappedResults.length,
-    durationMs: Date.now() - startedAt,
-  });
+      const mappedResults = mapMfpSearchResults(searchPayload).slice(0, limit);
 
-  return mappedResults;
+      span.setAttribute("http.response.status_code", searchPayload.search.status);
+      span.setAttribute("app.search.detail_count", searchPayload.detailCount);
+      span.setAttribute("app.search.result_count", mappedResults.length);
+
+      logInfo("mfp.search_foods.complete", {
+        query,
+        limit,
+        searchStatus: searchPayload.search.status,
+        detailCount: searchPayload.detailCount,
+        mappedCount: mappedResults.length,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return mappedResults;
+    },
+  );
 }
 
 async function executeOpenFoodFactsSearch(params: {
@@ -1404,30 +1445,45 @@ async function executeOpenFoodFactsSearch(params: {
 
 async function searchOpenFoodFactsFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
   const startedAt = Date.now();
-  logInfo("open_food_facts.search_foods.start", {
-    query,
-    limit,
-    cacheTtlDays: config.searchCacheTtlDays,
-    baseUrl: OPEN_FOOD_FACTS_BASE_URL,
-  });
 
-  const payload = await executeOpenFoodFactsSearch({
-    query,
-    page: 1,
-    pageSize: Math.min(20, Math.max(limit * 2, 8)),
-  });
+  return withSpan(
+    "food_search.open_food_facts",
+    {
+      attributes: {
+        "app.search.query_length": query.trim().length,
+        "app.search.limit": limit,
+      },
+    },
+    async (span) => {
+      logInfo("open_food_facts.search_foods.start", {
+        query,
+        limit,
+        cacheTtlDays: config.searchCacheTtlDays,
+        baseUrl: OPEN_FOOD_FACTS_BASE_URL,
+      });
 
-  const mappedResults = mapOpenFoodFactsSearchResults(payload).slice(0, limit);
+      const payload = await executeOpenFoodFactsSearch({
+        query,
+        page: 1,
+        pageSize: Math.min(20, Math.max(limit * 2, 8)),
+      });
 
-  logInfo("open_food_facts.search_foods.complete", {
-    query,
-    limit,
-    status: payload.status,
-    mappedCount: mappedResults.length,
-    durationMs: Date.now() - startedAt,
-  });
+      const mappedResults = mapOpenFoodFactsSearchResults(payload).slice(0, limit);
 
-  return mappedResults;
+      span.setAttribute("http.response.status_code", payload.status);
+      span.setAttribute("app.search.result_count", mappedResults.length);
+
+      logInfo("open_food_facts.search_foods.complete", {
+        query,
+        limit,
+        status: payload.status,
+        mappedCount: mappedResults.length,
+        durationMs: Date.now() - startedAt,
+      });
+
+      return mappedResults;
+    },
+  );
 }
 
 function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): FoodSearchResult[] {
@@ -1467,65 +1523,81 @@ function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): Fo
 }
 
 async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
-  const [anmatResult, mfpResult, openFoodFactsResult] = await Promise.allSettled([
-    searchLocalAnmatFoods(query, limit),
-    searchMfpFoods(query, limit),
-    searchOpenFoodFactsFoods(query, limit),
-  ]);
+  return withSpan(
+    "food_search.unified",
+    {
+      attributes: {
+        "app.search.query_length": query.trim().length,
+        "app.search.limit": limit,
+      },
+    },
+    async (span) => {
+      const [anmatResult, mfpResult, openFoodFactsResult] = await Promise.allSettled([
+        searchLocalAnmatFoods(query, limit),
+        searchMfpFoods(query, limit),
+        searchOpenFoodFactsFoods(query, limit),
+      ]);
 
-  const anmatFoods = anmatResult.status === "fulfilled" ? anmatResult.value : [];
-  const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value : [];
-  const openFoodFactsFoods = openFoodFactsResult.status === "fulfilled" ? openFoodFactsResult.value : [];
+      const anmatFoods = anmatResult.status === "fulfilled" ? anmatResult.value : [];
+      const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value : [];
+      const openFoodFactsFoods = openFoodFactsResult.status === "fulfilled" ? openFoodFactsResult.value : [];
 
-  if (anmatResult.status === "rejected") {
-    logError("food_search.anmat_failed", anmatResult.reason, {
-      query,
-      limit,
-    });
-  }
+      if (anmatResult.status === "rejected") {
+        logError("food_search.anmat_failed", anmatResult.reason, {
+          query,
+          limit,
+        });
+      }
 
-  if (mfpResult.status === "rejected") {
-    logError("food_search.mfp_failed", mfpResult.reason, {
-      query,
-      limit,
-      anmatCount: anmatFoods.length,
-    });
-  }
+      if (mfpResult.status === "rejected") {
+        logError("food_search.mfp_failed", mfpResult.reason, {
+          query,
+          limit,
+          anmatCount: anmatFoods.length,
+        });
+      }
 
-  if (openFoodFactsResult.status === "rejected") {
-    logError("food_search.open_food_facts_failed", openFoodFactsResult.reason, {
-      query,
-      limit,
-      anmatCount: anmatFoods.length,
-      mfpCount: mfpFoods.length,
-    });
-  }
+      if (openFoodFactsResult.status === "rejected") {
+        logError("food_search.open_food_facts_failed", openFoodFactsResult.reason, {
+          query,
+          limit,
+          anmatCount: anmatFoods.length,
+          mfpCount: mfpFoods.length,
+        });
+      }
 
-  if (anmatResult.status === "rejected" && mfpResult.status === "rejected" && openFoodFactsResult.status === "rejected") {
-    throw anmatResult.reason;
-  }
+      if (anmatResult.status === "rejected" && mfpResult.status === "rejected" && openFoodFactsResult.status === "rejected") {
+        throw anmatResult.reason;
+      }
 
-  if (mfpResult.status === "rejected" || openFoodFactsResult.status === "rejected") {
-    logInfo("food_search.complete_with_partial_sources", {
-      query,
-      limit,
-      anmatCount: anmatFoods.length,
-      mfpCount: mfpFoods.length,
-      openFoodFactsCount: openFoodFactsFoods.length,
-      mfpFailed: mfpResult.status === "rejected",
-      openFoodFactsFailed: openFoodFactsResult.status === "rejected",
-    });
-  } else {
-    logInfo("food_search.remote_sources_success", {
-      query,
-      limit,
-      mfpCount: mfpFoods.length,
-      anmatCount: anmatFoods.length,
-      openFoodFactsCount: openFoodFactsFoods.length,
-    });
-  }
+      if (mfpResult.status === "rejected" || openFoodFactsResult.status === "rejected") {
+        logInfo("food_search.complete_with_partial_sources", {
+          query,
+          limit,
+          anmatCount: anmatFoods.length,
+          mfpCount: mfpFoods.length,
+          openFoodFactsCount: openFoodFactsFoods.length,
+          mfpFailed: mfpResult.status === "rejected",
+          openFoodFactsFailed: openFoodFactsResult.status === "rejected",
+        });
+      } else {
+        logInfo("food_search.remote_sources_success", {
+          query,
+          limit,
+          mfpCount: mfpFoods.length,
+          anmatCount: anmatFoods.length,
+          openFoodFactsCount: openFoodFactsFoods.length,
+        });
+      }
 
-  return interleaveFoodResults([anmatFoods, openFoodFactsFoods, mfpFoods], limit);
+      const mergedResults = interleaveFoodResults([anmatFoods, openFoodFactsFoods, mfpFoods], limit);
+      span.setAttribute("app.search.result_count", mergedResults.length);
+      span.setAttribute("app.search.anmat_count", anmatFoods.length);
+      span.setAttribute("app.search.mfp_count", mfpFoods.length);
+      span.setAttribute("app.search.open_food_facts_count", openFoodFactsFoods.length);
+      return mergedResults;
+    },
+  );
 }
 
 async function searchFoodsBySource(
@@ -1931,247 +2003,325 @@ async function requestOpenRouterTurn(session: AgentSession): Promise<{
     };
   }
 
-  const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.openRouterApiKey}`,
-      "Content-Type": "application/json",
+  return withSpan(
+    "openrouter.chat.completions",
+    {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        "server.address": "openrouter.ai",
+        "http.request.method": "POST",
+        "url.full": "https://openrouter.ai/api/v1/chat/completions",
+        "gen_ai.system": "openrouter",
+        "gen_ai.request.model": config.openRouterModel,
+        "app.ai.message_count": session.conversation.length,
+        "app.ai.tool_count": openRouterTools.length,
+        "app.ai.provider.only": providerOnly || undefined,
+      },
     },
-    body: JSON.stringify(requestBody),
-  });
+    async (span) => {
+      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${config.openRouterApiKey}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(requestBody),
+      });
 
-  const textBody = await response.text();
+      span.setAttribute("http.response.status_code", response.status);
 
-  if (!response.ok) {
-    const suffix = textBody ? `: ${textBody.slice(0, 300)}` : "";
-    throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
-  }
+      const textBody = await response.text();
 
-  let parsed: unknown;
-  try {
-    parsed = textBody ? JSON.parse(textBody) : {};
-  } catch {
-    throw new Error("OpenRouter returned invalid JSON.");
-  }
+      if (!response.ok) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: `OpenRouter request failed (${response.status})`,
+        });
+        const suffix = textBody ? `: ${textBody.slice(0, 300)}` : "";
+        throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
+      }
 
-  const root = asRecord(parsed);
-  const choices = Array.isArray(root?.choices) ? root.choices : [];
-  const firstChoice = asRecord(choices[0]);
-  const message = asRecord(firstChoice?.message);
+      let parsed: unknown;
+      try {
+        parsed = textBody ? JSON.parse(textBody) : {};
+      } catch {
+        throw new Error("OpenRouter returned invalid JSON.");
+      }
 
-  const assistantText = parseOpenRouterText(message?.content);
-  const toolCalls = parseOpenRouterToolCalls(message?.tool_calls);
+      const root = asRecord(parsed);
+      const choices = Array.isArray(root?.choices) ? root.choices : [];
+      const firstChoice = asRecord(choices[0]);
+      const message = asRecord(firstChoice?.message);
 
-  return {
-    assistantText,
-    toolCalls,
-  };
+      const assistantText = parseOpenRouterText(message?.content);
+      const toolCalls = parseOpenRouterToolCalls(message?.tool_calls);
+
+      span.setAttribute("app.ai.assistant_text_length", assistantText.length);
+      span.setAttribute("app.ai.tool_call_count", toolCalls.length);
+
+      return {
+        assistantText,
+        toolCalls,
+      };
+    },
+  );
 }
 
 async function runToolCall(
   session: AgentSession,
   toolCall: OpenRouterToolCall,
 ): Promise<{ pauseForApproval: boolean; output: unknown; events: AgentEvent[] }> {
-  let rawArguments: unknown;
-  try {
-    rawArguments = parseToolArguments(toolCall.function.arguments);
-  } catch {
-    return {
-      pauseForApproval: false,
-      output: {
-        error: "Tool arguments were invalid JSON.",
+  return withSpan(
+    `ai.tool.${toolCall.function.name}`,
+    {
+      attributes: {
+        "app.ai.tool_name": toolCall.function.name,
+        "app.ai.tool_call_id": toolCall.id,
       },
-      events: [],
-    };
-  }
-
-  if (toolCall.function.name === "searchFoods") {
-    const args = asRecord(rawArguments);
-    const query = asString(args?.query) ?? "";
-    const parsedLimit = asNumber(args?.limit);
-    const limit = Math.max(1, Math.min(10, Number.isFinite(parsedLimit) ? Math.round(parsedLimit as number) : 6));
-
-    if (query.trim().length < 2) {
-      return {
-        pauseForApproval: false,
-        output: {
-          error: "Invalid searchFoods input.",
-        },
-        events: [],
-      };
-    }
-
-    const topFoods = await searchUnifiedFoods(query.trim(), limit);
-    const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
-      const resultId = `r${session.searchResultCounter}`;
-      session.searchResultCounter += 1;
-
-      const mapped: SearchResultFood = {
-        ...food,
-        resultId,
-      };
-
-      session.searchResultsByLocalId.set(resultId, mapped);
-      return mapped;
-    });
-
-    return {
-      pauseForApproval: false,
-      output: {
-        foods: foodsWithResultIds,
-      },
-      events: [
-        {
-          kind: "search",
-          foods: foodsWithResultIds,
-        },
-      ],
-    };
-  }
-
-  if (toolCall.function.name === "requestFoodApprovals") {
-    const args = asRecord(rawArguments);
-    const suggestionsRaw = args?.suggestions;
-
-    if (!Array.isArray(suggestionsRaw) || suggestionsRaw.length === 0 || suggestionsRaw.length > 8) {
-      return {
-        pauseForApproval: false,
-        output: {
-          error: "Invalid requestFoodApprovals input.",
-        },
-        events: [],
-      };
-    }
-
-    const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
-    const unknownResultIds: string[] = [];
-    const seenSuggestions = new Set<string>();
-
-    for (const candidate of suggestionsRaw) {
-      const suggestion = asRecord(candidate);
-      const resultId = asString(suggestion?.resultId)?.trim() ?? "";
-      const food = session.searchResultsByLocalId.get(resultId);
-      if (!food) {
-        unknownResultIds.push(resultId || "(empty)");
-        continue;
-      }
-
-      const meal = normalizeMeal(suggestion?.meal);
-      const portion = sanitizePortion(suggestion?.portion);
-      const reason = asString(suggestion?.reason)?.trim() ?? "";
-      if (!reason) {
-        continue;
-      }
-
-      const duplicateKey = `${resultId}|${meal}|${portion}`;
-      if (seenSuggestions.has(duplicateKey)) {
-        continue;
-      }
-      seenSuggestions.add(duplicateKey);
-
-      resolvedSuggestions.push({
-        suggestionId: createMessageId(),
-        resultId,
-        meal,
-        portion,
-        reason,
-        food,
-      });
-    }
-
-    if (unknownResultIds.length > 0) {
-      return {
-        pauseForApproval: false,
-        output: {
-          error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
-        },
-        events: [],
-      };
-    }
-
-    if (resolvedSuggestions.length === 0) {
-      return {
-        pauseForApproval: false,
-        output: {
-          error: "No valid suggestions to approve.",
-        },
-        events: [],
-      };
-    }
-
-    session.pendingApprovals.set(toolCall.id, resolvedSuggestions);
-
-    return {
-      pauseForApproval: true,
-      output: null,
-      events: [
-        {
-          kind: "approval",
-          toolCallId: toolCall.id,
-          suggestions: resolvedSuggestions,
-        },
-      ],
-    };
-  }
-
-  return {
-    pauseForApproval: false,
-    output: {
-      error: `Unknown tool: ${toolCall.function.name}`,
     },
-    events: [],
-  };
+    async (span) => {
+      let rawArguments: unknown;
+      try {
+        rawArguments = parseToolArguments(toolCall.function.arguments);
+      } catch {
+        span.setAttribute("app.ai.tool.invalid_arguments", true);
+        return {
+          pauseForApproval: false,
+          output: {
+            error: "Tool arguments were invalid JSON.",
+          },
+          events: [],
+        };
+      }
+
+      if (toolCall.function.name === "searchFoods") {
+        const args = asRecord(rawArguments);
+        const query = asString(args?.query) ?? "";
+        const parsedLimit = asNumber(args?.limit);
+        const limit = Math.max(1, Math.min(10, Number.isFinite(parsedLimit) ? Math.round(parsedLimit as number) : 6));
+
+        span.setAttribute("app.search.query_length", query.trim().length);
+        span.setAttribute("app.search.limit", limit);
+
+        if (query.trim().length < 2) {
+          return {
+            pauseForApproval: false,
+            output: {
+              error: "Invalid searchFoods input.",
+            },
+            events: [],
+          };
+        }
+
+        const topFoods = await searchUnifiedFoods(query.trim(), limit);
+        const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
+          const resultId = `r${session.searchResultCounter}`;
+          session.searchResultCounter += 1;
+
+          const mapped: SearchResultFood = {
+            ...food,
+            resultId,
+          };
+
+          session.searchResultsByLocalId.set(resultId, mapped);
+          return mapped;
+        });
+
+        span.setAttribute("app.search.result_count", foodsWithResultIds.length);
+
+        return {
+          pauseForApproval: false,
+          output: {
+            foods: foodsWithResultIds,
+          },
+          events: [
+            {
+              kind: "search",
+              foods: foodsWithResultIds,
+            },
+          ],
+        };
+      }
+
+      if (toolCall.function.name === "requestFoodApprovals") {
+        const args = asRecord(rawArguments);
+        const suggestionsRaw = args?.suggestions;
+
+        if (!Array.isArray(suggestionsRaw) || suggestionsRaw.length === 0 || suggestionsRaw.length > 8) {
+          return {
+            pauseForApproval: false,
+            output: {
+              error: "Invalid requestFoodApprovals input.",
+            },
+            events: [],
+          };
+        }
+
+        const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
+        const unknownResultIds: string[] = [];
+        const seenSuggestions = new Set<string>();
+
+        for (const candidate of suggestionsRaw) {
+          const suggestion = asRecord(candidate);
+          const resultId = asString(suggestion?.resultId)?.trim() ?? "";
+          const food = session.searchResultsByLocalId.get(resultId);
+          if (!food) {
+            unknownResultIds.push(resultId || "(empty)");
+            continue;
+          }
+
+          const meal = normalizeMeal(suggestion?.meal);
+          const portion = sanitizePortion(suggestion?.portion);
+          const reason = asString(suggestion?.reason)?.trim() ?? "";
+          if (!reason) {
+            continue;
+          }
+
+          const duplicateKey = `${resultId}|${meal}|${portion}`;
+          if (seenSuggestions.has(duplicateKey)) {
+            continue;
+          }
+          seenSuggestions.add(duplicateKey);
+
+          resolvedSuggestions.push({
+            suggestionId: createMessageId(),
+            resultId,
+            meal,
+            portion,
+            reason,
+            food,
+          });
+        }
+
+        span.setAttribute("app.ai.approval_candidate_count", suggestionsRaw.length);
+        span.setAttribute("app.ai.approval_resolved_count", resolvedSuggestions.length);
+
+        if (unknownResultIds.length > 0) {
+          span.setAttribute("app.ai.approval_unknown_result_ids", unknownResultIds.length);
+          return {
+            pauseForApproval: false,
+            output: {
+              error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
+            },
+            events: [],
+          };
+        }
+
+        if (resolvedSuggestions.length === 0) {
+          return {
+            pauseForApproval: false,
+            output: {
+              error: "No valid suggestions to approve.",
+            },
+            events: [],
+          };
+        }
+
+        session.pendingApprovals.set(toolCall.id, resolvedSuggestions);
+
+        return {
+          pauseForApproval: true,
+          output: null,
+          events: [
+            {
+              kind: "approval",
+              toolCallId: toolCall.id,
+              suggestions: resolvedSuggestions,
+            },
+          ],
+        };
+      }
+
+      span.setAttribute("app.ai.tool_unknown", true);
+      return {
+        pauseForApproval: false,
+        output: {
+          error: `Unknown tool: ${toolCall.function.name}`,
+        },
+        events: [],
+      };
+    },
+  );
 }
 
 async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
-  const events: AgentEvent[] = [];
+  return withSpan(
+    "ai.assistant.loop",
+    {
+      attributes: {
+        "app.ai.message_count": session.conversation.length,
+      },
+    },
+    async (loopSpan) => {
+      const events: AgentEvent[] = [];
 
-  for (let step = 0; step < 8; step += 1) {
-    const turn = await requestOpenRouterTurn(session);
+      for (let step = 0; step < 8; step += 1) {
+        const turn = await withSpan(
+          "ai.assistant.step",
+          {
+            attributes: {
+              "app.ai.step_index": step,
+              "app.ai.message_count": session.conversation.length,
+            },
+          },
+          async (stepSpan) => {
+            const nextTurn = await requestOpenRouterTurn(session);
+            stepSpan.setAttribute("app.ai.assistant_text_length", nextTurn.assistantText.length);
+            stepSpan.setAttribute("app.ai.tool_call_count", nextTurn.toolCalls.length);
+            return nextTurn;
+          },
+        );
 
-    if (turn.assistantText.trim()) {
-      events.push({
-        kind: "assistant",
-        text: turn.assistantText,
-      });
-    }
+        loopSpan.setAttribute("app.ai.step_count", step + 1);
 
-    session.conversation.push({
-      role: "assistant",
-      content: turn.assistantText.trim() ? turn.assistantText : null,
-      ...(turn.toolCalls.length > 0 ? { tool_calls: turn.toolCalls } : {}),
-    });
+        if (turn.assistantText.trim()) {
+          events.push({
+            kind: "assistant",
+            text: turn.assistantText,
+          });
+        }
 
-    if (turn.toolCalls.length === 0) {
+        session.conversation.push({
+          role: "assistant",
+          content: turn.assistantText.trim() ? turn.assistantText : null,
+          ...(turn.toolCalls.length > 0 ? { tool_calls: turn.toolCalls } : {}),
+        });
+
+        if (turn.toolCalls.length === 0) {
+          loopSpan.setAttribute("app.ai.event_count", events.length);
+          return {
+            status: "ready",
+            events,
+          };
+        }
+
+        for (const toolCall of turn.toolCalls) {
+          const toolResult = await runToolCall(session, toolCall);
+          events.push(...toolResult.events);
+
+          if (toolResult.pauseForApproval) {
+            loopSpan.setAttribute("app.ai.event_count", events.length);
+            return {
+              status: "awaiting-approval",
+              events,
+            };
+          }
+
+          session.conversation.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: JSON.stringify(toolResult.output ?? {}),
+          });
+        }
+      }
+
+      loopSpan.setAttribute("app.ai.event_count", events.length);
       return {
         status: "ready",
         events,
       };
-    }
-
-    for (const toolCall of turn.toolCalls) {
-      const toolResult = await runToolCall(session, toolCall);
-      events.push(...toolResult.events);
-
-      if (toolResult.pauseForApproval) {
-        return {
-          status: "awaiting-approval",
-          events,
-        };
-      }
-
-      session.conversation.push({
-        role: "tool",
-        tool_call_id: toolCall.id,
-        content: JSON.stringify(toolResult.output ?? {}),
-      });
-    }
-  }
-
-  return {
-    status: "ready",
-    events,
-  };
+    },
+  );
 }
 
 async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): Promise<string> {
@@ -2198,50 +2348,75 @@ async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): 
   }
   formData.set("file", audioFile, fileName);
 
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.groqApiKey}`,
+  return withSpan(
+    "groq.audio.transcriptions",
+    {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        "server.address": "api.groq.com",
+        "http.request.method": "POST",
+        "url.full": "https://api.groq.com/openai/v1/audio/transcriptions",
+        "gen_ai.system": "groq",
+        "gen_ai.request.model": "whisper-large-v3-turbo",
+        "app.ai.audio.size_bytes": audioFile.size,
+        "app.ai.audio.content_type": audioFile.type || "audio/m4a",
+        "app.ai.transcription.has_prompt": Boolean(prompt && prompt.trim()),
       },
-      body: formData,
-    });
-
-    const rawBody = await response.text();
-
-    if (!response.ok) {
-      let errorMessage = rawBody;
+    },
+    async (span) => {
       try {
-        const parsedError = JSON.parse(rawBody) as { error?: { message?: unknown } };
-        if (typeof parsedError.error?.message === "string" && parsedError.error.message.trim()) {
-          errorMessage = parsedError.error.message;
+        const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
+          method: "POST",
+          headers: {
+            Authorization: `Bearer ${config.groqApiKey}`,
+          },
+          body: formData,
+        });
+
+        span.setAttribute("http.response.status_code", response.status);
+
+        const rawBody = await response.text();
+
+        if (!response.ok) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: `Groq returned ${response.status}`,
+          });
+          let errorMessage = rawBody;
+          try {
+            const parsedError = JSON.parse(rawBody) as { error?: { message?: unknown } };
+            if (typeof parsedError.error?.message === "string" && parsedError.error.message.trim()) {
+              errorMessage = parsedError.error.message;
+            }
+          } catch {
+            // Keep raw text fallback if Groq returns non-JSON.
+          }
+
+          throw new Error(`Groq returned ${response.status}: ${errorMessage}`);
         }
-      } catch {
-        // Keep raw text fallback if Groq returns non-JSON.
+
+        let transcript = rawBody.trim();
+        try {
+          const parsed = JSON.parse(rawBody) as { text?: unknown };
+          if (typeof parsed.text === "string") {
+            transcript = parsed.text.trim();
+          }
+        } catch {
+          // Keep plain text response fallback.
+        }
+
+        if (!transcript) {
+          throw new Error("Groq returned an empty transcription.");
+        }
+
+        span.setAttribute("app.ai.transcription.length", transcript.length);
+        return transcript;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`Groq transcription request failed: ${message}`);
       }
-
-      throw new Error(`Groq returned ${response.status}: ${errorMessage}`);
-    }
-
-    let transcript = rawBody.trim();
-    try {
-      const parsed = JSON.parse(rawBody) as { text?: unknown };
-      if (typeof parsed.text === "string") {
-        transcript = parsed.text.trim();
-      }
-    } catch {
-      // Keep plain text response fallback.
-    }
-
-    if (!transcript) {
-      throw new Error("Groq returned an empty transcription.");
-    }
-
-    return transcript;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Groq transcription request failed: ${message}`);
-  }
+    },
+  );
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -2253,12 +2428,7 @@ async function parseJsonBody(request: Request): Promise<Record<string, unknown> 
   }
 }
 
-const server = Bun.serve({
-  hostname: "0.0.0.0",
-  port: config.port,
-  idleTimeout: 120,
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+async function handleRequest(request: Request, url: URL): Promise<Response> {
 
     if (url.pathname === "/health") {
       return json({ ok: true });
@@ -2354,6 +2524,11 @@ const server = Bun.serve({
       const recentLogHints = parseRecentLogHints(body?.recentLogs);
       const recentLogContextPrompt = buildRecentLogContextPrompt(recentLogHints);
       const transcriptionPrompt = buildRecentLogTranscriptionPrompt(recentLogHints);
+
+      setActiveSpanAttributes({
+        "app.ai.endpoint": "/ai/session",
+        "app.ai.recent_log_count": recentLogHints.length,
+      });
 
       const sessionId = crypto.randomUUID();
       const now = Date.now();
@@ -2465,6 +2640,14 @@ const server = Bun.serve({
         return json({ error: "Session not found for this user" }, 403);
       }
 
+      setActiveSpanAttributes({
+        "app.ai.endpoint": "/ai/turn",
+        "app.ai.session_id": sessionId,
+        "app.ai.action_type": actionType,
+        "app.ai.has_audio": Boolean(audioFile),
+        "app.ai.pending_approval_count": session.pendingApprovals.size,
+      });
+
       session.updatedAt = Date.now();
 
       try {
@@ -2477,6 +2660,10 @@ const server = Bun.serve({
           if (!message) {
             return json({ error: "action.message or audio is required" }, 400);
           }
+
+          setActiveSpanAttributes({
+            "app.ai.user_message_length": message.length,
+          });
 
           if (session.pendingApprovals.size > 0) {
             return json({ error: "Resolve pending approvals before sending a new message." }, 409);
@@ -2505,6 +2692,12 @@ const server = Bun.serve({
           if (!toolCallId || !suggestionId) {
             return json({ error: "action.toolCallId and action.suggestionId are required" }, 400);
           }
+
+          setActiveSpanAttributes({
+            "app.ai.approval.tool_call_id": toolCallId,
+            "app.ai.approval.suggestion_id": suggestionId,
+            "app.ai.approval.approved": approved,
+          });
 
           const pendingSuggestions = session.pendingApprovals.get(toolCallId);
           if (!pendingSuggestions) {
@@ -2582,7 +2775,41 @@ const server = Bun.serve({
       }
     }
 
-    return json({ error: "Not found" }, 404);
+  return json({ error: "Not found" }, 404);
+}
+
+const server = Bun.serve({
+  hostname: "0.0.0.0",
+  port: config.port,
+  idleTimeout: 120,
+  async fetch(request: Request): Promise<Response> {
+    const url = new URL(request.url);
+
+    return withSpan(
+      "http.request",
+      {
+        kind: SpanKind.SERVER,
+        attributes: {
+          "http.request.method": request.method,
+          "url.path": url.pathname,
+          "url.query": url.search || undefined,
+          "server.address": url.hostname,
+          "server.port": Number(url.port || config.port),
+          "user_agent.original": request.headers.get("user-agent") ?? undefined,
+        },
+      },
+      async (span) => {
+        const response = await handleRequest(request, url);
+        span.setAttribute("http.response.status_code", response.status);
+        if (response.status >= 500) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: `HTTP ${response.status}`,
+          });
+        }
+        return response;
+      },
+    );
   },
 });
 
@@ -2596,5 +2823,9 @@ logInfo("backend.startup", {
   mfpUsernamePreview: redactSecret(config.mfpUsername),
   mfpDetailConcurrency: config.detailConcurrency,
   mfpRequestTimeoutMs: config.requestTimeoutMs,
+  sentryEnabled: true,
+  sentryEnableLogs: SENTRY_ENABLE_LOGS,
+  sentryTracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
+  sentryServiceName: SENTRY_SERVICE_NAME,
 });
 console.log(`backend listening on http://${server.hostname}:${server.port}`);

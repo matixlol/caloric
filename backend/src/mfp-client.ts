@@ -1,5 +1,6 @@
 import { config } from "./config";
 import { logError, logInfo, redactSecret, summarizeText } from "./logging";
+import { SpanKind, SpanStatusCode, withSpan } from "./tracing";
 import { getMfpAuthHeaders, MFP_BASE_URL } from "./mfp-session";
 
 const MFP_API_USER_AGENT =
@@ -44,69 +45,96 @@ async function request(pathWithQuery: string): Promise<MfpResponse> {
   const url = new URL(pathWithQuery, MFP_BASE_URL);
   const startedAt = Date.now();
 
-  const fetchMfp = async (forceRefresh = false): Promise<MfpResponse> => {
-    const headers = await getMfpHeaders(forceRefresh);
+  return withSpan(
+    "mfp.request",
+    {
+      kind: SpanKind.CLIENT,
+      attributes: {
+        "server.address": url.hostname,
+        "server.port": Number(url.port || 443),
+        "http.request.method": "GET",
+        "url.full": url.toString(),
+        "app.request.timeout_ms": config.requestTimeoutMs,
+      },
+    },
+    async (span) => {
+      const fetchMfp = async (forceRefresh = false): Promise<MfpResponse> => {
+        const headers = await getMfpHeaders(forceRefresh);
+        span.setAttribute("app.mfp.force_refresh", forceRefresh);
 
-    logInfo("mfp.request.start", {
-      url: url.toString(),
-      timeoutMs: config.requestTimeoutMs,
-      forceRefresh,
-      hasAuthorization: Boolean(headers.Authorization),
-      authorizationPreview: redactSecret(headers.Authorization),
-      hasCookie: Boolean(headers.Cookie),
-      cookiePreview: redactSecret(headers.Cookie),
-      headers: Object.keys(headers).sort(),
-    });
+        logInfo("mfp.request.start", {
+          url: url.toString(),
+          timeoutMs: config.requestTimeoutMs,
+          forceRefresh,
+          hasAuthorization: Boolean(headers.Authorization),
+          authorizationPreview: redactSecret(headers.Authorization),
+          hasCookie: Boolean(headers.Cookie),
+          cookiePreview: redactSecret(headers.Cookie),
+          headers: Object.keys(headers).sort(),
+        });
 
-    const response = await fetch(url, {
-      method: "GET",
-      headers,
-      signal: AbortSignal.timeout(config.requestTimeoutMs),
-    });
+        const response = await fetch(url, {
+          method: "GET",
+          headers,
+          signal: AbortSignal.timeout(config.requestTimeoutMs),
+        });
 
-    const text = await response.text();
-    let json: unknown | null = null;
+        const text = await response.text();
+        let json: unknown | null = null;
 
-    try {
-      json = JSON.parse(text);
-    } catch {
-      json = null;
-    }
+        try {
+          json = JSON.parse(text);
+        } catch {
+          json = null;
+        }
 
-    logInfo("mfp.request.complete", {
-      url: url.toString(),
-      responseUrl: response.url,
-      status: response.status,
-      ok: response.ok,
-      durationMs: Date.now() - startedAt,
-      contentType: response.headers.get("content-type"),
-      jsonParsed: json !== null,
-      textPreview: json ? null : summarizeText(text),
-    });
+        span.setAttribute("http.response.status_code", response.status);
+        span.setAttribute("app.response.json_parsed", json !== null);
+        span.setAttribute("url.response", response.url);
 
-    return {
-      status: response.status,
-      url: response.url,
-      json,
-      text: json ? null : text,
-    };
-  };
+        if (!response.ok) {
+          span.setStatus({
+            code: SpanStatusCode.ERROR,
+            message: `MFP request failed with status ${response.status}`,
+          });
+        }
 
-  let response: MfpResponse;
-  try {
-    response = await fetchMfp();
-    if (response.status === 401 || response.status === 403 || isAuthorizationErrorResponse(response)) {
-      response = await fetchMfp(true);
-    }
-  } catch (error) {
-    logError("mfp.request.fetch_failed", error, {
-      url: url.toString(),
-      durationMs: Date.now() - startedAt,
-    });
-    throw error;
-  }
+        logInfo("mfp.request.complete", {
+          url: url.toString(),
+          responseUrl: response.url,
+          status: response.status,
+          ok: response.ok,
+          durationMs: Date.now() - startedAt,
+          contentType: response.headers.get("content-type"),
+          jsonParsed: json !== null,
+          textPreview: json ? null : summarizeText(text),
+        });
 
-  return response;
+        return {
+          status: response.status,
+          url: response.url,
+          json,
+          text: json ? null : text,
+        };
+      };
+
+      let response: MfpResponse;
+      try {
+        response = await fetchMfp();
+        if (response.status === 401 || response.status === 403 || isAuthorizationErrorResponse(response)) {
+          response = await fetchMfp(true);
+        }
+      } catch (error) {
+        logError("mfp.request.fetch_failed", error, {
+          url: url.toString(),
+          durationMs: Date.now() - startedAt,
+        });
+        throw error;
+      }
+
+      return response;
+    },
+  );
 }
 
 export type SearchParams = {
