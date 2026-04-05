@@ -1,9 +1,5 @@
 import { and, desc, eq, gte, ilike, isNotNull, lt, or } from "drizzle-orm";
-import {
-  buildRecentLogContextPrompt,
-  buildRecentLogTranscriptionPrompt,
-  parseRecentLogHints,
-} from "./ai-log-context";
+import { buildRecentLogContextPrompt, parseRecentLogHints } from "./ai-log-context";
 import {
   buildDetailContentUrl,
   buildDetailWrapperUrl,
@@ -169,9 +165,22 @@ type OpenRouterToolCall = {
   };
 };
 
+type OpenRouterContentPart =
+  | {
+      type: "text";
+      text: string;
+    }
+  | {
+      type: "input_audio";
+      input_audio: {
+        data: string;
+        format: string;
+      };
+    };
+
 type OpenRouterMessage = {
   role: "system" | "user" | "assistant" | "tool";
-  content?: string | null;
+  content?: string | OpenRouterContentPart[] | null;
   tool_calls?: OpenRouterToolCall[];
   tool_call_id?: string;
 };
@@ -199,6 +208,10 @@ type AgentEvent =
       text: string;
     }
   | {
+      kind: "assistant-delta";
+      text: string;
+    }
+  | {
       kind: "search";
       foods: SearchResultFood[];
     }
@@ -214,7 +227,6 @@ type AgentSession = {
   id: string;
   userId: string;
   conversation: OpenRouterMessage[];
-  transcriptionPrompt: string | null;
   searchResultCounter: number;
   searchResultsByLocalId: Map<string, SearchResultFood>;
   pendingApprovals: Map<string, ResolvedApprovalSuggestion[]>;
@@ -301,6 +313,8 @@ const systemPrompt = [
   "Only set resultId, meal, portion, and reason in each suggestion.",
   "Portion should be in quarter increments (0.25).",
   "If the user rejects suggestions, explain briefly and search again.",
+  "If the user sends audio, understand it directly from the audio input instead of talking about transcription.",
+  "When you answer, keep the wording concise and practical.",
 ].join(" ");
 
 const aiSessions = new Map<string, AgentSession>();
@@ -313,6 +327,10 @@ function json(data: JsonValue, status = 200): Response {
       "Content-Type": "application/json",
     },
   });
+}
+
+function encodeSseChunk(payload: Record<string, unknown>): string {
+  return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
 function parseInteger(value: string | null, fallback: number): number {
@@ -1909,14 +1927,136 @@ function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
   return output;
 }
 
-async function requestOpenRouterTurn(session: AgentSession): Promise<{
+function parseSseDataChunks(raw: string): string[] {
+  const normalized = raw.replace(/\r\n/g, "\n");
+  const events = normalized.split("\n\n");
+  const chunks: string[] = [];
+
+  for (const event of events) {
+    const lines = event
+      .split("\n")
+      .filter((line) => line.startsWith("data:"))
+      .map((line) => line.slice(5).trim());
+
+    if (lines.length === 0) {
+      continue;
+    }
+
+    const payload = lines.join("\n");
+    if (payload === "[DONE]") {
+      continue;
+    }
+
+    chunks.push(payload);
+  }
+
+  return chunks;
+}
+
+function parseToolCallDeltas(raw: unknown): Array<{ index: number; toolCall: OpenRouterToolCall }> {
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  const byIndex = new Map<number, OpenRouterToolCall>();
+
+  for (const candidate of raw) {
+    const record = asRecord(candidate);
+    if (!record) {
+      continue;
+    }
+
+    const index = typeof record.index === "number" ? record.index : undefined;
+    if (index === undefined) {
+      continue;
+    }
+
+    const existing = byIndex.get(index) ?? {
+      id: asString(record.id) ?? `tool-${index}`,
+      type: "function",
+      function: {
+        name: "",
+        arguments: "",
+      },
+    };
+
+    const maybeId = asString(record.id);
+    if (maybeId) {
+      existing.id = maybeId;
+    }
+
+    const fn = asRecord(record.function);
+    const maybeName = asString(fn?.name);
+    if (maybeName) {
+      existing.function.name = maybeName;
+    }
+
+    const argsChunk = fn?.arguments;
+    if (typeof argsChunk === "string") {
+      existing.function.arguments += argsChunk;
+    } else if (argsChunk !== undefined) {
+      try {
+        existing.function.arguments += JSON.stringify(argsChunk);
+      } catch {
+        // Ignore non-serializable chunks.
+      }
+    }
+
+    byIndex.set(index, existing);
+  }
+
+  return Array.from(byIndex.entries())
+    .filter(([, toolCall]) => toolCall.function.name.trim().length > 0)
+    .map(([index, toolCall]) => ({ index, toolCall }));
+}
+
+function normalizeAudioFormat(value: string | undefined): string {
+  const normalized = (value ?? "m4a").trim().toLowerCase();
+
+  if (normalized === "mpeg" || normalized === "mpga") {
+    return "mp3";
+  }
+
+  if (["wav", "mp3", "aiff", "aac", "ogg", "flac", "m4a", "pcm16", "pcm24"].includes(normalized)) {
+    return normalized;
+  }
+
+  return "m4a";
+}
+
+async function encodeAudioFileForOpenRouter(audioFile: File): Promise<{ data: string; format: string }> {
+  if (audioFile.size <= 0) {
+    throw new Error("Audio snippet was empty.");
+  }
+
+  if (audioFile.size > 12 * 1024 * 1024) {
+    throw new Error("Audio snippet is too large (max 12 MB).");
+  }
+
+  const bytes = new Uint8Array(await audioFile.arrayBuffer());
+  const data = Buffer.from(bytes).toString("base64");
+  const typeFormat = audioFile.type.split("/").at(1);
+  const nameFormat = audioFile.name.split(".").at(-1);
+
+  return {
+    data,
+    format: normalizeAudioFormat(typeFormat ?? nameFormat ?? undefined),
+  };
+}
+
+async function requestOpenRouterTurn(
+  session: AgentSession,
+  options?: {
+    onAssistantDelta?: (text: string) => void;
+  },
+): Promise<{
   assistantText: string;
   toolCalls: OpenRouterToolCall[];
 }> {
   const providerOnly = config.openRouterProviderOnly.trim();
   const requestBody: Record<string, unknown> = {
     model: config.openRouterModel,
-    stream: false,
+    stream: true,
     tool_choice: "auto",
     tools: openRouterTools,
     messages: session.conversation,
@@ -1947,24 +2087,62 @@ async function requestOpenRouterTurn(session: AgentSession): Promise<{
     throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
   }
 
-  let parsed: unknown;
-  try {
-    parsed = textBody ? JSON.parse(textBody) : {};
-  } catch {
-    throw new Error("OpenRouter returned invalid JSON.");
+  const chunks = parseSseDataChunks(textBody);
+  let assistantText = "";
+  const toolCallsByIndex = new Map<number, OpenRouterToolCall>();
+
+  for (const chunk of chunks) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(chunk);
+    } catch {
+      continue;
+    }
+
+    const root = asRecord(parsed);
+    const choices = Array.isArray(root?.choices) ? root.choices : [];
+    const firstChoice = asRecord(choices[0]);
+    const delta = asRecord(firstChoice?.delta);
+
+    const textDelta = parseOpenRouterText(delta?.content);
+    if (textDelta) {
+      assistantText += textDelta;
+      options?.onAssistantDelta?.(textDelta);
+    }
+
+    const toolCallDeltas = parseToolCallDeltas(delta?.tool_calls);
+    for (const { index, toolCall } of toolCallDeltas) {
+      const existing = toolCallsByIndex.get(index);
+      if (!existing) {
+        toolCallsByIndex.set(index, toolCall);
+        continue;
+      }
+
+      if (toolCall.id.trim()) {
+        existing.id = toolCall.id;
+      }
+      if (toolCall.function.name.trim()) {
+        existing.function.name = toolCall.function.name;
+      }
+      if (toolCall.function.arguments) {
+        existing.function.arguments += toolCall.function.arguments;
+      }
+    }
+
+    const message = asRecord(firstChoice?.message);
+    const messageToolCalls = parseOpenRouterToolCalls(message?.tool_calls);
+    if (messageToolCalls.length > 0) {
+      for (const [index, toolCall] of messageToolCalls.entries()) {
+        toolCallsByIndex.set(index, toolCall);
+      }
+    }
   }
-
-  const root = asRecord(parsed);
-  const choices = Array.isArray(root?.choices) ? root.choices : [];
-  const firstChoice = asRecord(choices[0]);
-  const message = asRecord(firstChoice?.message);
-
-  const assistantText = parseOpenRouterText(message?.content);
-  const toolCalls = parseOpenRouterToolCalls(message?.tool_calls);
 
   return {
     assistantText,
-    toolCalls,
+    toolCalls: Array.from(toolCallsByIndex.values()).filter(
+      (toolCall) => toolCall.function.name.trim().length > 0,
+    ),
   };
 }
 
@@ -2127,7 +2305,18 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
   const events: AgentEvent[] = [];
 
   for (let step = 0; step < 8; step += 1) {
-    const turn = await requestOpenRouterTurn(session);
+    const turn = await requestOpenRouterTurn(session, {
+      onAssistantDelta: (text) => {
+        if (!text) {
+          return;
+        }
+
+        events.push({
+          kind: "assistant-delta",
+          text,
+        });
+      },
+    });
 
     if (turn.assistantText.trim()) {
       events.push({
@@ -2172,76 +2361,6 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
     status: "ready",
     events,
   };
-}
-
-async function transcribeAudioSnippet(audioFile: File, prompt?: string | null): Promise<string> {
-  if (!config.groqApiKey) {
-    throw new Error("GROQ_API_KEY is not configured on the backend.");
-  }
-
-  if (audioFile.size <= 0) {
-    throw new Error("Audio snippet was empty.");
-  }
-
-  if (audioFile.size > 12 * 1024 * 1024) {
-    throw new Error("Audio snippet is too large (max 12 MB).");
-  }
-
-  const guessedExtension = (audioFile.type || "audio/m4a").split("/").at(1) ?? "m4a";
-  const fileName = audioFile.name?.trim() || `voice.${guessedExtension}`;
-  const formData = new FormData();
-  formData.set("model", "whisper-large-v3-turbo");
-  formData.set("response_format", "json");
-  formData.set("temperature", "0");
-  if (prompt && prompt.trim()) {
-    formData.set("prompt", prompt.trim());
-  }
-  formData.set("file", audioFile, fileName);
-
-  try {
-    const response = await fetch("https://api.groq.com/openai/v1/audio/transcriptions", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${config.groqApiKey}`,
-      },
-      body: formData,
-    });
-
-    const rawBody = await response.text();
-
-    if (!response.ok) {
-      let errorMessage = rawBody;
-      try {
-        const parsedError = JSON.parse(rawBody) as { error?: { message?: unknown } };
-        if (typeof parsedError.error?.message === "string" && parsedError.error.message.trim()) {
-          errorMessage = parsedError.error.message;
-        }
-      } catch {
-        // Keep raw text fallback if Groq returns non-JSON.
-      }
-
-      throw new Error(`Groq returned ${response.status}: ${errorMessage}`);
-    }
-
-    let transcript = rawBody.trim();
-    try {
-      const parsed = JSON.parse(rawBody) as { text?: unknown };
-      if (typeof parsed.text === "string") {
-        transcript = parsed.text.trim();
-      }
-    } catch {
-      // Keep plain text response fallback.
-    }
-
-    if (!transcript) {
-      throw new Error("Groq returned an empty transcription.");
-    }
-
-    return transcript;
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    throw new Error(`Groq transcription request failed: ${message}`);
-  }
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -2353,7 +2472,6 @@ const server = Bun.serve({
       pruneOldAiSessions();
       const recentLogHints = parseRecentLogHints(body?.recentLogs);
       const recentLogContextPrompt = buildRecentLogContextPrompt(recentLogHints);
-      const transcriptionPrompt = buildRecentLogTranscriptionPrompt(recentLogHints);
 
       const sessionId = crypto.randomUUID();
       const now = Date.now();
@@ -2374,7 +2492,6 @@ const server = Bun.serve({
               ]
             : []),
         ],
-        transcriptionPrompt,
         searchResultCounter: 1,
         searchResultsByLocalId: new Map<string, SearchResultFood>(),
         pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
@@ -2469,12 +2586,9 @@ const server = Bun.serve({
 
       try {
         if (actionType === "user-message") {
-          let message = asString(action.message)?.trim() ?? "";
-          if (!message && audioFile) {
-            message = await transcribeAudioSnippet(audioFile, session.transcriptionPrompt);
-          }
+          const message = asString(action.message)?.trim() ?? "";
 
-          if (!message) {
+          if (!message && !audioFile) {
             return json({ error: "action.message or audio is required" }, 400);
           }
 
@@ -2482,19 +2596,64 @@ const server = Bun.serve({
             return json({ error: "Resolve pending approvals before sending a new message." }, 409);
           }
 
-          session.conversation.push({
-            role: "user",
-            content: message,
-          });
+          if (audioFile) {
+            const encodedAudio = await encodeAudioFileForOpenRouter(audioFile);
+            const content: OpenRouterContentPart[] = [];
+
+            if (message) {
+              content.push({
+                type: "text",
+                text: message,
+              });
+            }
+
+            content.push({
+              type: "input_audio",
+              input_audio: encodedAudio,
+            });
+
+            session.conversation.push({
+              role: "user",
+              content,
+            });
+          } else {
+            session.conversation.push({
+              role: "user",
+              content: message,
+            });
+          }
 
           const loopResult = await runAssistantLoop(session);
           session.updatedAt = Date.now();
 
-          return json({
-            status: loopResult.status,
-            events: loopResult.events,
-            resolvedUserMessage: message,
-          });
+          return new Response(
+            encodeSseChunk({
+              type: "status",
+              status: loopResult.status,
+            }) +
+              (message
+                ? encodeSseChunk({
+                    type: "resolved-user-message",
+                    resolvedUserMessage: message,
+                  })
+                : "") +
+              loopResult.events
+                .map((event) =>
+                  encodeSseChunk({
+                    type: "event",
+                    event,
+                  }),
+                )
+                .join("") +
+              "data: [DONE]\n\n",
+            {
+              headers: {
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache, no-transform",
+                Connection: "keep-alive",
+              },
+            },
+          );
         }
 
         if (actionType === "approval") {
@@ -2569,10 +2728,28 @@ const server = Bun.serve({
           const loopResult = await runAssistantLoop(session);
           session.updatedAt = Date.now();
 
-          return json({
-            status: loopResult.status,
-            events: loopResult.events,
-          });
+          return new Response(
+            encodeSseChunk({
+              type: "status",
+              status: loopResult.status,
+            }) +
+              loopResult.events
+                .map((event) =>
+                  encodeSseChunk({
+                    type: "event",
+                    event,
+                  }),
+                )
+                .join("") +
+              "data: [DONE]\n\n",
+            {
+              headers: {
+                "Content-Type": "text/event-stream; charset=utf-8",
+                "Cache-Control": "no-cache, no-transform",
+                Connection: "keep-alive",
+              },
+            },
+          );
         }
 
         return json({ error: `Unsupported action type: ${actionType}` }, 400);
