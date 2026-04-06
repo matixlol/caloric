@@ -14,7 +14,7 @@
     "backend:start": "cd ../backend && pnpm run start",
     "backend:db:generate": "cd ../backend && pnpm run db:generate",
     "backend:db:migrate": "cd ../backend && pnpm run db:migrate",
-    "deploy:ios": "eas-cli build --platform ios --profile production --auto-submit"
+    "deploy:ios": "npx eas-cli build --platform ios --profile production --auto-submit --wait --non-interactive"
   },
   "dependencies": {
     "@azure/core-asynciterator-polyfill": "^1.0.2",
