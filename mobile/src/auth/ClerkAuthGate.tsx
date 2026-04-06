@@ -161,14 +161,11 @@ function sanitizeProviderMentions(value: string) {
 
 function getAuthErrorMessage(error: unknown) {
   if (isClerkAPIResponseError(error) && error.errors.length > 0) {
-    const firstError = error.errors[0];
-    return sanitizeProviderMentions(
-      firstError.longMessage || firstError.message || "Authentication failed.",
-    );
+    return "Authentication failed.";
   }
 
   if (error instanceof Error) {
-    return sanitizeProviderMentions(error.message);
+    return "Authentication failed.";
   }
 
   return "Authentication failed.";

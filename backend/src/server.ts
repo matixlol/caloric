@@ -31,6 +31,7 @@ import {
 import { logError, logInfo, redactSecret, summarizeText } from "./logging";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
 import {
+  captureException,
   SENTRY_ENABLE_LOGS,
   SENTRY_SERVICE_NAME,
   SENTRY_TRACES_SAMPLE_RATE,
@@ -328,6 +329,7 @@ const systemPrompt = [
 
 const aiSessions = new Map<string, AgentSession>();
 const maxAiSessionIdleMs = 1000 * 60 * 60 * 8;
+const UNKNOWN_PUBLIC_ERROR_MESSAGE = "Unknown error.";
 
 function json(data: JsonValue, status = 200): Response {
   return new Response(JSON.stringify(data), {
@@ -336,6 +338,52 @@ function json(data: JsonValue, status = 200): Response {
       "Content-Type": "application/json",
     },
   });
+}
+
+function stringifyUnknownError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+function toErrorForCapture(error: unknown, code: string): Error {
+  if (error instanceof Error) {
+    return error;
+  }
+
+  return new Error(`${code}: ${summarizeText(stringifyUnknownError(error), 500)}`);
+}
+
+function reportUnknownError(code: string, error: unknown): Response {
+  const errorForCapture = toErrorForCapture(error, code);
+
+  setActiveSpanAttributes({
+    "app.error.code": code,
+    "app.error.exposed": false,
+  });
+
+  logError(`api.${code}`, {
+    error: errorForCapture,
+  });
+  captureException(errorForCapture);
+
+  return json(
+    {
+      error: code,
+      message: UNKNOWN_PUBLIC_ERROR_MESSAGE,
+    },
+    502,
+  );
 }
 
 function encodeSseChunk(payload: Record<string, unknown>): string {
@@ -2556,8 +2604,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
           foods,
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return json({ error: "search_failed", message }, 502);
+        return reportUnknownError("search_failed", error);
       }
     }
 
@@ -2575,8 +2622,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
           hasCookie: Boolean(auth.cookieHeader),
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return json({ error: "mfp_session_refresh_failed", message }, 502);
+        return reportUnknownError("mfp_session_refresh_failed", error);
       }
     }
 
@@ -2602,8 +2648,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
           eanStatus: "not_attempted_live_pdf_skipped",
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return json({ error: "anmat_live_search_failed", message }, 502);
+        return reportUnknownError("anmat_live_search_failed", error);
       }
     }
 
@@ -2612,51 +2657,55 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
         return json({ error: "Method not allowed" }, 405);
       }
 
-      const body = await parseJsonBody(request);
-      const userId = asString(body?.userId)?.trim() ?? "";
+      try {
+        const body = await parseJsonBody(request);
+        const userId = asString(body?.userId)?.trim() ?? "";
 
-      if (!userId) {
-        return json({ error: "userId is required" }, 400);
+        if (!userId) {
+          return json({ error: "userId is required" }, 400);
+        }
+
+        pruneOldAiSessions();
+        const recentLogHints = parseRecentLogHints(body?.recentLogs);
+        const recentLogContextPrompt = buildRecentLogContextPrompt(recentLogHints);
+
+        setActiveSpanAttributes({
+          "app.ai.endpoint": "/ai/session",
+          "app.ai.recent_log_count": recentLogHints.length,
+        });
+
+        const sessionId = crypto.randomUUID();
+        const now = Date.now();
+        aiSessions.set(sessionId, {
+          id: sessionId,
+          userId,
+          conversation: [
+            {
+              role: "system",
+              content: systemPrompt,
+            },
+            ...(recentLogContextPrompt
+              ? [
+                  {
+                    role: "system" as const,
+                    content: recentLogContextPrompt,
+                  },
+                ]
+              : []),
+          ],
+          searchResultCounter: 1,
+          searchResultsByLocalId: new Map<string, SearchResultFood>(),
+          pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
+          updatedAt: now,
+        });
+
+        return json({
+          sessionId,
+          status: "ready",
+        });
+      } catch (error) {
+        return reportUnknownError("ai_session_failed", error);
       }
-
-      pruneOldAiSessions();
-      const recentLogHints = parseRecentLogHints(body?.recentLogs);
-      const recentLogContextPrompt = buildRecentLogContextPrompt(recentLogHints);
-
-      setActiveSpanAttributes({
-        "app.ai.endpoint": "/ai/session",
-        "app.ai.recent_log_count": recentLogHints.length,
-      });
-
-      const sessionId = crypto.randomUUID();
-      const now = Date.now();
-      aiSessions.set(sessionId, {
-        id: sessionId,
-        userId,
-        conversation: [
-          {
-            role: "system",
-            content: systemPrompt,
-          },
-          ...(recentLogContextPrompt
-            ? [
-                {
-                  role: "system" as const,
-                  content: recentLogContextPrompt,
-                },
-              ]
-            : []),
-        ],
-        searchResultCounter: 1,
-        searchResultsByLocalId: new Map<string, SearchResultFood>(),
-        pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
-        updatedAt: now,
-      });
-
-      return json({
-        sessionId,
-        status: "ready",
-      });
     }
 
     if (url.pathname === "/ai/turn") {
@@ -2927,8 +2976,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
 
         return json({ error: `Unsupported action type: ${actionType}` }, 400);
       } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        return json({ error: "ai_turn_failed", message }, 502);
+        return reportUnknownError("ai_turn_failed", error);
       }
     }
 

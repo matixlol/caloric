@@ -158,6 +158,10 @@ export function recordSpanError(span: Span, error: unknown): void {
   Sentry.captureException(error);
 }
 
+export function captureException(error: unknown): void {
+  Sentry.captureException(error);
+}
+
 export async function withSpan<T>(name: string, options: SpanOptions, fn: (span: Span) => Promise<T>): Promise<T> {
   return Sentry.startSpan(
     {

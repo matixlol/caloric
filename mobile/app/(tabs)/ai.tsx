@@ -194,11 +194,17 @@ function isErrorLike(value: unknown): value is { message?: unknown; stack?: unkn
 }
 
 function getErrorMessage(error: unknown): string {
-  if (isErrorLike(error) && typeof error.message === "string" && error.message.trim()) {
-    return error.message;
+  if (
+    isErrorLike(error) &&
+    typeof error.name === "string" &&
+    error.name === "UIError" &&
+    typeof error.message === "string" &&
+    error.message.trim()
+  ) {
+    return error.message.trim();
   }
 
-  return "Something went wrong while talking to the backend AI service.";
+  return "Unknown error.";
 }
 
 class UIError extends Error {
@@ -212,25 +218,6 @@ class UIError extends Error {
 }
 
 function getErrorDetails(error: unknown): string | null {
-  if (isErrorLike(error) && typeof error.name === "string" && error.name === "UIError") {
-    const details = typeof (error as { details?: unknown }).details === "string"
-      ? (error as { details?: string }).details
-      : undefined;
-    if (details?.trim()) {
-      return details.trim();
-    }
-  }
-
-  if (isErrorLike(error)) {
-    const stack = typeof error.stack === "string" ? error.stack.trim() : "";
-    const message = typeof error.message === "string" ? error.message.trim() : "";
-    return stack || message || null;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error.trim();
-  }
-
   return null;
 }
 
@@ -313,7 +300,7 @@ function buildStreamingResult(payloads: StreamingPayload[]): StreamingTurnResult
           ? payload.message
           : typeof payload.error === "string"
             ? payload.error
-            : "AI request failed.";
+            : "Unknown error.";
       throw new UIError(backendMessage);
     }
   }
@@ -604,7 +591,7 @@ export default function AILogScreen() {
       const message =
         typeof payload?.error === "string"
           ? payload.error
-          : `Could not start AI session (${response.status}).`;
+          : "Unknown error.";
       throw new UIError(
         message,
         buildErrorDetails({
@@ -722,7 +709,7 @@ export default function AILogScreen() {
           ? payload.message
           : typeof payload?.error === "string"
             ? payload.error
-            : `AI request failed (${response.status}).`;
+            : "Unknown error.";
       throw new UIError(
         backendMessage,
         buildErrorDetails({

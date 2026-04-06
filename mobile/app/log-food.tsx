@@ -65,15 +65,11 @@ function createEmptyFoodsBySource(): SearchFoodsBySource {
 }
 
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim().length > 0) {
-    return error.message;
+  if (error instanceof Error && error.name === "AbortError") {
+    return "Unable to search foods right now.";
   }
 
-  if (typeof error === "string" && error.trim().length > 0) {
-    return error;
-  }
-
-  return "Unable to search foods right now.";
+  return "Unknown error.";
 }
 function FoodRow({
   sourceLabel,

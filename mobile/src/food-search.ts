@@ -174,11 +174,11 @@ function getPayloadErrorMessage(payload: SearchResponsePayload | null): string |
   }
 
   if (typeof payload.message === "string" && payload.message.trim().length > 0) {
-    return payload.message;
+    return payload.message === "Unknown error." ? payload.message : "Unknown error.";
   }
 
   if (typeof payload.error === "string" && payload.error.trim().length > 0) {
-    return payload.error;
+    return payload.error === "Unknown error." ? payload.error : "Unknown error.";
   }
 
   return undefined;
