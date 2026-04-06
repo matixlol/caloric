@@ -189,8 +189,12 @@ function formatCalories(value: number | undefined): string {
   return Math.round(value).toLocaleString();
 }
 
+function isErrorLike(value: unknown): value is { message?: unknown; stack?: unknown; name?: unknown } {
+  return Boolean(value && typeof value === "object");
+}
+
 function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
+  if (isErrorLike(error) && typeof error.message === "string" && error.message.trim()) {
     return error.message;
   }
 
@@ -208,12 +212,19 @@ class UIError extends Error {
 }
 
 function getErrorDetails(error: unknown): string | null {
-  if (error instanceof UIError && error.details) {
-    return error.details;
+  if (isErrorLike(error) && typeof error.name === "string" && error.name === "UIError") {
+    const details = typeof (error as { details?: unknown }).details === "string"
+      ? (error as { details?: string }).details
+      : undefined;
+    if (details?.trim()) {
+      return details.trim();
+    }
   }
 
-  if (error instanceof Error) {
-    return error.stack?.trim() || error.message.trim() || null;
+  if (isErrorLike(error)) {
+    const stack = typeof error.stack === "string" ? error.stack.trim() : "";
+    const message = typeof error.message === "string" ? error.message.trim() : "";
+    return stack || message || null;
   }
 
   if (typeof error === "string" && error.trim()) {
@@ -339,8 +350,11 @@ function buildErrorDetails(options: {
     }
   }
 
-  if (options.underlyingError instanceof Error && options.underlyingError.message.trim()) {
-    lines.push(`cause: ${options.underlyingError.message.trim()}`);
+  if (isErrorLike(options.underlyingError) && typeof options.underlyingError.message === "string") {
+    const cause = options.underlyingError.message.trim();
+    if (cause) {
+      lines.push(`cause: ${cause}`);
+    }
   }
 
   return lines.join("\n");
