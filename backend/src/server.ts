@@ -2125,7 +2125,7 @@ async function requestOpenRouterTurn(
   assistantText: string;
   toolCalls: OpenRouterToolCall[];
 }> {
-  const providerOnly = config.openRouterProviderOnly.trim();
+  const providerOnly = config.openRouterProviderOnly?.trim() ?? "";
   const requestBody: Record<string, unknown> = {
     model: config.openRouterModel,
     stream: true,
