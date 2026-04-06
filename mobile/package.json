@@ -13,7 +13,8 @@
     "backend:dev": "cd ../backend && pnpm run dev",
     "backend:start": "cd ../backend && pnpm run start",
     "backend:db:generate": "cd ../backend && pnpm run db:generate",
-    "backend:db:migrate": "cd ../backend && pnpm run db:migrate"
+    "backend:db:migrate": "cd ../backend && pnpm run db:migrate",
+    "deploy:ios": "eas-cli build --platform ios --profile production --auto-submit"
   },
   "dependencies": {
     "@azure/core-asynciterator-polyfill": "^1.0.2",
@@ -75,6 +76,7 @@
   },
   "devDependencies": {
     "@types/react": "~19.2.10",
+    "eas-cli": "^18.5.0",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~55.0.0",
     "glob": "^13.0.0",
