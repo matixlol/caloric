@@ -1,5 +1,6 @@
 import { useClerk, useUser } from "@clerk/clerk-expo";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
+import * as Updates from "expo-updates";
 import { useEffect, useRef, useState } from "react";
 import { useAccount } from "jazz-tools/expo";
 import {
@@ -78,6 +79,54 @@ function normalizeMacroRatios(
   return { protein, carbs, fat };
 }
 
+function formatUpdateTimestamp(value: Date | null | undefined): string {
+  if (!(value instanceof Date) || Number.isNaN(value.getTime())) {
+    return "Never";
+  }
+
+  return value.toLocaleString();
+}
+
+function getUpdatesStatusLabel(options: {
+  isEnabled: boolean;
+  isChecking: boolean;
+  isDownloading: boolean;
+  isRestarting: boolean;
+  isUpdatePending: boolean;
+  isUpdateAvailable: boolean;
+  error: string | null;
+}): string {
+  if (!options.isEnabled) {
+    return "Updates unavailable";
+  }
+
+  if (options.error) {
+    return options.error;
+  }
+
+  if (options.isRestarting) {
+    return "Applying update...";
+  }
+
+  if (options.isDownloading) {
+    return "Downloading update...";
+  }
+
+  if (options.isUpdatePending) {
+    return "Update ready to apply";
+  }
+
+  if (options.isChecking) {
+    return "Checking updates...";
+  }
+
+  if (options.isUpdateAvailable) {
+    return "Update available";
+  }
+
+  return "Up to date";
+}
+
 function FormRow({
   label,
   value,
@@ -118,6 +167,17 @@ export default function SettingsScreen() {
   const clerk = useClerk();
   const { user } = useUser();
   const me = useAccount(CaloricAccount, { resolve: { profile: true, root: true } });
+  const {
+    currentlyRunning,
+    isChecking,
+    isDownloading,
+    isRestarting,
+    isUpdateAvailable,
+    isUpdatePending,
+    checkError,
+    downloadError,
+    lastCheckForUpdateTimeSinceRestart,
+  } = Updates.useUpdates();
   const [goalInput, setGoalInput] = useState("");
   const [macroSplitA, setMacroSplitA] = useState(DEFAULT_PROTEIN_PCT);
   const [macroSplitB, setMacroSplitB] = useState(DEFAULT_PROTEIN_PCT + DEFAULT_CARBS_PCT);
@@ -127,6 +187,7 @@ export default function SettingsScreen() {
   const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
+  const [updatesActionError, setUpdatesActionError] = useState<string | null>(null);
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
 
@@ -279,6 +340,24 @@ export default function SettingsScreen() {
     fatPct !== loadedMacros.fat;
 
   const profileEmail = clerkEmail;
+  const updatesErrorMessage = updatesActionError ?? (checkError || downloadError ? "Unknown error." : null);
+  const updatesStatusLabel = getUpdatesStatusLabel({
+    isEnabled: Updates.isEnabled,
+    isChecking,
+    isDownloading,
+    isRestarting,
+    isUpdatePending,
+    isUpdateAvailable,
+    error: updatesErrorMessage,
+  });
+  const lastCheckedLabel = formatUpdateTimestamp(lastCheckForUpdateTimeSinceRestart);
+  const currentUpdateCreatedAtLabel = formatUpdateTimestamp(currentlyRunning.createdAt);
+  const canCheckForUpdates = Updates.isEnabled && !isChecking && !isDownloading && !isRestarting;
+  const updateButtonLabel = isUpdatePending
+    ? "Apply Update"
+    : isUpdateAvailable || isDownloading
+      ? "Download Update"
+      : "Force Check";
 
   const handleSave = () => {
     setSaveError(null);
@@ -306,10 +385,34 @@ export default function SettingsScreen() {
 
     try {
       await clerk.signOut();
-    } catch (error) {
-      setSignOutError(error instanceof Error ? error.message : "Could not sign out. Try again.");
+    } catch {
+      setSignOutError("Could not sign out. Try again.");
     } finally {
       setIsSigningOut(false);
+    }
+  };
+
+  const handleCheckForUpdates = async () => {
+    if (!canCheckForUpdates) {
+      return;
+    }
+
+    setUpdatesActionError(null);
+
+    try {
+      if (isUpdatePending) {
+        await Updates.reloadAsync();
+        return;
+      }
+
+      if (!isUpdateAvailable) {
+        await Updates.checkForUpdateAsync();
+        return;
+      }
+
+      await Updates.fetchUpdateAsync();
+    } catch {
+      setUpdatesActionError("Unknown error.");
     }
   };
 
@@ -371,6 +474,38 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
         {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
+
+        <Text style={styles.sectionTitle}>Updates</Text>
+        <View style={styles.card}>
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Status</Text>
+            <Text style={styles.accountValue}>{updatesStatusLabel}</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Last checked</Text>
+            <Text style={styles.accountValue}>{lastCheckedLabel}</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Current update</Text>
+            <Text style={styles.accountValue}>{currentUpdateCreatedAtLabel}</Text>
+          </View>
+          <View style={styles.divider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={updateButtonLabel}
+            onPress={() => {
+              void handleCheckForUpdates();
+            }}
+            disabled={!canCheckForUpdates}
+            style={[styles.updatesButton, !canCheckForUpdates && styles.updatesButtonDisabled]}
+          >
+            <Text style={[styles.updatesButtonText, !canCheckForUpdates && styles.updatesButtonTextDisabled]}>
+              {updateButtonLabel}
+            </Text>
+          </Pressable>
+        </View>
 
         <Text style={styles.sectionTitle}>Goals</Text>
         <View style={styles.card}>
@@ -598,6 +733,23 @@ const styles = StyleSheet.create({
     color: palette.error,
   },
   signOutButtonTextDisabled: {
+    color: palette.secondaryLabel,
+  },
+  updatesButton: {
+    minHeight: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  updatesButtonDisabled: {
+    opacity: 0.5,
+  },
+  updatesButtonText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "600",
+    color: palette.tint,
+  },
+  updatesButtonTextDisabled: {
     color: palette.secondaryLabel,
   },
   formValueWrap: {
