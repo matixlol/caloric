@@ -55,5 +55,5 @@ export const config = {
   openFoodFactsUserEmail: Bun.env.OPEN_FOOD_FACTS_USER_EMAIL,
   openRouterApiKey: getRequiredEnv("OPENROUTER_API_KEY"),
   openRouterModel: Bun.env.OPENROUTER_MODEL ?? "google/gemini-3-flash-preview",
-  openRouterProviderOnly: Bun.env.OPENROUTER_PROVIDER_ONLY ?? "google",
+  openRouterProviderOnly: Bun.env.OPENROUTER_PROVIDER_ONLY,
 };

@@ -84,7 +84,7 @@ Optional:
 - `OPEN_FOOD_FACTS_USER_AGENT`
 - `OPEN_FOOD_FACTS_USER_EMAIL`
 - `OPENROUTER_MODEL`
-- `OPENROUTER_PROVIDER_ONLY`
+- `OPENROUTER_PROVIDER_ONLY` (optional; for Gemini 3 Flash use `google-ai-studio` or `google-vertex`; leave unset to let OpenRouter choose sorted by throughput)
 
 ## Run
 

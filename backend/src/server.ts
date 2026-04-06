@@ -2136,12 +2136,15 @@ async function requestOpenRouterTurn(
     session_id: session.id,
   };
 
-  if (providerOnly) {
-    requestBody.provider = {
-      only: [providerOnly],
-      allow_fallbacks: false,
-    };
-  }
+  requestBody.provider = providerOnly
+    ? {
+        only: [providerOnly],
+        allow_fallbacks: true,
+        sort: "throughput",
+      }
+    : {
+        sort: "throughput",
+      };
 
   return withSpan(
     "openrouter.chat.completions",
