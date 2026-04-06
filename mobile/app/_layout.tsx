@@ -9,6 +9,21 @@ import "../global.css";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
 import { CaloricAccount } from "../src/jazz/schema";
+import * as Sentry from '@sentry/react-native';
+
+Sentry.init({
+  dsn: 'https://b717a9ae29012fc29268ccc8b531ea67@o4510397347987456.ingest.us.sentry.io/4511171255009280',
+
+  // Adds more context data to events (IP address, cookies, user, etc.)
+  // For more information, visit: https://docs.sentry.io/platforms/react-native/data-management/data-collected/
+  sendDefaultPii: true,
+
+  // Enable Logs
+  enableLogs: true,
+
+  // uncomment the line below to enable Spotlight (https://spotlightjs.com)
+  // spotlight: __DEV__,
+});
 
 const jazzApiKey = process.env.EXPO_PUBLIC_JAZZ_API_KEY?.trim() || "you@example.com";
 const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
@@ -54,7 +69,7 @@ function AppNavigator() {
   );
 }
 
-export default function RootLayout() {
+export default Sentry.wrap(function RootLayout() {
   if (!clerkPublishableKey) {
     return <MissingClerkKeyScreen />;
   }
@@ -71,7 +86,7 @@ export default function RootLayout() {
       </ClerkProvider>
     </GestureHandlerRootView>
   );
-}
+});
 
 const styles = StyleSheet.create({
   gestureRoot: {
