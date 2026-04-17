@@ -88,6 +88,18 @@ export const openFoodFactsSearchResponses = pgTable(
   }),
 );
 
+export const anmatLiveSearchRequests = pgTable(
+  "anmat_live_search_requests",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    query: text("query").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    queryCreatedAtIdx: index("anmat_live_search_requests_query_created_at_idx").on(table.query, table.createdAt),
+  }),
+);
+
 export const anmatProductHtmlBlobs = pgTable(
   "anmat_product_html_blobs",
   {
