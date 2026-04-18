@@ -60,6 +60,7 @@ describe("ai api live", () => {
 
       expect(turnResponse.status).toBe(200);
       const turnBody = await turnResponse.text();
+      console.log(turnBody)
 
       expect(turnBody).toContain(`"type":"status"`);
       expect(turnBody).toContain(`"status":"ready"`);
