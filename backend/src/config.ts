@@ -38,6 +38,9 @@ function getBooleanEnv(name: string, fallback: boolean): boolean {
 export const config = {
   port: getNumberEnv("PORT", 8787),
   databaseUrl: getRequiredEnv("DATABASE_URL"),
+  clerkSecretKey: getRequiredEnv("CLERK_SECRET_KEY"),
+  clerkPublishableKey: getRequiredEnv("CLERK_PUBLISHABLE_KEY"),
+  clerkJwtKey: Bun.env.CLERK_JWT_KEY,
   searchCacheTtlDays: Math.max(1, getNumberEnv("SEARCH_CACHE_TTL_DAYS", 30)),
   mfpUsername: Bun.env.MFP_USERNAME,
   mfpPassword: Bun.env.MFP_PASSWORD,

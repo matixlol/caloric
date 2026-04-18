@@ -14,15 +14,16 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `resourceType` (default `foods`)
     - `includeDetails` (default `true`)
 - `POST /ai/session`
+  - requires a Clerk bearer token
   - body:
-    - `userId` (required)
+    - `recentLogs` (optional)
   - returns:
     - `sessionId`
     - `status` (`ready`)
 - `POST /ai/turn`
+  - requires a Clerk bearer token
   - body (`application/json`):
     - `sessionId` (required)
-    - `userId` (required, must match session owner)
     - `action` (required)
       - user message:
         - `type: "user-message"`
@@ -34,7 +35,6 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
         - `approved`
   - body (`multipart/form-data`, for voice):
     - `sessionId` (required)
-    - `userId` (required)
     - `actionType` (required, set to `user-message`)
     - `audio` (required for voice-only requests)
     - `message` (optional companion text)
@@ -42,6 +42,12 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `type: "status"` with `status` (`ready` or `awaiting-approval`)
     - `type: "event"` with `event` (`assistant-delta`, `assistant`, `search`, `approval`)
     - `type: "resolved-user-message"` when a typed companion message was sent
+- `GET /sync/bootstrap`
+  - requires a Clerk bearer token
+  - returns synced food entries plus user settings
+- `POST /sync/push`
+  - requires a Clerk bearer token
+  - accepts dirty food entry upserts and settings upserts
 - `POST /mfp/session/refresh`
   - forces a Playwright login refresh and updates the stored MyFitnessPal session in Postgres
   - returns whether auth headers were refreshed successfully
@@ -67,6 +73,8 @@ The refresh path launches the verified Rebrowser Playwright + 2Captcha login har
 Copy `.env.example` to `.env` and set:
 
 - `DATABASE_URL`
+- `CLERK_SECRET_KEY`
+- `CLERK_PUBLISHABLE_KEY`
 - `MFP_USERNAME`
 - `MFP_PASSWORD`
 - `TWO_CAPTCHA_API_KEY` (used to solve Cloudflare Turnstile during MyFitnessPal login)
@@ -85,6 +93,7 @@ Optional:
 - `OPEN_FOOD_FACTS_USER_EMAIL`
 - `OPENROUTER_MODEL`
 - `OPENROUTER_PROVIDER_ONLY` (optional; for Gemini 3 Flash use `google-ai-studio` or `google-vertex`; leave unset to let OpenRouter choose sorted by throughput)
+- `CLERK_JWT_KEY`
 
 ## Run
 

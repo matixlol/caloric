@@ -1,10 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
 import { AppState, Platform } from "react-native";
-import { useAccount } from "jazz-tools/expo";
-import { CaloricAccount } from "../jazz/schema";
+import { useAllFoodEntries, useDataStoreReady, useUserSettings } from "../data/DataProvider";
 import { ensureICloudBackup } from "./iCloudBackup";
 
-type SnapshotNutrition = {
+function serializeNutrition(nutrition?: {
   calories?: number;
   protein?: number;
   carbs?: number;
@@ -13,44 +12,7 @@ type SnapshotNutrition = {
   sugars?: number;
   sodiumMg?: number;
   potassiumMg?: number;
-};
-
-type SnapshotFood = {
-  $isLoaded: boolean;
-  name: string;
-  brand?: string;
-  serving?: string;
-  nutrition?: SnapshotNutrition | null;
-};
-
-type SnapshotLog = {
-  $isLoaded: boolean;
-  meal: string;
-  foodName: string;
-  brand?: string;
-  serving?: string;
-  portion: number;
-  nutrition?: SnapshotNutrition | null;
-  createdAt: number;
-  dateKey?: string;
-};
-
-type LoadedAccountSnapshotSource = {
-  profile: {
-    name: string;
-    email: string;
-  };
-  root: {
-    calorieGoal?: number;
-    macroProteinPct?: number;
-    macroCarbsPct?: number;
-    macroFatPct?: number;
-    foods?: SnapshotFood[];
-    logs?: SnapshotLog[];
-  };
-};
-
-function serializeNutrition(nutrition?: SnapshotNutrition | null) {
+} | null) {
   if (!nutrition) {
     return undefined;
   }
@@ -67,71 +29,46 @@ function serializeNutrition(nutrition?: SnapshotNutrition | null) {
   };
 }
 
-function serializeAccountSnapshot(account: LoadedAccountSnapshotSource) {
-  const foods = account.root.foods
-    ? account.root.foods.filter((item) => item.$isLoaded).map((item) => ({
-        name: item.name,
-        brand: item.brand,
-        serving: item.serving,
-        nutrition: serializeNutrition(item.nutrition),
-      }))
-    : [];
-
-  const logs = account.root.logs
-    ? account.root.logs.filter((entry) => entry.$isLoaded).map((entry) => ({
-        meal: entry.meal,
-        foodName: entry.foodName,
-        brand: entry.brand,
-        serving: entry.serving,
-        portion: entry.portion,
-        nutrition: serializeNutrition(entry.nutrition),
-        createdAt: entry.createdAt,
-        dateKey: entry.dateKey,
-      }))
-    : [];
-
+function serializeAccountSnapshot(logs: ReturnType<typeof useAllFoodEntries>["data"], settings: NonNullable<ReturnType<typeof useUserSettings>["data"]>) {
   return {
     version: 1,
     exportedAt: Date.now(),
     account: {
-      profile: {
-        name: account.profile.name,
-        email: account.profile.email,
-      },
       root: {
-        calorieGoal: account.root.calorieGoal,
-        macroProteinPct: account.root.macroProteinPct,
-        macroCarbsPct: account.root.macroCarbsPct,
-        macroFatPct: account.root.macroFatPct,
-        foods,
-        logs,
+        calorieGoal: settings.calorieGoal,
+        macroProteinPct: settings.macroProteinPct,
+        macroCarbsPct: settings.macroCarbsPct,
+        macroFatPct: settings.macroFatPct,
+        logs: logs.map((entry) => ({
+          meal: entry.meal,
+          foodName: entry.foodName,
+          brand: entry.brand,
+          serving: entry.serving,
+          portion: entry.portion,
+          nutrition: serializeNutrition(entry.nutrition),
+          createdAt: entry.createdAt,
+          dateKey: entry.dateKey,
+          sortIndex: entry.sortIndex,
+        })),
       },
     },
   };
 }
 
 export function AutoBackupCoordinator() {
-  const account = useAccount(CaloricAccount, {
-    resolve: {
-      profile: true,
-      root: {
-        foods: { $each: { nutrition: true } },
-        logs: { $each: { nutrition: true } },
-      },
-    },
-  });
+  const isReady = useDataStoreReady();
+  const { data: logs } = useAllFoodEntries();
+  const { data: settings } = useUserSettings();
   const isEnsuringBackupRef = useRef(false);
   const wasBackupSourceReadyRef = useRef(false);
 
   const createSnapshotJson = useCallback(() => {
-    if (Platform.OS !== "ios" || !account.$isLoaded) {
+    if (Platform.OS !== "ios" || !isReady || !settings) {
       return null;
     }
 
-    return JSON.stringify(
-      serializeAccountSnapshot(account as unknown as LoadedAccountSnapshotSource),
-    );
-  }, [account]);
+    return JSON.stringify(serializeAccountSnapshot(logs, settings));
+  }, [isReady, logs, settings]);
 
   const ensureBackup = useCallback(async () => {
     const json = createSnapshotJson();
@@ -149,14 +86,14 @@ export function AutoBackupCoordinator() {
   }, [createSnapshotJson]);
 
   useEffect(() => {
-    const isBackupSourceReady = Platform.OS === "ios" && account.$isLoaded;
+    const isBackupSourceReady = Platform.OS === "ios" && isReady && Boolean(settings);
 
     if (isBackupSourceReady && !wasBackupSourceReadyRef.current) {
       void ensureBackup();
     }
 
     wasBackupSourceReadyRef.current = isBackupSourceReady;
-  }, [account.$isLoaded, ensureBackup]);
+  }, [ensureBackup, isReady, settings]);
 
   useEffect(() => {
     if (Platform.OS !== "ios") {

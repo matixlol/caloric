@@ -71,7 +71,7 @@
           "enableBackgroundPlayback": false
         }
       ],
-      "expo-sqlite",
+      "./plugins/withThirdPartySQLitePod",
       "./plugins/withICloudBackup",
       "expo-asset",
       "expo-font",

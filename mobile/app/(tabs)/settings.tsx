@@ -2,7 +2,6 @@ import { useClerk, useUser } from "@clerk/clerk-expo";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Updates from "expo-updates";
 import { useEffect, useRef, useState } from "react";
-import { useAccount } from "jazz-tools/expo";
 import {
   Alert,
   PanResponder,
@@ -16,7 +15,7 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CaloricAccount } from "../../src/jazz/schema";
+import { useDataStoreActions, useDataStoreReady, useUserSettings } from "../../src/data/DataProvider";
 import { useAppTheme } from "../../src/theme/useAppTheme";
 
 const DEFAULT_CALORIE_GOAL = 2500;
@@ -166,7 +165,9 @@ export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const clerk = useClerk();
   const { user } = useUser();
-  const me = useAccount(CaloricAccount, { resolve: { profile: true, root: true } });
+  const isDataReady = useDataStoreReady();
+  const { upsertUserSettings } = useDataStoreActions();
+  const { data: syncedSettings, isLoading: isLoadingSettings } = useUserSettings();
   const {
     currentlyRunning,
     isChecking,
@@ -212,20 +213,20 @@ export default function SettingsScreen() {
     user?.primaryEmailAddress?.emailAddress ||
     user?.emailAddresses?.[0]?.emailAddress ||
     "No email found";
-  const syncedGoal = me.$isLoaded ? me.root.calorieGoal : undefined;
-  const syncedProtein = me.$isLoaded ? me.root.macroProteinPct : undefined;
-  const syncedCarbs = me.$isLoaded ? me.root.macroCarbsPct : undefined;
-  const syncedFat = me.$isLoaded ? me.root.macroFatPct : undefined;
+  const syncedGoal = syncedSettings?.calorieGoal;
+  const syncedProtein = syncedSettings?.macroProteinPct;
+  const syncedCarbs = syncedSettings?.macroCarbsPct;
+  const syncedFat = syncedSettings?.macroFatPct;
 
   useEffect(() => {
-    if (!me.$isLoaded) return;
+    if (!syncedSettings) return;
 
     const normalizedMacros = normalizeMacroRatios(syncedProtein, syncedCarbs, syncedFat);
 
     setGoalInput(String(syncedGoal ?? DEFAULT_CALORIE_GOAL));
     setMacroSplitA(normalizedMacros.protein);
     setMacroSplitB(normalizedMacros.protein + normalizedMacros.carbs);
-  }, [me.$isLoaded, syncedGoal, syncedProtein, syncedCarbs, syncedFat]);
+  }, [syncedCarbs, syncedFat, syncedGoal, syncedProtein, syncedSettings]);
 
   useEffect(() => {
     setSaveError(null);
@@ -300,7 +301,7 @@ export default function SettingsScreen() {
     }),
   ).current;
 
-  if (!me.$isLoaded) {
+  if (!isDataReady || isLoadingSettings || !syncedSettings) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Loading settings…</Text>
@@ -308,11 +309,11 @@ export default function SettingsScreen() {
     );
   }
 
-  const loadedGoal = me.root.calorieGoal ?? DEFAULT_CALORIE_GOAL;
+  const loadedGoal = syncedSettings.calorieGoal ?? DEFAULT_CALORIE_GOAL;
   const loadedMacros = normalizeMacroRatios(
-    me.root.macroProteinPct,
-    me.root.macroCarbsPct,
-    me.root.macroFatPct,
+    syncedSettings.macroProteinPct,
+    syncedSettings.macroCarbsPct,
+    syncedSettings.macroFatPct,
   );
 
   const proteinPct = macroSplitA;
@@ -368,10 +369,12 @@ export default function SettingsScreen() {
       return;
     }
 
-    me.root.$jazz.set("calorieGoal", parsedGoal);
-    me.root.$jazz.set("macroProteinPct", proteinPct);
-    me.root.$jazz.set("macroCarbsPct", carbsPct);
-    me.root.$jazz.set("macroFatPct", fatPct);
+    void upsertUserSettings({
+      calorieGoal: parsedGoal,
+      macroProteinPct: proteinPct,
+      macroCarbsPct: carbsPct,
+      macroFatPct: fatPct,
+    });
     setSaveSuccess("Saved successfully.");
   };
 

@@ -3,9 +3,8 @@ import {
   useAuth,
   useSignIn,
   useSignUp,
-  useUser,
 } from "@clerk/clerk-expo";
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useState } from "react";
 import {
   ActivityIndicator,
   Pressable,
@@ -15,9 +14,7 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { useAccount } from "jazz-tools/expo";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CaloricAccount } from "../jazz/schema";
 import { type AppPalette, type AppTheme, useThemedStyles } from "../theme/useAppTheme";
 
 const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -155,10 +152,6 @@ function normalizeEmail(value: string) {
   return value.trim().toLowerCase();
 }
 
-function sanitizeProviderMentions(value: string) {
-  return value.replace(/clerk/gi, "auth");
-}
-
 function getAuthErrorMessage(error: unknown) {
   if (isClerkAPIResponseError(error) && error.errors.length > 0) {
     return "Authentication failed.";
@@ -239,10 +232,8 @@ function LabeledInput({
 export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   const { palette, styles, isDark } = useThemedStyles(createStyles);
   const { isLoaded: authLoaded, isSignedIn } = useAuth();
-  const { user } = useUser();
   const { isLoaded: signInLoaded, signIn, setActive: setSignInActive } = useSignIn();
   const { isLoaded: signUpLoaded, signUp, setActive: setSignUpActive } = useSignUp();
-  const me = useAccount(CaloricAccount, { resolve: { profile: true } });
 
   const [authMode, setAuthMode] = useState<AuthMode>("sign-in");
   const [verificationMode, setVerificationMode] = useState<VerificationMode>("none");
@@ -251,22 +242,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
-
-  const currentEmail = useMemo(() => {
-    if (!me.$isLoaded) return "";
-    return normalizeEmail(me.profile.email);
-  }, [me]);
-
-  useEffect(() => {
-    if (!isSignedIn || !me.$isLoaded || currentEmail) {
-      return;
-    }
-
-    const clerkEmail = normalizeEmail(user?.primaryEmailAddress?.emailAddress || "");
-    if (EMAIL_REGEX.test(clerkEmail)) {
-      me.profile.$jazz.set("email", clerkEmail);
-    }
-  }, [currentEmail, isSignedIn, me, user]);
 
   const emailIsValid = EMAIL_REGEX.test(normalizeEmail(emailInput));
 
@@ -438,19 +413,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
     }
   };
 
-  const handleSaveEmail = () => {
-    if (!me.$isLoaded) return;
-
-    const normalizedEmail = normalizeEmail(emailInput);
-    if (!EMAIL_REGEX.test(normalizedEmail)) {
-      setError("Enter a valid email.");
-      return;
-    }
-
-    setError(null);
-    me.profile.$jazz.set("email", normalizedEmail);
-  };
-
   if (!authLoaded) {
     return (
       <View style={styles.loadingContainer}>
@@ -554,41 +516,6 @@ export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
                   ? "Need an account? Sign Up"
                   : "Already have an account? Sign In"}
             </Text>
-          </Pressable>
-        </View>
-      </AuthScreen>
-    );
-  }
-
-  if (!me.$isLoaded) {
-    return (
-      <View style={styles.loadingContainer}>
-        <ActivityIndicator size="large" color={palette.tint} />
-      </View>
-    );
-  }
-
-  if (!currentEmail) {
-    return (
-      <AuthScreen
-        styles={styles}
-        title="Add Email"
-        subtitle="Your account requires an email. This is stored on your public profile."
-      >
-        <LabeledInput
-          palette={palette}
-          styles={styles}
-          isDark={isDark}
-          label="Email"
-          value={emailInput}
-          onChangeText={setEmailInput}
-          placeholder="you@company.com"
-          keyboardType="email-address"
-        />
-        {error ? <Text style={styles.errorText}>{error}</Text> : null}
-        <View style={styles.actions}>
-          <Pressable onPress={handleSaveEmail} style={styles.primaryButton}>
-            <Text style={styles.primaryButtonText}>Save Email</Text>
           </Pressable>
         </View>
       </AuthScreen>

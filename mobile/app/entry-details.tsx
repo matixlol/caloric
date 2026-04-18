@@ -1,9 +1,8 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useAccount } from "jazz-tools/expo";
 import { Platform, PlatformColor, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { CaloricAccount } from "../src/jazz/schema";
+import { useDataStoreActions, useDataStoreReady, useFoodEntry } from "../src/data/DataProvider";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 import {
   PORTION_DELTAS,
@@ -91,23 +90,18 @@ export default function EntryDetailsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ entryId?: string | string[] }>();
-  const me = useAccount(CaloricAccount, {
-    resolve: { root: { logs: { $each: { nutrition: true } } } },
-  });
+  const isDataReady = useDataStoreReady();
+  const { updateFoodEntry } = useDataStoreActions();
+  const entryId = Array.isArray(params.entryId) ? params.entryId[0] : params.entryId;
+  const { data: entry, isLoading } = useFoodEntry(entryId);
 
-  if (!me.$isLoaded) {
+  if (!isDataReady || isLoading) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
-
-  const entryId = Array.isArray(params.entryId) ? params.entryId[0] : params.entryId;
-  const entry =
-    entryId && me.root.logs
-      ? me.root.logs.find((item) => item?.$isLoaded && item.$jazz.id === entryId) ?? null
-      : null;
 
   if (!entry) {
     return (
@@ -147,7 +141,17 @@ export default function EntryDetailsScreen() {
       return;
     }
 
-    entry.$jazz.set("portion", nextPortion);
+    void updateFoodEntry(entry.id, (current) => ({
+      meal: current.meal,
+      foodName: current.foodName,
+      brand: current.brand,
+      serving: current.serving,
+      portion: nextPortion,
+      nutrition: current.nutrition,
+      createdAt: current.createdAt,
+      dateKey: current.dateKey,
+      sortIndex: current.sortIndex,
+    }));
   };
 
   return (

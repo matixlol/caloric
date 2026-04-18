@@ -1,6 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
-import { useAccount } from "jazz-tools/expo";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   FlatList,
@@ -16,15 +15,14 @@ import DraggableFlatList, { type RenderItemParams } from "react-native-draggable
 import PagerView, { type PagerViewOnPageSelectedEvent } from "react-native-pager-view";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { useAllFoodEntries, useDataStoreActions, useDataStoreReady, useUserSettings } from "../../src/data/DataProvider";
 import {
   getTodayLocalDateKey,
-  normalizeLocalDateKey,
   parseLocalDateKey,
   shiftLocalDateKey,
 } from "../../src/date";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel, sanitizePortion } from "../../src/portion";
-import { CaloricAccount } from "../../src/jazz/schema";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -196,9 +194,10 @@ function MealRow({
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const me = useAccount(CaloricAccount, {
-    resolve: { root: { logs: { $each: { nutrition: true } } } },
-  });
+  const isDataReady = useDataStoreReady();
+  const { deleteFoodEntry, reorderFoodEntriesForDate } = useDataStoreActions();
+  const { data: allLogs, isLoading: isLoadingEntries } = useAllFoodEntries();
+  const { data: settings, isLoading: isLoadingSettings } = useUserSettings();
 
   const [dayOffset, setDayOffset] = useState(0);
   const [todayDateKey, setTodayDateKey] = useState(() => getTodayLocalDateKey());
@@ -227,32 +226,8 @@ export default function HomeScreen() {
     [selectedDate, selectedDateKey],
   );
 
-  const logsValue = me.$isLoaded ? me.root.logs : undefined;
-
-  const allLogs = useMemo(() => {
-    if (!me.$isLoaded) {
-      return [];
-    }
-
-    return (logsValue ?? []).filter(
-      (entry): entry is NonNullable<typeof entry> & { $isLoaded: true } => Boolean(entry?.$isLoaded),
-    );
-  }, [logsValue, me.$isLoaded]);
-
-  useEffect(() => {
-    allLogs.forEach((entry) => {
-      const normalizedDateKey = normalizeLocalDateKey(entry.dateKey, entry.createdAt);
-      if (entry.dateKey !== normalizedDateKey) {
-        entry.$jazz.set("dateKey", normalizedDateKey);
-      }
-    });
-  }, [allLogs]);
-
   const logs = useMemo(
-    () =>
-      allLogs.filter(
-        (entry) => normalizeLocalDateKey(entry.dateKey, entry.createdAt) === selectedDateKey,
-      ),
+    () => allLogs.filter((entry) => entry.dateKey === selectedDateKey),
     [allLogs, selectedDateKey],
   );
 
@@ -271,7 +246,7 @@ export default function HomeScreen() {
       const portion = sanitizePortion(entry.portion);
 
       grouped[meal].push({
-        id: entry.$jazz.id,
+        id: entry.id,
         name: entry.foodName,
         meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
         calories: (entry.nutrition?.calories ?? 0) * portion,
@@ -409,15 +384,13 @@ export default function HomeScreen() {
     [goToNewerDay, goToOlderDay],
   );
 
-  if (!me.$isLoaded) {
+  if (!isDataReady || isLoadingEntries || isLoadingSettings || !settings) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
   }
-
-  const rootLogs = me.root.logs;
 
   const caloriesConsumed = logs.reduce(
     (sum, entry) => sum + (entry.nutrition?.calories ?? 0) * sanitizePortion(entry.portion),
@@ -436,10 +409,10 @@ export default function HomeScreen() {
     0,
   );
 
-  const goal = me.root.calorieGoal || DEFAULT_CALORIE_GOAL;
-  const proteinPct = me.root.macroProteinPct ?? DEFAULT_PROTEIN_PCT;
-  const carbsPct = me.root.macroCarbsPct ?? DEFAULT_CARBS_PCT;
-  const fatPct = me.root.macroFatPct ?? DEFAULT_FAT_PCT;
+  const goal = settings.calorieGoal || DEFAULT_CALORIE_GOAL;
+  const proteinPct = settings.macroProteinPct ?? DEFAULT_PROTEIN_PCT;
+  const carbsPct = settings.macroCarbsPct ?? DEFAULT_CARBS_PCT;
+  const fatPct = settings.macroFatPct ?? DEFAULT_FAT_PCT;
   const calorieProgress = clampPercent((caloriesConsumed / goal) * 100);
 
   const proteinGoal = Math.round((goal * (proteinPct / 100)) / 4);
@@ -456,9 +429,7 @@ export default function HomeScreen() {
     const targetTitle = formatDayTitle(targetDayOffset, targetDate);
     const targetSubtitle = targetDate ? DATE_SUBTITLE_FORMATTER.format(targetDate) : targetDateKey;
 
-    const targetLogs = allLogs.filter(
-      (entry) => normalizeLocalDateKey(entry.dateKey, entry.createdAt) === targetDateKey,
-    );
+    const targetLogs = allLogs.filter((entry) => entry.dateKey === targetDateKey);
 
     const grouped: Record<MealKey, MealEntry[]> = {
       breakfast: [],
@@ -474,7 +445,7 @@ export default function HomeScreen() {
       const portion = sanitizePortion(entry.portion);
 
       grouped[meal].push({
-        id: entry.$jazz.id,
+        id: entry.id,
         name: entry.foodName,
         meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
         calories: (entry.nutrition?.calories ?? 0) * portion,
@@ -532,16 +503,7 @@ export default function HomeScreen() {
   };
 
   const handleDeleteEntry = (entryId: string) => {
-    if (!rootLogs) {
-      return;
-    }
-
-    const index = rootLogs.findIndex((entry) => entry?.$isLoaded && entry.$jazz.id === entryId);
-    if (index === -1) {
-      return;
-    }
-
-    rootLogs.$jazz.splice(index, 1);
+    void deleteFoodEntry(entryId);
   };
 
   const handleOpenEntry = (entryId: string) => {
@@ -552,7 +514,7 @@ export default function HomeScreen() {
   };
 
   const persistDraggedOrder = (orderedItems: MealListItem[]) => {
-    if (!rootLogs || logs.length === 0) {
+    if (logs.length === 0) {
       return;
     }
 
@@ -585,16 +547,16 @@ export default function HomeScreen() {
     });
 
     logs.forEach((entry) => {
-      if (seenEntryIds.has(entry.$jazz.id)) {
+      if (seenEntryIds.has(entry.id)) {
         return;
       }
 
       const normalizedMeal = normalizeMeal(entry.meal) ?? "lunch";
-      entryIdsByMeal[normalizedMeal].push(entry.$jazz.id);
+      entryIdsByMeal[normalizedMeal].push(entry.id);
     });
 
-    const logsById = new Map(logs.map((entry) => [entry.$jazz.id, entry] as const));
-    const reordered: typeof logs = [];
+    const orderedEntries: { id: string; meal: MealKey }[] = [];
+    const logsById = new Map(logs.map((entry) => [entry.id, entry] as const));
 
     MEAL_TIMES.forEach((mealTime) => {
       entryIdsByMeal[mealTime.key].forEach((entryId) => {
@@ -603,44 +565,18 @@ export default function HomeScreen() {
           return;
         }
 
-        if (normalizeMeal(entry.meal) !== mealTime.key) {
-          entry.$jazz.set("meal", mealTime.key);
-        }
-
-        reordered.push(entry);
+        orderedEntries.push({
+          id: entry.id,
+          meal: mealTime.key,
+        });
       });
     });
 
-    if (reordered.length !== logs.length) {
+    if (orderedEntries.length !== logs.length) {
       return;
     }
 
-    const reorderedEntryIds = new Set(reordered.map((entry) => entry.$jazz.id));
-    const nextRootLogs = rootLogs.filter(
-      (entry): entry is (typeof logs)[number] => Boolean(entry?.$isLoaded),
-    );
-    let nextDayEntryIndex = 0;
-
-    for (let index = 0; index < nextRootLogs.length; index += 1) {
-      const current = nextRootLogs[index];
-      if (!current || !current.$isLoaded || !reorderedEntryIds.has(current.$jazz.id)) {
-        continue;
-      }
-
-      const nextEntry = reordered[nextDayEntryIndex];
-      if (!nextEntry) {
-        return;
-      }
-
-      nextRootLogs[index] = nextEntry;
-      nextDayEntryIndex += 1;
-    }
-
-    if (nextDayEntryIndex !== reordered.length) {
-      return;
-    }
-
-    rootLogs.$jazz.splice(0, rootLogs.length, ...nextRootLogs);
+    void reorderFoodEntriesForDate(selectedDateKey, orderedEntries);
   };
 
   const listHeader = (

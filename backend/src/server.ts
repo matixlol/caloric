@@ -1,4 +1,6 @@
-import { and, desc, eq, gte, ilike, isNotNull, lt, or } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { USER_SETTINGS_ROW_ID } from "@caloric/data-model";
+import { authenticateUserRequest } from "./auth";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "./ai-log-context";
 import { normalizeTextValue } from "./anmat-html";
 import { config } from "./config";
@@ -10,6 +12,8 @@ import {
   mfpFoodDetailResponses,
   mfpSearchResponses,
   openFoodFactsSearchResponses,
+  userFoodEntries,
+  userSettings,
 } from "./db/schema";
 import { logError, logInfo, redactSecret, summarizeText } from "./logging";
 import { fetchFoodDetail, searchNutrition } from "./mfp-client";
@@ -26,6 +30,7 @@ import {
 import { getMfpAuthHeaders } from "./mfp-session";
 import { MFP_BASE_URL } from "./mfp-session";
 import { OPEN_FOOD_FACTS_BASE_URL, searchOpenFoodFacts } from "./openfoodfacts-client";
+import { parseSyncPushBody, shouldApplyIncomingWrite } from "./sync";
 
 type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
@@ -321,6 +326,96 @@ function json(data: JsonValue, status = 200): Response {
       "Content-Type": "application/json",
     },
   });
+}
+
+async function requireAuthenticatedUser(request: Request): Promise<{ userId: string } | Response> {
+  try {
+    return await authenticateUserRequest(request);
+  } catch {
+    return json({ error: "Unauthorized" }, 401);
+  }
+}
+
+function dateFromMillis(value: number | null | undefined): Date | null {
+  if (typeof value !== "number") {
+    return null;
+  }
+
+  return new Date(value);
+}
+
+async function upsertUserFoodEntry(
+  userId: string,
+  row: ReturnType<typeof parseSyncPushBody>["foodEntries"][number],
+): Promise<boolean> {
+  const existing = await db
+    .select({ updatedAt: userFoodEntries.updatedAt })
+    .from(userFoodEntries)
+    .where(and(eq(userFoodEntries.userId, userId), eq(userFoodEntries.id, row.id)))
+    .limit(1);
+
+  if (!shouldApplyIncomingWrite(existing[0]?.updatedAt, row.updatedAt)) {
+    return false;
+  }
+
+  const nextUpdatedAt = new Date(row.updatedAt);
+  const nextDeletedAt = dateFromMillis(row.deletedAt ?? null);
+
+  await db
+    .insert(userFoodEntries)
+    .values({
+      userId,
+      id: row.id,
+      data: row.data,
+      updatedAt: nextUpdatedAt,
+      deletedAt: nextDeletedAt,
+    })
+    .onConflictDoUpdate({
+      target: [userFoodEntries.userId, userFoodEntries.id],
+      set: {
+        data: row.data,
+        updatedAt: nextUpdatedAt,
+        deletedAt: nextDeletedAt,
+      },
+      setWhere: sql`${userFoodEntries.updatedAt} <= ${nextUpdatedAt}`,
+    });
+
+  return true;
+}
+
+async function upsertUserSettingsRow(
+  userId: string,
+  row: NonNullable<ReturnType<typeof parseSyncPushBody>["settings"]>,
+): Promise<boolean> {
+  const existing = await db
+    .select({ updatedAt: userSettings.updatedAt })
+    .from(userSettings)
+    .where(eq(userSettings.userId, userId))
+    .limit(1);
+
+  if (!shouldApplyIncomingWrite(existing[0]?.updatedAt, row.updatedAt)) {
+    return false;
+  }
+
+  const nextUpdatedAt = new Date(row.updatedAt);
+
+  await db
+    .insert(userSettings)
+    .values({
+      userId,
+      data: row.data,
+      updatedAt: nextUpdatedAt,
+    })
+    .onConflictDoUpdate({
+      target: userSettings.userId,
+      set: {
+        data: row.data,
+        updatedAt: nextUpdatedAt,
+      },
+      setWhere: sql`${userSettings.updatedAt} <= ${nextUpdatedAt}`,
+    });
+
+  return true;
 }
 
 function stringifyUnknownError(error: unknown): string {
@@ -2419,18 +2514,106 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
       }
     }
 
+    if (url.pathname === "/sync/bootstrap") {
+      if (request.method !== "GET") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      const auth = await requireAuthenticatedUser(request);
+      if (auth instanceof Response) {
+        return auth;
+      }
+
+      try {
+        const [foodEntryRows, settingsRows] = await Promise.all([
+          db
+            .select({
+              id: userFoodEntries.id,
+              data: userFoodEntries.data,
+              updatedAt: userFoodEntries.updatedAt,
+            })
+            .from(userFoodEntries)
+            .where(and(eq(userFoodEntries.userId, auth.userId), isNull(userFoodEntries.deletedAt)))
+            .orderBy(userFoodEntries.updatedAt),
+          db
+            .select({
+              data: userSettings.data,
+              updatedAt: userSettings.updatedAt,
+            })
+            .from(userSettings)
+            .where(eq(userSettings.userId, auth.userId))
+            .limit(1),
+        ]);
+
+        return json({
+          foodEntries: foodEntryRows.map((row) => ({
+            id: row.id,
+            data: row.data,
+            updatedAt: row.updatedAt.getTime(),
+          })),
+          settings: settingsRows[0]
+            ? {
+                id: USER_SETTINGS_ROW_ID,
+                data: settingsRows[0].data,
+                updatedAt: settingsRows[0].updatedAt.getTime(),
+              }
+            : null,
+        });
+      } catch (error) {
+        return reportUnknownError("sync_bootstrap_failed", error);
+      }
+    }
+
+    if (url.pathname === "/sync/push") {
+      if (request.method !== "POST") {
+        return json({ error: "Method not allowed" }, 405);
+      }
+
+      const auth = await requireAuthenticatedUser(request);
+      if (auth instanceof Response) {
+        return auth;
+      }
+
+      try {
+        const body = parseSyncPushBody(await parseJsonBody(request));
+        const acceptedFoodEntryIds: string[] = [];
+
+        for (const row of body.foodEntries) {
+          if (await upsertUserFoodEntry(auth.userId, row)) {
+            acceptedFoodEntryIds.push(row.id);
+          }
+        }
+
+        let acceptedSettings = false;
+        if (body.settings) {
+          acceptedSettings = await upsertUserSettingsRow(auth.userId, body.settings);
+        }
+
+        return json({
+          acceptedFoodEntryIds,
+          acceptedSettings,
+        });
+      } catch (error) {
+        if (error instanceof Error && error.name === "ZodError") {
+          return json({ error: "Invalid sync payload" }, 400);
+        }
+
+        return reportUnknownError("sync_push_failed", error);
+      }
+    }
+
     if (url.pathname === "/ai/session") {
       if (request.method !== "POST") {
         return json({ error: "Method not allowed" }, 405);
       }
 
+      const auth = await requireAuthenticatedUser(request);
+      if (auth instanceof Response) {
+        return auth;
+      }
+
       try {
         const body = await parseJsonBody(request);
-        const userId = asString(body?.userId)?.trim() ?? "";
-
-        if (!userId) {
-          return json({ error: "userId is required" }, 400);
-        }
 
         pruneOldAiSessions();
         const recentLogHints = parseRecentLogHints(body?.recentLogs);
@@ -2445,7 +2628,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
         const now = Date.now();
         aiSessions.set(sessionId, {
           id: sessionId,
-          userId,
+          userId: auth.userId,
           conversation: [
             {
               role: "system",
@@ -2480,8 +2663,12 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
         return json({ error: "Method not allowed" }, 405);
       }
 
+      const auth = await requireAuthenticatedUser(request);
+      if (auth instanceof Response) {
+        return auth;
+      }
+
       let sessionId = "";
-      let userId = "";
       let action: Record<string, unknown> | null = null;
       let audioFile: File | null = null;
 
@@ -2496,7 +2683,6 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
         }
 
         sessionId = asString(formData.get("sessionId"))?.trim() ?? "";
-        userId = asString(formData.get("userId"))?.trim() ?? "";
 
         const actionType = asString(formData.get("actionType"))?.trim() ?? "";
         if (!actionType) {
@@ -2529,7 +2715,6 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
       } else {
         const body = await parseJsonBody(request);
         sessionId = asString(body?.sessionId)?.trim() ?? "";
-        userId = asString(body?.userId)?.trim() ?? "";
         action = asRecord(body?.action);
       }
 
@@ -2539,8 +2724,8 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
 
       const actionType = asString(action.type)?.trim() ?? "";
 
-      if (!sessionId || !userId) {
-        return json({ error: "sessionId and userId are required" }, 400);
+      if (!sessionId) {
+        return json({ error: "sessionId is required" }, 400);
       }
 
       if (!actionType) {
@@ -2548,7 +2733,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
       }
 
       pruneOldAiSessions();
-      const session = requireSessionOwner(sessionId, userId);
+      const session = requireSessionOwner(sessionId, auth.userId);
       if (!session) {
         return json({ error: "Session not found for this user" }, 403);
       }

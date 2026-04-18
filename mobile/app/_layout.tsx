@@ -1,15 +1,13 @@
-import { ClerkProvider, useClerk } from "@clerk/clerk-expo";
+import { ClerkProvider } from "@clerk/clerk-expo";
 import { tokenCache } from "@clerk/clerk-expo/token-cache";
 import { Stack } from "expo-router";
-import { JazzExpoProviderWithClerk } from "jazz-tools/expo";
-import { type ReactNode } from "react";
 import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
-import { CaloricAccount } from "../src/jazz/schema";
-import * as Sentry from '@sentry/react-native';
+import { DataProvider } from "../src/data/DataProvider";
+import * as Sentry from "@sentry/react-native";
 
 Sentry.init({
   dsn: 'https://b717a9ae29012fc29268ccc8b531ea67@o4510397347987456.ingest.us.sentry.io/4511171255009280',
@@ -25,24 +23,9 @@ Sentry.init({
   // spotlight: __DEV__,
 });
 
-const jazzApiKey = process.env.EXPO_PUBLIC_JAZZ_API_KEY?.trim() || "you@example.com";
 const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
-
-function JazzProvider({ children }: { children: ReactNode }) {
-  const clerk = useClerk();
-
-  return (
-    <JazzExpoProviderWithClerk
-      clerk={clerk}
-      sync={{ peer: `wss://cloud.jazz.tools/?key=${encodeURIComponent(jazzApiKey)}`, when: "always" }}
-      AccountSchema={CaloricAccount}
-    >
-      {children}
-    </JazzExpoProviderWithClerk>
-  );
-}
 
 function MissingClerkKeyScreen() {
   return (
@@ -77,12 +60,12 @@ export default Sentry.wrap(function RootLayout() {
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
       <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
-        <JazzProvider>
+        <DataProvider>
           <ClerkAuthGate>
             <AutoBackupCoordinator />
             <AppNavigator />
           </ClerkAuthGate>
-        </JazzProvider>
+        </DataProvider>
       </ClerkProvider>
     </GestureHandlerRootView>
   );

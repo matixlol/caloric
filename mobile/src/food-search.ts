@@ -309,7 +309,7 @@ export async function searchFoods(
 ): Promise<SearchFood[]> {
   const maxItems = options.maxItems ?? SEARCH_MAX_ITEMS_DEFAULT;
   const foodsBySource = createEmptyFoodsBySource();
-  const tasks: Array<Promise<SearchFood[]>> = [
+  const tasks: Promise<SearchFood[]>[] = [
     fetchBaseSearch(query, options.signal, maxItems, "anmat"),
     fetchBaseSearch(query, options.signal, maxItems, "openfoodfacts"),
     fetchBaseSearch(query, options.signal, maxItems, "mfp"),

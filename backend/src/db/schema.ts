@@ -1,4 +1,5 @@
-import { bigint, boolean, customType, index, integer, jsonb, pgTable, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
+import type { FoodEntry, UserSettings } from "@caloric/data-model";
+import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array | Buffer }>({
   dataType() {
@@ -171,4 +172,28 @@ export const anmatProductDerivedData = pgTable(
     eanStatusIdx: index("anmat_product_derived_data_ean_status_idx").on(table.eanStatus),
     eanIdx: index("anmat_product_derived_data_ean_idx").on(table.ean),
   }),
+);
+
+export const userFoodEntries = pgTable(
+  "user_food_entries",
+  {
+    userId: text("user_id").notNull(),
+    id: text("id").notNull(),
+    data: jsonb("data").$type<FoodEntry>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+    deletedAt: timestamp("deleted_at", { withTimezone: true }),
+  },
+  (table) => ({
+    pk: primaryKey({ columns: [table.userId, table.id], name: "user_food_entries_pk" }),
+    userUpdatedAtIdx: index("user_food_entries_user_updated_at_idx").on(table.userId, table.updatedAt),
+  }),
+);
+
+export const userSettings = pgTable(
+  "user_settings",
+  {
+    userId: text("user_id").primaryKey(),
+    data: jsonb("data").$type<UserSettings>().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
+  },
 );

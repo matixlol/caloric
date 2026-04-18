@@ -8,7 +8,6 @@ import {
   setAudioModeAsync,
   useAudioRecorder,
 } from "expo-audio";
-import { useAccount } from "jazz-tools/expo";
 import {
   type ColorValue,
   Keyboard,
@@ -33,8 +32,8 @@ import Animated, {
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
 import { localDateKeyFromTimestamp } from "../../src/date";
+import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../../src/data/DataProvider";
 import { type SearchFood as SharedSearchFood } from "../../src/food-search";
-import { CaloricAccount } from "../../src/jazz/schema";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel } from "../../src/portion";
 import { type AppTheme, useThemedStyles } from "../../src/theme/useAppTheme";
@@ -473,10 +472,10 @@ function TypingIndicator({ color }: { color: ColorValue }) {
 export default function AILogScreen() {
   const { palette, markdownTheme, isDark, styles } = useThemedStyles(createStyles);
   const insets = useSafeAreaInsets();
-  const { userId } = useAuth();
-  const me = useAccount(CaloricAccount, {
-    resolve: { root: { logs: true } },
-  });
+  const { userId, getToken } = useAuth();
+  const isDataReady = useDataStoreReady();
+  const { createFoodEntry } = useDataStoreActions();
+  const { data: recentEntries, isLoading: isLoadingEntries } = useAllFoodEntries();
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<UIMessage[]>([]);
@@ -518,18 +517,10 @@ export default function AILogScreen() {
   }, []);
 
   const appendApprovedFoodToLog = (suggestion: ResolvedApprovalSuggestion) => {
-    if (!me.$isLoaded) {
-      return;
-    }
-
-    if (!me.root.logs) {
-      me.root.$jazz.set("logs", []);
-    }
-
     const meal = normalizeMeal(suggestion.meal) ?? "lunch";
     const createdAt = Date.now();
 
-    me.root.logs?.$jazz.push({
+    void createFoodEntry({
       meal,
       foodName: suggestion.food.name,
       brand: suggestion.food.brand,
@@ -551,9 +542,14 @@ export default function AILogScreen() {
     setErrorDetails(getErrorDetails(nextError));
   };
 
-  const ensureSessionId = async (currentUserId: string): Promise<string> => {
+  const ensureSessionId = async (): Promise<string> => {
     if (sessionIdRef.current) {
       return sessionIdRef.current;
+    }
+
+    const token = await getToken();
+    if (!token) {
+      throw new UIError("Missing authentication token. Sign in again and retry.");
     }
 
     const sessionUrl = `${BACKEND_BASE_URL}/ai/session`;
@@ -562,11 +558,11 @@ export default function AILogScreen() {
       response = await fetch(sessionUrl, {
         method: "POST",
         headers: {
+          Authorization: `Bearer ${token}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
-          userId: currentUserId,
-          recentLogs: buildRecentLogHints(me.$isLoaded ? me.root.logs : undefined),
+          recentLogs: buildRecentLogHints(recentEntries),
         }),
       });
     } catch (networkError) {
@@ -625,7 +621,6 @@ export default function AILogScreen() {
   };
 
   const requestTurn = async (
-    currentUserId: string,
     action: AgentAction,
     options?: {
       audio?: AudioUpload;
@@ -633,7 +628,11 @@ export default function AILogScreen() {
     },
     retry = true,
   ): Promise<StreamingTurnResult> => {
-    const sessionId = await ensureSessionId(currentUserId);
+    const sessionId = await ensureSessionId();
+    const token = await getToken();
+    if (!token) {
+      throw new UIError("Missing authentication token. Sign in again and retry.");
+    }
 
     const usingAudio = Boolean(options?.audio && action.type === "user-message");
     const userMessage = action.type === "user-message" ? action.message?.trim() : undefined;
@@ -642,7 +641,6 @@ export default function AILogScreen() {
       ? (() => {
           const formData = new FormData();
           formData.append("sessionId", sessionId);
-          formData.append("userId", currentUserId);
           formData.append("actionType", action.type);
           if (userMessage) {
             formData.append("message", userMessage);
@@ -661,7 +659,6 @@ export default function AILogScreen() {
         })()
       : JSON.stringify({
           sessionId,
-          userId: currentUserId,
           action,
         });
 
@@ -672,6 +669,7 @@ export default function AILogScreen() {
         method: "POST",
         headers: {
           Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`,
           ...(usingAudio
             ? {}
             : {
@@ -701,7 +699,7 @@ export default function AILogScreen() {
 
       if (response.status === 403 && retry) {
         sessionIdRef.current = null;
-        return requestTurn(currentUserId, action, options, false);
+        return requestTurn(action, options, false);
       }
 
       const backendMessage =
@@ -878,7 +876,7 @@ export default function AILogScreen() {
     try {
       setStatus("streaming");
       const streamedEventsJson = new Set<string>();
-      const result = await requestTurn(userId, action, {
+      const result = await requestTurn(action, {
         ...options,
         onEvent: (event) => {
           streamedEventsJson.add(JSON.stringify(event));
@@ -1070,10 +1068,10 @@ export default function AILogScreen() {
     });
   };
 
-  if (!me.$isLoaded) {
+  if (!isDataReady || isLoadingEntries) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading account…</Text>
+        <Text style={styles.loadingText}>Loading data…</Text>
       </View>
     );
   }

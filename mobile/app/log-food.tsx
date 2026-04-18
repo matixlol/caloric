@@ -1,7 +1,6 @@
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { useAccount } from "jazz-tools/expo";
 import {
   Platform,
   PlatformColor,
@@ -20,8 +19,8 @@ import {
   type SearchFoodSource,
   searchFoods,
 } from "../src/food-search";
+import { useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
-import { CaloricAccount } from "../src/jazz/schema";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -47,7 +46,7 @@ const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MAX_ITEMS = 20;
 type SearchProviderFilter = "all" | SearchFoodSource;
 
-const PROVIDER_FILTERS: Array<{ key: SearchProviderFilter; label: string }> = [
+const PROVIDER_FILTERS: { key: SearchProviderFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "mfp", label: "MFP" },
   { key: "openfoodfacts", label: "OFF" },
@@ -116,9 +115,8 @@ export default function LogFoodScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ meal?: string | string[]; day?: string | string[] }>();
-  const me = useAccount(CaloricAccount, {
-    resolve: { root: { logs: true } },
-  });
+  const isDataReady = useDataStoreReady();
+  const { createFoodEntry } = useDataStoreActions();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [foods, setFoods] = useState<SearchFood[]>([]);
@@ -141,7 +139,7 @@ export default function LogFoodScreen() {
   }, [query]);
 
   useEffect(() => {
-    if (!me.$isLoaded) {
+    if (!isDataReady) {
       return;
     }
 
@@ -193,12 +191,12 @@ export default function LogFoodScreen() {
     return () => {
       controller.abort();
     };
-  }, [debouncedQuery, me.$isLoaded]);
+  }, [debouncedQuery, isDataReady]);
 
-  if (!me.$isLoaded) {
+  if (!isDataReady) {
     return (
       <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading account…</Text>
+        <Text style={styles.loadingText}>Loading data…</Text>
       </View>
     );
   }
@@ -225,13 +223,9 @@ export default function LogFoodScreen() {
   const handleAddToLog = () => {
     if (!selectedFood) return;
 
-    if (!me.root.logs) {
-      me.root.$jazz.set("logs", []);
-    }
-
     const createdAt = Date.now();
 
-    me.root.logs?.$jazz.push({
+    void createFoodEntry({
       meal: selectedMeal,
       foodName: selectedFood.name,
       brand: selectedFood.brand,
