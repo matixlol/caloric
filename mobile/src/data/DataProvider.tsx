@@ -3,7 +3,12 @@ import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
 import { useAuth } from "@clerk/expo";
 import { type Meal, type UserSettings } from "@caloric/data-model";
-import { localDataStore, type FoodEntryRecord, type UserSettingsRecord } from "./store";
+import {
+  localDataStore,
+  type FoodEntryRecord,
+  type SyncStatusRecord,
+  type UserSettingsRecord,
+} from "./store";
 
 type DataContextValue = {
   store: typeof localDataStore;
@@ -11,6 +16,10 @@ type DataContextValue = {
 };
 
 const EMPTY_ENTRIES: FoodEntryRecord[] = [];
+const EMPTY_SYNC_STATUS: SyncStatusRecord = {
+  updatedAt: 0,
+  dirty: false,
+};
 
 const DataContext = createContext<DataContextValue | null>(null);
 
@@ -172,6 +181,13 @@ export function useUserSettings() {
   const query = useCallback(() => store.getUserSettings(), [store]);
 
   return useStoreQuery(query, null as UserSettingsRecord | null);
+}
+
+export function useSyncStatus() {
+  const { store } = useDataContext();
+  const query = useCallback(() => store.getSyncStatus(), [store]);
+
+  return useStoreQuery(query, EMPTY_SYNC_STATUS);
 }
 
 export function useDataStoreActions() {

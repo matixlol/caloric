@@ -15,7 +15,12 @@ import {
   View,
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
-import { useDataStoreActions, useDataStoreReady, useUserSettings } from "../../src/data/DataProvider";
+import {
+  useDataStoreActions,
+  useDataStoreReady,
+  useSyncStatus,
+  useUserSettings,
+} from "../../src/data/DataProvider";
 import { macroColors } from "../../src/theme/macroColors";
 import { useAppTheme } from "../../src/theme/useAppTheme";
 
@@ -203,6 +208,7 @@ export default function SettingsScreen() {
   const isDataReady = useDataStoreReady();
   const { upsertUserSettings } = useDataStoreActions();
   const { data: syncedSettings, isLoading: isLoadingSettings } = useUserSettings();
+  const { data: syncStatus, isLoading: isLoadingSyncStatus } = useSyncStatus();
   const {
     currentlyRunning,
     isChecking,
@@ -226,7 +232,6 @@ export default function SettingsScreen() {
   const [updatesActionError, setUpdatesActionError] = useState<string | null>(null);
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
-
   const macroTrackWidthRef = useRef(macroTrackWidth);
   const macroSplitARef = useRef(macroSplitA);
   const macroSplitBRef = useRef(macroSplitB);
@@ -336,7 +341,7 @@ export default function SettingsScreen() {
     }),
   ).current;
 
-  if (!isDataReady || isLoadingSettings || !syncedSettings) {
+  if (!isDataReady || isLoadingSettings || isLoadingSyncStatus || !syncedSettings) {
     return (
       <View style={styles.loadingContainer}>
         <Text style={styles.loadingText}>Loading settings…</Text>
@@ -394,9 +399,9 @@ export default function SettingsScreen() {
     : isUpdateAvailable || isDownloading
       ? "Download Update"
       : "Force Check";
-  const lastSyncedValue = syncedSettings.dirty
+  const lastSyncedValue = syncStatus.dirty
     ? "Pending"
-    : formatRelativeTimestamp(syncedSettings.updatedAt);
+    : formatRelativeTimestamp(syncStatus.updatedAt);
 
   const handleSave = () => {
     setSaveError(null);
@@ -498,13 +503,13 @@ export default function SettingsScreen() {
           <View
             style={[
               styles.syncBadge,
-              syncedSettings.dirty ? styles.syncBadgePending : styles.syncBadgeReady,
+              syncStatus.dirty ? styles.syncBadgePending : styles.syncBadgeReady,
             ]}
           >
             <View
               style={[
                 styles.syncBadgeDot,
-                syncedSettings.dirty ? styles.syncBadgeDotPending : styles.syncBadgeDotReady,
+                syncStatus.dirty ? styles.syncBadgeDotPending : styles.syncBadgeDotReady,
               ]}
             />
             <Text style={styles.syncBadgeLabel}>Last synced</Text>

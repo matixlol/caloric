@@ -32,6 +32,11 @@ export type UserSettingsRecord = UserSettings & {
   dirty: boolean;
 };
 
+export type SyncStatusRecord = {
+  updatedAt: number;
+  dirty: boolean;
+};
+
 type SqlRow = Record<string, Scalar>;
 type TokenProvider = () => Promise<string | null>;
 
@@ -272,6 +277,36 @@ export class LocalDataStore {
     }
 
     return parseUserSettingsRow(result.rows[0] as SqlRow);
+  }
+
+  async getSyncStatus(): Promise<SyncStatusRecord> {
+    await this.initialize();
+    const [foodEntriesResult, settingsResult] = await Promise.all([
+      this.getDb().execute(
+        `
+          SELECT MAX(updated_at) AS updated_at, MAX(dirty) AS dirty
+          FROM food_entries
+        `,
+      ),
+      this.getDb().execute(
+        `
+          SELECT MAX(updated_at) AS updated_at, MAX(dirty) AS dirty
+          FROM user_settings
+        `,
+      ),
+    ]);
+
+    const foodEntriesRow = (foodEntriesResult.rows[0] ?? {}) as SqlRow;
+    const settingsRow = (settingsResult.rows[0] ?? {}) as SqlRow;
+    const foodEntriesUpdatedAt = typeof foodEntriesRow.updated_at === "number" ? foodEntriesRow.updated_at : 0;
+    const settingsUpdatedAt = typeof settingsRow.updated_at === "number" ? settingsRow.updated_at : 0;
+    const hasDirtyFoodEntries = foodEntriesRow.dirty === 1;
+    const hasDirtySettings = settingsRow.dirty === 1;
+
+    return {
+      updatedAt: Math.max(foodEntriesUpdatedAt, settingsUpdatedAt),
+      dirty: hasDirtyFoodEntries || hasDirtySettings,
+    };
   }
 
   async createFoodEntry(
