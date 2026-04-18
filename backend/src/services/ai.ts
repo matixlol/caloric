@@ -12,30 +12,23 @@ import { isObjectRecord, jsonResponse, requireAuthenticatedUser } from "../http"
 import { createAiMessageId, createAiSessionId } from "../id";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
+import {
+  createAiSession,
+  loadAiSession,
+  mealValues,
+  saveAiSession,
+  type AiSessionState,
+  type ApprovalOutput,
+  type Meal,
+  type ResolvedApprovalSuggestion,
+} from "./ai-store";
 import { searchUnifiedFoods, type SearchResultFood } from "./search";
 
-const MealSchema = z.enum(["breakfast", "lunch", "dinner", "snacks"]);
-
-type Meal = z.infer<typeof MealSchema>;
+const MealSchema = z.enum(mealValues);
 type SessionToolCall = {
   toolCallId: string;
   toolName: keyof typeof aiSdkTools;
   input: unknown;
-};
-
-type ApprovalOutput = {
-  approved: boolean;
-  reason?: string;
-};
-
-type ResolvedApprovalSuggestion = {
-  suggestionId: string;
-  resultId: string;
-  meal: Meal;
-  portion: number;
-  reason: string;
-  food: SearchResultFood;
-  output?: ApprovalOutput;
 };
 
 type AgentEvent =
@@ -58,16 +51,6 @@ type AgentEvent =
     };
 
 type AgentStatus = "ready" | "awaiting-approval";
-
-type AgentSession = {
-  id: string;
-  userId: string;
-  conversation: ModelMessage[];
-  searchResultCounter: number;
-  searchResultsByLocalId: Map<string, SearchResultFood>;
-  pendingApprovals: Map<string, ResolvedApprovalSuggestion[]>;
-  updatedAt: number;
-};
 
 const SearchFoodsToolArgsSchema = z.object({
   query: z.string().trim().min(2),
@@ -146,8 +129,6 @@ const sseHeaders = {
   Connection: "keep-alive",
 } as const;
 
-const aiSessions = new Map<string, AgentSession>();
-const maxAiSessionIdleMs = 1000 * 60 * 60 * 8;
 const openrouter = createOpenRouter({
   apiKey: config.openRouterApiKey,
   compatibility: "strict",
@@ -295,25 +276,8 @@ function createOpenRouterModel(userId: string) {
         }
       : {
           sort: "throughput",
-        },
+      },
   });
-}
-
-function pruneOldAiSessions(now = Date.now()) {
-  for (const [sessionId, session] of aiSessions) {
-    if (now - session.updatedAt > maxAiSessionIdleMs) {
-      aiSessions.delete(sessionId);
-    }
-  }
-}
-
-function requireSessionOwner(sessionId: string, userId: string): AgentSession | null {
-  const session = aiSessions.get(sessionId);
-  if (!session || session.userId !== userId) {
-    return null;
-  }
-
-  return session;
 }
 
 async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaType: string }> {
@@ -377,7 +341,7 @@ function createToolResultMessage(toolCall: SessionToolCall, value: unknown): Mod
 }
 
 async function requestAiSdkTurn(
-  session: AgentSession,
+  session: AiSessionState,
   options?: {
     onAssistantDelta?: (text: string) => void;
     signal?: AbortSignal;
@@ -436,7 +400,7 @@ async function requestAiSdkTurn(
 }
 
 async function runToolCall(
-  session: AgentSession,
+  session: AiSessionState,
   toolCall: SessionToolCall,
 ): Promise<{ pauseForApproval: boolean; output: unknown; events: AgentEvent[] }> {
   if (toolCall.toolName === "searchFoods") {
@@ -462,7 +426,7 @@ async function runToolCall(
         resultId,
       };
 
-      session.searchResultsByLocalId.set(resultId, mapped);
+      session.searchResultsByLocalId[resultId] = mapped;
       return mapped;
     });
 
@@ -497,7 +461,7 @@ async function runToolCall(
     const seenSuggestions = new Set<string>();
 
     for (const suggestion of parsedArgs.data.suggestions) {
-      const food = session.searchResultsByLocalId.get(suggestion.resultId);
+      const food = session.searchResultsByLocalId[suggestion.resultId];
       if (!food) {
         unknownResultIds.push(suggestion.resultId);
         continue;
@@ -539,7 +503,7 @@ async function runToolCall(
       };
     }
 
-    session.pendingApprovals.set(toolCall.toolCallId, resolvedSuggestions);
+    session.pendingApprovals[toolCall.toolCallId] = resolvedSuggestions;
 
     return {
       pauseForApproval: true,
@@ -563,19 +527,8 @@ async function runToolCall(
   };
 }
 
-async function runManualAssistantLoop(
-  session: AgentSession,
-  requestTurn: (
-    session: AgentSession,
-    options?: {
-      onAssistantDelta?: (text: string) => void;
-      signal?: AbortSignal;
-    },
-  ) => Promise<{
-    assistantText: string;
-    toolCalls: SessionToolCall[];
-    responseMessages: ModelMessage[];
-  }>,
+async function runAssistantLoop(
+  session: AiSessionState,
   options?: {
     onEvent?: (event: AgentEvent) => void;
     signal?: AbortSignal;
@@ -589,7 +542,7 @@ async function runManualAssistantLoop(
   };
 
   for (let step = 0; step < 8; step += 1) {
-    const turn = await requestTurn(session, {
+    const turn = await requestAiSdkTurn(session, {
       signal: options?.signal,
       onAssistantDelta: (text) => {
         if (!text) {
@@ -640,16 +593,6 @@ async function runManualAssistantLoop(
     status: "ready",
     events,
   };
-}
-
-async function runAssistantLoop(
-  session: AgentSession,
-  options?: {
-    onEvent?: (event: AgentEvent) => void;
-    signal?: AbortSignal;
-  },
-): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
-  return runManualAssistantLoop(session, requestAiSdkTurn, options);
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -760,8 +703,6 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
 
   try {
     const body = await parseJsonBody(request);
-
-    pruneOldAiSessions();
     const recentLogHints = parseRecentLogHints(body?.recentLogs);
     const recentLogContextPrompt = buildRecentLogContextPrompt(recentLogHints);
 
@@ -771,8 +712,7 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
     });
 
     const sessionId = createAiSessionId();
-    const now = Date.now();
-    aiSessions.set(sessionId, {
+    await createAiSession({
       id: sessionId,
       userId: auth.userId,
       conversation: [
@@ -790,9 +730,8 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
           : []),
       ],
       searchResultCounter: 1,
-      searchResultsByLocalId: new Map<string, SearchResultFood>(),
-      pendingApprovals: new Map<string, ResolvedApprovalSuggestion[]>(),
-      updatedAt: now,
+      searchResultsByLocalId: {},
+      pendingApprovals: {},
     });
 
     return jsonResponse({
@@ -815,8 +754,7 @@ export async function handleAiTurnRequest(request: Request): Promise<Response> {
     return parsed;
   }
 
-  pruneOldAiSessions();
-  const session = requireSessionOwner(parsed.sessionId, auth.userId);
+  const session = await loadAiSession(parsed.sessionId, auth.userId);
   if (!session) {
     return jsonResponse({ error: "Session not found for this user" }, 403);
   }
@@ -826,10 +764,8 @@ export async function handleAiTurnRequest(request: Request): Promise<Response> {
     "app.ai.session_id": parsed.sessionId,
     "app.ai.action_type": parsed.action.type,
     "app.ai.has_audio": Boolean(parsed.audioFile),
-    "app.ai.pending_approval_count": session.pendingApprovals.size,
+    "app.ai.pending_approval_count": Object.keys(session.pendingApprovals).length,
   });
-
-  session.updatedAt = Date.now();
 
   try {
     if (parsed.action.type === "user-message") {
@@ -844,7 +780,7 @@ export async function handleAiTurnRequest(request: Request): Promise<Response> {
 
 async function handleUserMessageAction(
   request: Request,
-  session: AgentSession,
+  session: AiSessionState,
   action: UserMessageAction,
   audioFile: File | null,
 ): Promise<Response> {
@@ -854,7 +790,7 @@ async function handleUserMessageAction(
     return jsonResponse({ error: "action.message or audio is required" }, 400);
   }
 
-  if (session.pendingApprovals.size > 0) {
+  if (Object.keys(session.pendingApprovals).length > 0) {
     return jsonResponse({ error: "Resolve pending approvals before sending a new message." }, 409);
   }
 
@@ -891,6 +827,8 @@ async function handleUserMessageAction(
     });
   }
 
+  await saveAiSession(session);
+
   return createSseResponse(async (writer) => {
     if (message) {
       writer.writeResolvedUserMessage(message);
@@ -901,19 +839,19 @@ async function handleUserMessageAction(
       signal: request.signal,
     });
 
-    session.updatedAt = Date.now();
+    await saveAiSession(session);
     writer.writeStatus(loopResult.status);
   }, "ai_turn_failed");
 }
 
-function handleApprovalAction(request: Request, session: AgentSession, action: ApprovalAction): Response {
+async function handleApprovalAction(request: Request, session: AiSessionState, action: ApprovalAction): Promise<Response> {
   Sentry.getActiveSpan()?.setAttributes({
     "app.ai.approval.tool_call_id": action.toolCallId,
     "app.ai.approval.suggestion_id": action.suggestionId,
     "app.ai.approval.approved": action.approved,
   });
 
-  const pendingSuggestions = session.pendingApprovals.get(action.toolCallId);
+  const pendingSuggestions = session.pendingApprovals[action.toolCallId];
   if (!pendingSuggestions) {
     return jsonResponse({ error: "No pending approval request for tool call." }, 409);
   }
@@ -945,15 +883,15 @@ function handleApprovalAction(request: Request, session: AgentSession, action: A
   );
 
   if (!nextSuggestions.every((suggestion) => Boolean(suggestion.output))) {
-    session.pendingApprovals.set(action.toolCallId, nextSuggestions);
-    session.updatedAt = Date.now();
+    session.pendingApprovals[action.toolCallId] = nextSuggestions;
+    await saveAiSession(session);
     return jsonResponse({
       status: "awaiting-approval",
       events: [],
     });
   }
 
-  session.pendingApprovals.delete(action.toolCallId);
+  delete session.pendingApprovals[action.toolCallId];
   const toolCall = buildToolCallRegistry(session.conversation).get(action.toolCallId);
   if (!toolCall) {
     return jsonResponse({ error: "Tool call not found." }, 409);
@@ -972,13 +910,15 @@ function handleApprovalAction(request: Request, session: AgentSession, action: A
     }),
   );
 
+  await saveAiSession(session);
+
   return createSseResponse(async (writer) => {
     const loopResult = await runAssistantLoop(session, {
       onEvent: writer.writeEvent,
       signal: request.signal,
     });
 
-    session.updatedAt = Date.now();
+    await saveAiSession(session);
     writer.writeStatus(loopResult.status);
   }, "ai_turn_failed");
 }

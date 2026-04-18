@@ -197,3 +197,20 @@ export const userSettings = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(),
   },
 );
+
+export const aiSessions = pgTable(
+  "ai_sessions",
+  {
+    id: text("id").primaryKey(),
+    userId: text("user_id").notNull(),
+    conversation: jsonb("conversation").notNull(),
+    searchResultCounter: integer("search_result_counter").notNull().default(1),
+    searchResultsByLocalId: jsonb("search_results_by_local_id").notNull(),
+    pendingApprovals: jsonb("pending_approvals").notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    userUpdatedAtIdx: index("ai_sessions_user_updated_at_idx").on(table.userId, table.updatedAt),
+  }),
+);
