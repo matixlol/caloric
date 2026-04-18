@@ -1,7 +1,7 @@
 import { httpInstrumentationMiddleware } from "@hono/otel";
 import { Hono } from "hono";
 import { config } from "./config";
-import { initSentry, SENTRY_ENABLE_LOGS, SENTRY_SERVICE_NAME, SENTRY_TRACES_SAMPLE_RATE, Sentry } from "./lib/sentry";
+import { SENTRY_ENABLE_LOGS, SENTRY_SERVICE_NAME, SENTRY_TRACES_SAMPLE_RATE, Sentry } from "./lib/sentry";
 import { logInfo, redactSecret } from "./logging";
 import { MFP_BASE_URL } from "./providers/myfitnesspal/session";
 import { aiRoutes } from "./routes/ai";
@@ -9,8 +9,6 @@ import { healthRoutes } from "./routes/health";
 import { myFitnessPalRoutes } from "./routes/myfitnesspal";
 import { searchRoutes } from "./routes/search";
 import { syncRoutes } from "./routes/sync";
-
-initSentry();
 
 export const app = new Hono();
 
@@ -23,8 +21,6 @@ app.use(
   }),
 );
 
-Sentry.setupHonoErrorHandler(app);
-
 app.route("/", healthRoutes);
 app.route("/ai", aiRoutes);
 app.route("/mfp", myFitnessPalRoutes);
@@ -33,7 +29,16 @@ app.route("/sync", syncRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
-app.onError((_, c) => c.json({ error: "Internal server error" }, 500));
+app.onError((error, c) => {
+  Sentry.captureException(error, {
+    mechanism: {
+      type: "auto.middleware.hono",
+      handled: false,
+    },
+  });
+
+  return c.json({ error: "Internal server error" }, 500);
+});
 
 export async function handleHttpRequest(request: Request): Promise<Response> {
   return app.fetch(request);

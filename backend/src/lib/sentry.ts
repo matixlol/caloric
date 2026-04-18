@@ -20,7 +20,7 @@ export function initSentry(): void {
     enabled: true,
     enableLogs: SENTRY_ENABLE_LOGS,
     tracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
-    integrations: [Sentry.honoIntegration()],
+    integrations: [Sentry.bunServerIntegration()],
     initialScope: {
       tags: {
         service: SENTRY_SERVICE_NAME,
