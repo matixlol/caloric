@@ -1,9 +1,9 @@
 import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
-import { USER_SETTINGS_ROW_ID } from "@caloric/data-model";
 import { authenticateUserRequest } from "./auth";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "./ai-log-context";
 import { normalizeTextValue } from "./anmat-html";
 import { config } from "./config";
+import { USER_SETTINGS_ROW_ID } from "./data-model";
 import { db } from "./db";
 import {
   anmatLiveSearchRequests,

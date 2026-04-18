@@ -14,7 +14,6 @@
     "anmat:import-product-derived": "bun src/import-anmat-product-derived.ts"
   },
   "dependencies": {
-    "@caloric/data-model": "workspace:*",
     "@clerk/backend": "^2.14.20",
     "@foxglove/wasm-zstd": "^1.0.1",
     "@sentry/bun": "^10.47.0",
