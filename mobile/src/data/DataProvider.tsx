@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useState, useSyncExternalStore } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
 import { useAuth } from "@clerk/expo";
@@ -26,6 +26,7 @@ const DataContext = createContext<DataContextValue | null>(null);
 export function DataProvider({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, userId, getToken } = useAuth();
   const [ready, setReady] = useState(false);
+  const getTokenForStore = useEffectEvent(async () => getToken());
 
   useEffect(() => {
     let cancelled = false;
@@ -54,7 +55,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     void (async () => {
-      await localDataStore.activateUser(userId, async () => getToken());
+      await localDataStore.activateUser(userId, async () => getTokenForStore());
       if (cancelled) {
         return;
       }
@@ -67,7 +68,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [getToken, isLoaded, isSignedIn, userId]);
+  }, [isLoaded, isSignedIn, userId]);
 
   useEffect(() => {
     if (!ready) {

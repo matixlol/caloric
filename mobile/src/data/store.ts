@@ -96,6 +96,7 @@ async function fetchJson<T>(response: Response): Promise<T | null> {
 export class LocalDataStore {
   private db: DB | null = null;
   private initializePromise: Promise<void> | null = null;
+  private bootstrapPromise: Promise<void> | null = null;
   private revision = 0;
   private listeners = new Set<() => void>();
   private activeUserId: string | null = null;
@@ -169,6 +170,7 @@ export class LocalDataStore {
 
   async activateUser(userId: string, tokenProvider: TokenProvider): Promise<void> {
     await this.initialize();
+    this.bootstrapPromise = null;
     this.activeUserId = userId;
     this.tokenProvider = tokenProvider;
 
@@ -190,6 +192,7 @@ export class LocalDataStore {
   }
 
   deactivateUser(): void {
+    this.bootstrapPromise = null;
     this.activeUserId = null;
     this.tokenProvider = null;
     if (this.syncTimer) {
@@ -499,98 +502,113 @@ export class LocalDataStore {
 
   async bootstrapFromBackend(): Promise<void> {
     await this.initialize();
-    if (!this.activeUserId || !this.tokenProvider) {
-      return;
+    if (this.bootstrapPromise) {
+      return this.bootstrapPromise;
     }
 
-    const token = await this.tokenProvider();
-    if (!token) {
-      return;
-    }
+    this.bootstrapPromise = (async () => {
+      const activeUserId = this.activeUserId;
+      const tokenProvider = this.tokenProvider;
 
-    let response: Response;
-    try {
-      response = await fetch(`${BACKEND_BASE_URL}/sync/bootstrap`, {
-        method: "GET",
-        headers: {
-          Authorization: `Bearer ${token}`,
-        },
+      if (!activeUserId || !tokenProvider) {
+        return;
+      }
+
+      const token = await tokenProvider();
+      if (!token || this.activeUserId !== activeUserId || this.tokenProvider !== tokenProvider) {
+        return;
+      }
+
+      let response: Response;
+      try {
+        response = await fetch(`${BACKEND_BASE_URL}/sync/bootstrap`, {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${token}`,
+          },
+        });
+      } catch {
+        return;
+      }
+
+      if (!response.ok || this.activeUserId !== activeUserId || this.tokenProvider !== tokenProvider) {
+        return;
+      }
+
+      const payload = await fetchJson<{
+        foodEntries?: {
+          id: string;
+          data: FoodEntry;
+          updatedAt: number;
+        }[];
+        settings?: {
+          id: typeof USER_SETTINGS_ROW_ID;
+          data: UserSettings;
+          updatedAt: number;
+        } | null;
+      }>(response);
+
+      if (!payload || this.activeUserId !== activeUserId || this.tokenProvider !== tokenProvider) {
+        return;
+      }
+
+      const foodEntries = payload.foodEntries ?? [];
+      const currentFoodEntriesById = await this.getFoodEntryRowsByIds(foodEntries.map((row) => row.id));
+      const currentSettings = payload.settings ? await this.getUserSettingsRow() : null;
+      let changed = false;
+
+      await this.withTransaction(async (tx) => {
+        for (const row of foodEntries) {
+          const current = currentFoodEntriesById.get(row.id);
+          if (!current || row.updatedAt >= current.updatedAt) {
+            await tx.execute(
+              `
+                INSERT INTO food_entries (id, payload_json, updated_at, deleted_at, dirty)
+                VALUES (?, ?, ?, NULL, 0)
+                ON CONFLICT(id) DO UPDATE SET
+                  payload_json = excluded.payload_json,
+                  updated_at = excluded.updated_at,
+                  deleted_at = NULL,
+                  dirty = 0
+                WHERE food_entries.updated_at <= excluded.updated_at
+              `,
+              [row.id, JSON.stringify(FoodEntrySchema.parse(row.data)), row.updatedAt],
+            );
+            changed = true;
+          }
+        }
+
+        if (payload.settings) {
+          const nextSettings = UserSettingsSchema.parse(payload.settings.data);
+
+          if (!currentSettings || payload.settings.updatedAt >= currentSettings.updatedAt) {
+            await tx.execute(
+              `
+                INSERT INTO user_settings (id, payload_json, updated_at, dirty)
+                VALUES (?, ?, ?, 0)
+                ON CONFLICT(id) DO UPDATE SET
+                  payload_json = excluded.payload_json,
+                  updated_at = excluded.updated_at,
+                  dirty = 0
+                WHERE user_settings.updated_at <= excluded.updated_at
+              `,
+              [USER_SETTINGS_ROW_ID, JSON.stringify(nextSettings), payload.settings.updatedAt],
+            );
+            changed = true;
+          }
+        } else {
+          await this.ensureDefaultSettingsRow(tx);
+        }
       });
-    } catch {
-      return;
-    }
 
-    if (!response.ok) {
-      return;
-    }
-
-    const payload = await fetchJson<{
-      foodEntries?: {
-        id: string;
-        data: FoodEntry;
-        updatedAt: number;
-      }[];
-      settings?: {
-        id: typeof USER_SETTINGS_ROW_ID;
-        data: UserSettings;
-        updatedAt: number;
-      } | null;
-    }>(response);
-
-    if (!payload) {
-      return;
-    }
-
-    let changed = false;
-
-    await this.withTransaction(async (tx) => {
-      for (const row of payload.foodEntries ?? []) {
-        const current = await this.getFoodEntryRowById(row.id);
-        if (!current || row.updatedAt >= current.updatedAt) {
-          await tx.execute(
-            `
-              INSERT INTO food_entries (id, payload_json, updated_at, deleted_at, dirty)
-              VALUES (?, ?, ?, NULL, 0)
-              ON CONFLICT(id) DO UPDATE SET
-                payload_json = excluded.payload_json,
-                updated_at = excluded.updated_at,
-                deleted_at = NULL,
-                dirty = 0
-              WHERE food_entries.updated_at <= excluded.updated_at
-            `,
-            [row.id, JSON.stringify(FoodEntrySchema.parse(row.data)), row.updatedAt],
-          );
-          changed = true;
-        }
+      if (changed) {
+        this.bumpRevision();
       }
-
-      if (payload.settings) {
-        const nextSettings = UserSettingsSchema.parse(payload.settings.data);
-        const current = await this.getUserSettingsRow();
-
-        if (!current || payload.settings.updatedAt >= current.updatedAt) {
-          await tx.execute(
-            `
-              INSERT INTO user_settings (id, payload_json, updated_at, dirty)
-              VALUES (?, ?, ?, 0)
-              ON CONFLICT(id) DO UPDATE SET
-                payload_json = excluded.payload_json,
-                updated_at = excluded.updated_at,
-                dirty = 0
-              WHERE user_settings.updated_at <= excluded.updated_at
-            `,
-            [USER_SETTINGS_ROW_ID, JSON.stringify(nextSettings), payload.settings.updatedAt],
-          );
-          changed = true;
-        }
-      } else {
-        await this.ensureDefaultSettingsRow(tx);
-      }
+    })().finally(() => {
+      this.bootstrapPromise = null;
     });
 
-    if (changed) {
-      this.bumpRevision();
-    }
+    return this.bootstrapPromise;
   }
 
   async syncDirtyRows(): Promise<void> {
@@ -776,6 +794,31 @@ export class LocalDataStore {
     );
 
     return result.rows[0] ? parseFoodEntryRow(result.rows[0] as SqlRow) : null;
+  }
+
+  private async getFoodEntryRowsByIds(ids: string[]): Promise<Map<string, FoodEntryRecord>> {
+    await this.initialize();
+    if (ids.length === 0) {
+      return new Map();
+    }
+
+    const uniqueIds = [...new Set(ids)];
+    const placeholders = uniqueIds.map(() => "?").join(", ");
+    const result = await this.getDb().execute(
+      `
+        SELECT id, payload_json, updated_at, deleted_at, dirty
+        FROM food_entries
+        WHERE id IN (${placeholders})
+      `,
+      uniqueIds,
+    );
+
+    return new Map(
+      result.rows.map((row) => {
+        const parsed = parseFoodEntryRow(row as SqlRow);
+        return [parsed.id, parsed] as const;
+      }),
+    );
   }
 
   private async getDirtyFoodEntryRows(): Promise<FoodEntryRecord[]> {
