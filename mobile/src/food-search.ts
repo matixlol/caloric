@@ -1,16 +1,16 @@
 const SEARCH_MAX_ITEMS_DEFAULT = 20;
-const SEARCH_SOURCE_ORDER: SearchFoodSource[] = ["anmat", "anmatlive", "openfoodfacts", "mfp"];
+const SEARCH_SOURCE_ORDER: SearchFoodSource[] = ["anmat", "openfoodfacts", "mfp"];
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
   "https://backend.caloric.mati.lol";
 
-export type SearchFoodSource = "mfp" | "anmat" | "anmatlive" | "openfoodfacts";
+export type SearchFoodSource = "mfp" | "anmat" | "openfoodfacts";
 
 export type SearchFood = {
   id: string;
   canonicalKey: string;
   source: SearchFoodSource;
-  sourceLabel: "MFP" | "ANMAT" | "ANMAT Live" | "OFF";
+  sourceLabel: "MFP" | "ANMAT" | "OFF";
   name: string;
   brand?: string;
   serving?: string;
@@ -45,7 +45,6 @@ export type SearchFoodsProgress = {
 function createEmptyFoodsBySource(): SearchFoodsBySource {
   return {
     anmat: [],
-    anmatlive: [],
     openfoodfacts: [],
     mfp: [],
   };
@@ -188,7 +187,7 @@ async function fetchBaseSearch(
   query: string,
   signal: AbortSignal | undefined,
   maxItems: number,
-  source?: Exclude<SearchFoodSource, "anmatlive">,
+  source?: SearchFoodSource,
 ): Promise<SearchFood[]> {
   const url = new URL("/search", `${BACKEND_BASE_URL}/`);
   url.searchParams.set("query", query);
@@ -216,11 +215,11 @@ async function fetchBaseSearch(
   return mapFoods(payload);
 }
 
-async function fetchLiveAnmatSearch(
+async function queueLiveAnmatSearch(
   query: string,
   signal: AbortSignal | undefined,
   maxItems: number,
-): Promise<SearchFood[]> {
+): Promise<void> {
   const response = await fetch(new URL("/search/anmat-live", `${BACKEND_BASE_URL}/`).toString(), {
     method: "POST",
     signal,
@@ -243,13 +242,6 @@ async function fetchLiveAnmatSearch(
   if (!response.ok) {
     throw new Error(getPayloadErrorMessage(payload) ?? `Search request failed with ${response.status}`);
   }
-
-  return mapFoods(payload).map((food) => ({
-    ...food,
-    id: `anmatlive:${food.id}`,
-    source: "anmatlive",
-    sourceLabel: "ANMAT Live",
-  }));
 }
 
 function interleaveFoodResults(foodsBySource: SearchFoodsBySource, maxItems: number): SearchFood[] {
@@ -296,7 +288,6 @@ function interleaveFoodResults(foodsBySource: SearchFoodsBySource, maxItems: num
 function snapshotFoodsBySource(foodsBySource: SearchFoodsBySource): SearchFoodsBySource {
   return {
     anmat: foodsBySource.anmat,
-    anmatlive: foodsBySource.anmatlive,
     openfoodfacts: foodsBySource.openfoodfacts,
     mfp: foodsBySource.mfp,
   };
@@ -320,10 +311,10 @@ export async function searchFoods(
   const foodsBySource = createEmptyFoodsBySource();
   const tasks: Array<Promise<SearchFood[]>> = [
     fetchBaseSearch(query, options.signal, maxItems, "anmat"),
-    fetchLiveAnmatSearch(query, options.signal, maxItems),
     fetchBaseSearch(query, options.signal, maxItems, "openfoodfacts"),
     fetchBaseSearch(query, options.signal, maxItems, "mfp"),
   ];
+  const queueTask = queueLiveAnmatSearch(query, options.signal, maxItems);
 
   const results = await Promise.allSettled(
     SEARCH_SOURCE_ORDER.map(async (source, index) => {
@@ -337,6 +328,7 @@ export async function searchFoods(
       return foods;
     }),
   );
+  await Promise.allSettled([queueTask]);
 
   if (options.signal?.aborted) {
     throw createAbortError();

@@ -51,14 +51,12 @@ const PROVIDER_FILTERS: Array<{ key: SearchProviderFilter; label: string }> = [
   { key: "all", label: "All" },
   { key: "mfp", label: "MFP" },
   { key: "openfoodfacts", label: "OFF" },
-  { key: "anmat", label: "ANMAT DB" },
-  { key: "anmatlive", label: "ANMAT Live" },
+  { key: "anmat", label: "ANMAT" },
 ];
 
 function createEmptyFoodsBySource(): SearchFoodsBySource {
   return {
     anmat: [],
-    anmatlive: [],
     openfoodfacts: [],
     mfp: [],
   };
@@ -213,14 +211,12 @@ export default function LogFoodScreen() {
   const canShowResults = trimmedQuery.length >= 2;
   const allFetchedFoods = [
     ...foodsBySource.anmat,
-    ...foodsBySource.anmatlive,
     ...foodsBySource.openfoodfacts,
     ...foodsBySource.mfp,
   ];
   const selectedFood = allFetchedFoods.find((food) => food.id === selectedFoodId) || null;
   const providerCounts: Record<SearchFoodSource, number> = {
     anmat: foodsBySource.anmat.length,
-    anmatlive: foodsBySource.anmatlive.length,
     openfoodfacts: foodsBySource.openfoodfacts.length,
     mfp: foodsBySource.mfp.length,
   };
@@ -329,7 +325,7 @@ export default function LogFoodScreen() {
         ) : null}
         {canShowResults && isSearching ? (
           <Text style={styles.helperText}>
-            Searching MFP, OpenFoodFacts, ANMAT DB, and ANMAT live. Results appear as each source returns.
+            Searching MFP, OpenFoodFacts, and ANMAT. Results appear as each source returns.
           </Text>
         ) : null}
         {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
