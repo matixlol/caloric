@@ -1,5 +1,4 @@
 import { useClerk, useUser } from "@clerk/expo";
-import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Updates from "expo-updates";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -22,7 +21,6 @@ import {
   useUserSettings,
 } from "../../src/data/DataProvider";
 import { macroColors } from "../../src/theme/macroColors";
-import { useAppTheme } from "../../src/theme/useAppTheme";
 
 const DEFAULT_CALORIE_GOAL = 2500;
 const DEFAULT_PROTEIN_PCT = 30;
@@ -45,7 +43,6 @@ const palette = {
   tintDisabled: "#D1D5DB",
   success: iosColor("systemGreen", "#16A34A"),
   error: iosColor("systemRed", "#DC2626"),
-  white: "#FFFFFF",
   macroProtein: macroColors.protein.background,
   macroCarbs: macroColors.carbs.background,
   macroFat: macroColors.fat.background,
@@ -201,7 +198,6 @@ function FormRow({
 }
 
 export default function SettingsScreen() {
-  const { isDark, palette: themePalette } = useAppTheme();
   const insets = useSafeAreaInsets();
   const clerk = useClerk();
   const { user } = useUser();
@@ -226,12 +222,9 @@ export default function SettingsScreen() {
   const [macroTrackWidth, setMacroTrackWidth] = useState(0);
   const [activeHandle, setActiveHandle] = useState<"first" | "second" | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState<string | null>(null);
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [updatesActionError, setUpdatesActionError] = useState<string | null>(null);
-  const canUseGlass =
-    Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
   const macroTrackWidthRef = useRef(macroTrackWidth);
   const macroSplitARef = useRef(macroSplitA);
   const macroSplitBRef = useRef(macroSplitB);
@@ -267,11 +260,6 @@ export default function SettingsScreen() {
     setMacroSplitA(normalizedMacros.protein);
     setMacroSplitB(normalizedMacros.protein + normalizedMacros.carbs);
   }, [syncedCarbs, syncedFat, syncedGoal, syncedProtein, syncedSettings]);
-
-  useEffect(() => {
-    setSaveError(null);
-    setSaveSuccess(null);
-  }, [goalInput, macroSplitA, macroSplitB]);
 
   const firstHandleResponder = useRef(
     PanResponder.create({
@@ -341,19 +329,11 @@ export default function SettingsScreen() {
     }),
   ).current;
 
-  if (!isDataReady || isLoadingSettings || isLoadingSyncStatus || !syncedSettings) {
-    return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading settings…</Text>
-      </View>
-    );
-  }
-
-  const loadedGoal = syncedSettings.calorieGoal ?? DEFAULT_CALORIE_GOAL;
+  const loadedGoal = syncedSettings?.calorieGoal ?? DEFAULT_CALORIE_GOAL;
   const loadedMacros = normalizeMacroRatios(
-    syncedSettings.macroProteinPct,
-    syncedSettings.macroCarbsPct,
-    syncedSettings.macroFatPct,
+    syncedSettings?.macroProteinPct,
+    syncedSettings?.macroCarbsPct,
+    syncedSettings?.macroFatPct,
   );
 
   const proteinPct = macroSplitA;
@@ -399,27 +379,57 @@ export default function SettingsScreen() {
     : isUpdateAvailable || isDownloading
       ? "Download Update"
       : "Force Check";
-  const lastSyncedValue = syncStatus.dirty
-    ? "Pending"
-    : formatRelativeTimestamp(syncStatus.updatedAt);
 
-  const handleSave = () => {
-    setSaveError(null);
-    setSaveSuccess(null);
+  useEffect(() => {
+    if (!syncedSettings) {
+      return;
+    }
 
     if (validationError || parsedGoal === null) {
       setSaveError(validationError);
       return;
     }
 
-    void upsertUserSettings({
-      calorieGoal: parsedGoal,
-      macroProteinPct: proteinPct,
-      macroCarbsPct: carbsPct,
-      macroFatPct: fatPct,
-    });
-    setSaveSuccess("Saved successfully.");
-  };
+    setSaveError(null);
+
+    if (!hasChanges) {
+      return;
+    }
+
+    const timeoutId = setTimeout(() => {
+      void upsertUserSettings({
+        calorieGoal: parsedGoal,
+        macroProteinPct: proteinPct,
+        macroCarbsPct: carbsPct,
+        macroFatPct: fatPct,
+      });
+    }, 200);
+
+    return () => {
+      clearTimeout(timeoutId);
+    };
+  }, [
+    carbsPct,
+    fatPct,
+    hasChanges,
+    parsedGoal,
+    proteinPct,
+    syncedSettings,
+    upsertUserSettings,
+    validationError,
+  ]);
+
+  if (!isDataReady || isLoadingSettings || isLoadingSyncStatus || !syncedSettings) {
+    return (
+      <View style={styles.loadingContainer}>
+        <Text style={styles.loadingText}>Loading settings…</Text>
+      </View>
+    );
+  }
+
+  const lastSyncedValue = syncStatus.dirty
+    ? "Pending"
+    : formatRelativeTimestamp(syncStatus.updatedAt);
 
   const handleSignOut = async () => {
     if (isSigningOut) {
@@ -494,7 +504,7 @@ export default function SettingsScreen() {
           styles.contentContainer,
           {
             paddingTop: insets.top + 4,
-            paddingBottom: insets.bottom + 116,
+            paddingBottom: insets.bottom + 24,
           },
         ]}
       >
@@ -517,27 +527,6 @@ export default function SettingsScreen() {
           </View>
         </View>
 
-        <Text style={styles.sectionTitle}>Account</Text>
-        <View style={styles.card}>
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Signed in as</Text>
-            <Text style={styles.accountValue}>{profileEmail}</Text>
-          </View>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sign out"
-            onPress={confirmSignOut}
-            disabled={isSigningOut}
-            style={[styles.signOutButton, isSigningOut && styles.signOutButtonDisabled]}
-          >
-            <Text style={[styles.signOutButtonText, isSigningOut && styles.signOutButtonTextDisabled]}>
-              {isSigningOut ? "Signing Out..." : "Sign Out"}
-            </Text>
-          </Pressable>
-        </View>
-        {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
-
         <Text style={styles.sectionTitle}>Goals</Text>
         <View style={styles.card}>
           <FormRow
@@ -548,6 +537,7 @@ export default function SettingsScreen() {
             maxLength={5}
           />
         </View>
+        {saveError ? <Text style={styles.sectionErrorText}>{saveError}</Text> : null}
 
         <Text style={styles.sectionTitle}>Macro Ratios</Text>
         <View style={styles.card}>
@@ -640,6 +630,27 @@ export default function SettingsScreen() {
           <Text style={styles.macroHelpText}>Drag the two dividers to resize each macro section.</Text>
         </View>
 
+        <Text style={styles.sectionTitle}>Account</Text>
+        <View style={styles.card}>
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Signed in as</Text>
+            <Text style={styles.accountValue}>{profileEmail}</Text>
+          </View>
+          <View style={styles.divider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Sign out"
+            onPress={confirmSignOut}
+            disabled={isSigningOut}
+            style={[styles.signOutButton, isSigningOut && styles.signOutButtonDisabled]}
+          >
+            <Text style={[styles.signOutButtonText, isSigningOut && styles.signOutButtonTextDisabled]}>
+              {isSigningOut ? "Signing Out..." : "Sign Out"}
+            </Text>
+          </Pressable>
+        </View>
+        {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
+
         <Text style={styles.sectionTitle}>Updates</Text>
         <View style={styles.card}>
           <View style={styles.formRow}>
@@ -672,50 +683,6 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
       </ScrollView>
-
-      <View
-        style={[
-          styles.actionBarContainer,
-          {
-            paddingBottom: insets.bottom + 12,
-            backgroundColor: themePalette.overlay,
-          },
-        ]}
-      >
-        {canUseGlass ? (
-          <GlassView
-            glassEffectStyle="regular"
-            tintColor={isDark ? "rgba(24,24,27,0.28)" : "rgba(255,255,255,0.2)"}
-            style={StyleSheet.absoluteFillObject}
-          />
-        ) : null}
-
-        {saveError ? <Text style={styles.errorText}>{saveError}</Text> : null}
-        {saveSuccess ? <Text style={styles.successText}>{saveSuccess}</Text> : null}
-
-        <Pressable
-          accessibilityRole="button"
-          onPress={handleSave}
-          disabled={!hasChanges}
-          style={[
-            styles.saveButton,
-            !hasChanges && {
-              backgroundColor: themePalette.tintDisabled,
-            },
-          ]}
-        >
-          <Text
-            style={[
-              styles.saveButtonText,
-              !hasChanges && {
-                color: themePalette.buttonDisabledText,
-              },
-            ]}
-          >
-            Save Changes
-          </Text>
-        </Pressable>
-      </View>
     </View>
   );
 }
@@ -1001,36 +968,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: palette.tertiaryLabel,
   },
-  actionBarContainer: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: 0,
-    paddingHorizontal: 16,
-    paddingTop: 10,
-    backgroundColor: "rgba(255,255,255,0.35)",
-    overflow: "hidden",
-  },
-  saveButton: {
-    marginTop: 2,
-    borderRadius: 12,
-    minHeight: 50,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.tint,
-  },
-  saveButtonDisabled: {
-    backgroundColor: palette.tintDisabled,
-  },
-  saveButtonText: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    color: palette.white,
-  },
-  saveButtonTextDisabled: {
-    color: palette.secondaryLabel,
-  },
   sectionErrorText: {
     paddingHorizontal: 4,
     marginTop: -4,
@@ -1038,19 +975,5 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "600",
     color: palette.error,
-  },
-  errorText: {
-    marginBottom: 6,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: palette.error,
-  },
-  successText: {
-    marginBottom: 6,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: palette.success,
   },
 });
