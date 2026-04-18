@@ -2957,54 +2957,58 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
   return json({ error: "Not found" }, 404);
 }
 
-const server = Bun.serve({
-  hostname: "0.0.0.0",
-  port: config.port,
-  idleTimeout: 120,
-  async fetch(request: Request): Promise<Response> {
-    const url = new URL(request.url);
+export async function handleHttpRequest(request: Request): Promise<Response> {
+  const url = new URL(request.url);
 
-    return withSpan(
-      "http.request",
-      {
-        kind: SpanKind.SERVER,
-        attributes: {
-          "http.request.method": request.method,
-          "url.path": url.pathname,
-          "url.query": url.search || undefined,
-          "server.address": url.hostname,
-          "server.port": Number(url.port || config.port),
-          "user_agent.original": request.headers.get("user-agent") ?? undefined,
-        },
+  return withSpan(
+    "http.request",
+    {
+      kind: SpanKind.SERVER,
+      attributes: {
+        "http.request.method": request.method,
+        "url.path": url.pathname,
+        "url.query": url.search || undefined,
+        "server.address": url.hostname,
+        "server.port": Number(url.port || config.port),
+        "user_agent.original": request.headers.get("user-agent") ?? undefined,
       },
-      async (span) => {
-        const response = await handleRequest(request, url);
-        span.setAttribute("http.response.status_code", response.status);
-        if (response.status >= 500) {
-          span.setStatus({
-            code: SpanStatusCode.ERROR,
-            message: `HTTP ${response.status}`,
-          });
-        }
-        return response;
-      },
-    );
-  },
-});
+    },
+    async (span) => {
+      const response = await handleRequest(request, url);
+      span.setAttribute("http.response.status_code", response.status);
+      if (response.status >= 500) {
+        span.setStatus({
+          code: SpanStatusCode.ERROR,
+          message: `HTTP ${response.status}`,
+        });
+      }
+      return response;
+    },
+  );
+}
 
-logInfo("backend.startup", {
-  host: server.hostname,
-  port: server.port,
-  mfpBaseUrl: MFP_BASE_URL,
-  hasMfpUsername: Boolean(config.mfpUsername),
-  hasMfpPassword: Boolean(config.mfpPassword),
-  hasTwoCaptchaApiKey: Boolean(config.twoCaptchaApiKey),
-  mfpUsernamePreview: redactSecret(config.mfpUsername),
-  mfpDetailConcurrency: config.detailConcurrency,
-  mfpRequestTimeoutMs: config.requestTimeoutMs,
-  sentryEnabled: true,
-  sentryEnableLogs: SENTRY_ENABLE_LOGS,
-  sentryTracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
-  sentryServiceName: SENTRY_SERVICE_NAME,
-});
-console.log(`backend listening on http://${server.hostname}:${server.port}`);
+if (import.meta.main) {
+  const server = Bun.serve({
+    hostname: "0.0.0.0",
+    port: config.port,
+    idleTimeout: 120,
+    fetch: handleHttpRequest,
+  });
+
+  logInfo("backend.startup", {
+    host: server.hostname,
+    port: server.port,
+    mfpBaseUrl: MFP_BASE_URL,
+    hasMfpUsername: Boolean(config.mfpUsername),
+    hasMfpPassword: Boolean(config.mfpPassword),
+    hasTwoCaptchaApiKey: Boolean(config.twoCaptchaApiKey),
+    mfpUsernamePreview: redactSecret(config.mfpUsername),
+    mfpDetailConcurrency: config.detailConcurrency,
+    mfpRequestTimeoutMs: config.requestTimeoutMs,
+    sentryEnabled: true,
+    sentryEnableLogs: SENTRY_ENABLE_LOGS,
+    sentryTracesSampleRate: SENTRY_TRACES_SAMPLE_RATE,
+    sentryServiceName: SENTRY_SERVICE_NAME,
+  });
+  console.log(`backend listening on http://${server.hostname}:${server.port}`);
+}
