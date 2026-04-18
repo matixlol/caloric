@@ -1,4 +1,7 @@
 import { describe, expect, it } from "bun:test";
+import { lte, sql } from "drizzle-orm";
+import { PgDialect } from "drizzle-orm/pg-core";
+import { userSettings } from "./db/schema";
 import { parseSyncPushBody, shouldApplyIncomingWrite } from "./sync";
 
 describe("sync", () => {
@@ -48,5 +51,16 @@ describe("sync", () => {
     expect(shouldApplyIncomingWrite(timestamp, timestamp)).toBe(true);
     expect(shouldApplyIncomingWrite(timestamp, timestamp + 1)).toBe(true);
     expect(shouldApplyIncomingWrite(null, timestamp)).toBe(true);
+  });
+
+  it("encodes timestamp guards with the column encoder", () => {
+    const dialect = new PgDialect();
+    const timestamp = new Date("2026-04-18T19:02:59.228Z");
+
+    const rawGuard = dialect.sqlToQuery(sql`${userSettings.updatedAt} <= ${timestamp}`);
+    const typedGuard = dialect.sqlToQuery(lte(userSettings.updatedAt, timestamp));
+
+    expect(rawGuard.params[0]).toBe(timestamp);
+    expect(typedGuard.params[0]).toBe(timestamp.toISOString());
   });
 });

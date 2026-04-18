@@ -9,6 +9,7 @@ import {
   type UserSettings,
 } from "@caloric/data-model";
 import { open, type DB, type Scalar, type Transaction } from "@op-engineering/op-sqlite";
+import { createFoodEntryId } from "../id";
 
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
@@ -278,7 +279,7 @@ export class LocalDataStore {
   ): Promise<FoodEntryRecord> {
     await this.initialize();
 
-    const id = crypto.randomUUID();
+    const id = createFoodEntryId();
     const sortIndex = await this.getNextSortIndex(input.dateKey, input.meal);
     const nextEntry = FoodEntrySchema.parse({
       ...input,

@@ -23,6 +23,7 @@
     "playwright-core": "1.52.0",
     "postgres": "^3.4.7",
     "rebrowser-playwright": "1.52.0",
+    "typeid-js": "^1.2.0",
     "zod": "^4.3.6"
   },
   "devDependencies": {

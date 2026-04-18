@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, or, sql } from "drizzle-orm";
+import { and, desc, eq, gte, ilike, isNotNull, isNull, lt, lte, or, sql } from "drizzle-orm";
 import { authenticateUserRequest } from "./auth";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "./ai-log-context";
 import { normalizeTextValue } from "./anmat-html";
@@ -27,6 +27,7 @@ import {
   setActiveSpanAttributes,
   withSpan,
 } from "./tracing";
+import { createAiMessageId, createAiSessionId, createMfpTraceId } from "./id";
 import { getMfpAuthHeaders } from "./mfp-session";
 import { MFP_BASE_URL } from "./mfp-session";
 import { OPEN_FOOD_FACTS_BASE_URL, searchOpenFoodFacts } from "./openfoodfacts-client";
@@ -232,7 +233,7 @@ type AgentSession = {
 };
 
 function buildMfpSearchTraceId(): string {
-  return `mfp-${Date.now()}-${crypto.randomUUID().slice(0, 8)}`;
+  return createMfpTraceId();
 }
 
 function countSearchItems(payload: unknown): number | null {
@@ -377,7 +378,7 @@ async function upsertUserFoodEntry(
         updatedAt: nextUpdatedAt,
         deletedAt: nextDeletedAt,
       },
-      setWhere: sql`${userFoodEntries.updatedAt} <= ${nextUpdatedAt}`,
+      setWhere: lte(userFoodEntries.updatedAt, nextUpdatedAt),
     });
 
   return true;
@@ -412,7 +413,7 @@ async function upsertUserSettingsRow(
         data: row.data,
         updatedAt: nextUpdatedAt,
       },
-      setWhere: sql`${userSettings.updatedAt} <= ${nextUpdatedAt}`,
+      setWhere: lte(userSettings.updatedAt, nextUpdatedAt),
     });
 
   return true;
@@ -1804,7 +1805,7 @@ function parseToolArguments(raw: string): unknown {
 }
 
 function createMessageId(): string {
-  return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return createAiMessageId();
 }
 
 function normalizeOpenRouterUserId(userId: string): string {
@@ -2624,7 +2625,7 @@ async function handleRequest(request: Request, url: URL): Promise<Response> {
           "app.ai.recent_log_count": recentLogHints.length,
         });
 
-        const sessionId = crypto.randomUUID();
+        const sessionId = createAiSessionId();
         const now = Date.now();
         aiSessions.set(sessionId, {
           id: sessionId,

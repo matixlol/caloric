@@ -34,6 +34,7 @@ import { StreamdownRN } from "streamdown-rn";
 import { localDateKeyFromTimestamp } from "../../src/date";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../../src/data/DataProvider";
 import { type SearchFood as SharedSearchFood } from "../../src/food-search";
+import { createAiMessageId } from "../../src/id";
 import { mealLabelFor, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel } from "../../src/portion";
 import { type AppTheme, useThemedStyles } from "../../src/theme/useAppTheme";
@@ -161,7 +162,7 @@ type StreamingPayload = {
 const recentLogWindowMs = 3 * 24 * 60 * 60 * 1000;
 const maxRecentLogHints = 80;
 
-const createMessageId = () => `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+const createMessageId = () => createAiMessageId();
 
 function cloneNutrition(nutrition: SearchResultFood["nutrition"]) {
   if (!nutrition) {
