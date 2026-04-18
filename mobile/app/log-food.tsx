@@ -19,6 +19,7 @@ import {
   type SearchFoodSource,
   searchFoods,
 } from "../src/food-search";
+import { MacroBadges } from "../src/components/MacroBadges";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 
@@ -70,59 +71,12 @@ function getErrorMessage(error: unknown): string {
   return "Unknown error.";
 }
 
-function formatCalories(value: number | undefined): string | null {
-  if (value === undefined || !Number.isFinite(value)) {
-    return null;
-  }
-
-  return Math.round(value).toLocaleString();
-}
-
-function formatMacroValue(value: number | undefined): string | null {
-  if (value === undefined || !Number.isFinite(value)) {
-    return null;
-  }
-
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-}
-
-function formatMacroSummary(nutrition: SearchFood["nutrition"] | undefined): string | null {
-  if (!nutrition) {
-    return null;
-  }
-
-  const parts: string[] = [];
-  const calories = formatCalories(nutrition.calories);
-  const protein = formatMacroValue(nutrition.protein);
-  const carbs = formatMacroValue(nutrition.carbs);
-  const fat = formatMacroValue(nutrition.fat);
-
-  if (calories) {
-    parts.push(`${calories} kcal`);
-  }
-
-  if (protein) {
-    parts.push(`P ${protein}g`);
-  }
-
-  if (carbs) {
-    parts.push(`C ${carbs}g`);
-  }
-
-  if (fat) {
-    parts.push(`F ${fat}g`);
-  }
-
-  return parts.length > 0 ? parts.join(" · ") : null;
-}
-
 function FoodRow({
   sourceLabel,
   name,
   brand,
   serving,
-  macroSummary,
+  nutrition,
   selected,
   isLast,
   onPress,
@@ -131,7 +85,7 @@ function FoodRow({
   name: string;
   brand?: string;
   serving?: string;
-  macroSummary?: string | null;
+  nutrition?: SearchFood["nutrition"];
   selected: boolean;
   isLast: boolean;
   onPress: () => void;
@@ -150,7 +104,7 @@ function FoodRow({
           {serving ? <Text style={styles.foodMeta}>{brand ? `• ${serving}` : serving}</Text> : null}
           {!brand && !serving ? <Text style={styles.foodMeta}>No serving details</Text> : null}
         </View>
-        {macroSummary ? <Text style={styles.foodMacroSummary}>{macroSummary}</Text> : null}
+        <MacroBadges nutrition={nutrition} />
       </View>
       {selected ? <Text style={styles.selectedMark}>✓</Text> : null}
     </Pressable>
@@ -364,7 +318,7 @@ export default function LogFoodScreen() {
                     name={entry.foodName}
                     brand={entry.brand}
                     serving={entry.serving}
-                    macroSummary={formatMacroSummary(entry.nutrition)}
+                    nutrition={entry.nutrition}
                     selected={selectedRecentEntryId === entry.id}
                     isLast={index === recentEntries.length - 1}
                     onPress={() => {
@@ -431,7 +385,7 @@ export default function LogFoodScreen() {
                   name={food.name}
                   brand={food.brand}
                   serving={food.serving}
-                  macroSummary={formatMacroSummary(food.nutrition)}
+                  nutrition={food.nutrition}
                   selected={selectedFoodId === food.id}
                   isLast={index === visibleFoods.length - 1}
                   onPress={() => {
@@ -612,13 +566,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
     color: palette.secondaryLabel,
-  },
-  foodMacroSummary: {
-    marginTop: 4,
-    fontSize: 12,
-    lineHeight: 17,
-    color: palette.secondaryLabel,
-    fontVariant: ["tabular-nums"],
   },
   inlineSourceBadge: {
     paddingHorizontal: 6,

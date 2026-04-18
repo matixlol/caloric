@@ -16,6 +16,7 @@ import {
 } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { useDataStoreActions, useDataStoreReady, useUserSettings } from "../../src/data/DataProvider";
+import { macroColors } from "../../src/theme/macroColors";
 import { useAppTheme } from "../../src/theme/useAppTheme";
 
 const DEFAULT_CALORIE_GOAL = 2500;
@@ -40,9 +41,9 @@ const palette = {
   success: iosColor("systemGreen", "#16A34A"),
   error: iosColor("systemRed", "#DC2626"),
   white: "#FFFFFF",
-  macroProtein: "#2563EB",
-  macroCarbs: "#F59E0B",
-  macroFat: "#14B8A6",
+  macroProtein: macroColors.protein.background,
+  macroCarbs: macroColors.carbs.background,
+  macroFat: macroColors.fat.background,
 };
 
 const MACRO_DIVISIONS = 10;

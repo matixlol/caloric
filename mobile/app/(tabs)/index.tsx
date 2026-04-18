@@ -23,6 +23,7 @@ import {
 } from "../../src/date";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel, sanitizePortion } from "../../src/portion";
+import { macroColors } from "../../src/theme/macroColors";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -35,9 +36,9 @@ const palette = {
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
-  macroProtein: "#2563EB",
-  macroCarbs: "#F59E0B",
-  macroFat: "#14B8A6",
+  macroProtein: macroColors.protein.background,
+  macroCarbs: macroColors.carbs.background,
+  macroFat: macroColors.fat.background,
   destructive: iosColor("systemRed", "#DC2626"),
   destructiveText: "#FFFFFF",
 };

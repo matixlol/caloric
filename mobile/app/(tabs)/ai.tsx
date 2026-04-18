@@ -33,6 +33,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
+import { MacroBadges } from "../../src/components/MacroBadges";
 import { localDateKeyFromTimestamp } from "../../src/date";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../../src/data/DataProvider";
 import { type SearchFood as SharedSearchFood } from "../../src/food-search";
@@ -196,51 +197,6 @@ function formatCalories(value: number | undefined): string {
   }
 
   return Math.round(value).toLocaleString();
-}
-
-function formatMacroValue(value: number | undefined): string | null {
-  if (value === undefined || !Number.isFinite(value)) {
-    return null;
-  }
-
-  const rounded = Math.round(value * 10) / 10;
-  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
-}
-
-function formatMacroSummary(
-  nutrition: SearchResultFood["nutrition"] | undefined,
-  multiplier = 1,
-): string | null {
-  if (!nutrition) {
-    return null;
-  }
-
-  const parts: string[] = [];
-  const calories =
-    nutrition.calories !== undefined && Number.isFinite(nutrition.calories)
-      ? `${formatCalories(nutrition.calories * multiplier)} kcal`
-      : null;
-  const protein = formatMacroValue(nutrition.protein !== undefined ? nutrition.protein * multiplier : undefined);
-  const carbs = formatMacroValue(nutrition.carbs !== undefined ? nutrition.carbs * multiplier : undefined);
-  const fat = formatMacroValue(nutrition.fat !== undefined ? nutrition.fat * multiplier : undefined);
-
-  if (calories) {
-    parts.push(calories);
-  }
-
-  if (protein) {
-    parts.push(`P ${protein}g`);
-  }
-
-  if (carbs) {
-    parts.push(`C ${carbs}g`);
-  }
-
-  if (fat) {
-    parts.push(`F ${fat}g`);
-  }
-
-  return parts.length > 0 ? parts.join(" · ") : null;
 }
 
 function isErrorLike(value: unknown): value is { message?: unknown; stack?: unknown; name?: unknown } {
@@ -1298,7 +1254,6 @@ export default function AILogScreen() {
                 <Text style={styles.toolHeading}>Review suggestions</Text>
                 {message.suggestions.map((suggestion) => {
                   const mealLabel = mealLabelFor(suggestion.meal);
-                  const macroSummary = formatMacroSummary(suggestion.food.nutrition, suggestion.portion);
 
                   return (
                     <View key={suggestion.suggestionId} style={styles.suggestionCard}>
@@ -1315,7 +1270,11 @@ export default function AILogScreen() {
                       <Text style={styles.toolMeta}>
                         {suggestion.resultId} • {formatPortionLabel(suggestion.portion)} to {mealLabel}
                       </Text>
-                      {macroSummary ? <Text style={styles.toolMeta}>{macroSummary}</Text> : null}
+                      <MacroBadges
+                        nutrition={suggestion.food.nutrition}
+                        multiplier={suggestion.portion}
+                        containerStyle={styles.toolMacroBadges}
+                      />
                       <Text style={styles.toolReason}>{suggestion.reason}</Text>
 
                       {suggestion.output ? (
@@ -1597,6 +1556,9 @@ function createStyles({ palette }: AppTheme) {
       fontSize: 12,
       lineHeight: 17,
       color: palette.secondaryLabel,
+    },
+    toolMacroBadges: {
+      marginTop: 6,
     },
     sourceBadge: {
       paddingHorizontal: 7,
