@@ -1,4 +1,10 @@
-import { EventSourceParserStream } from "eventsource-parser/stream";
+import {
+  streamText,
+  tool,
+  type JSONValue,
+  type ModelMessage,
+} from "ai";
+import { createOpenRouter } from "@openrouter/ai-sdk-provider";
 import { z } from "zod";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "../ai-log-context";
 import { config } from "../config";
@@ -8,38 +14,14 @@ import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
 import { searchUnifiedFoods, type SearchResultFood } from "./search";
 
-type OpenRouterToolCall = {
-  id: string;
-  type: "function";
-  function: {
-    name: string;
-    arguments: string;
-  };
-};
-
-type OpenRouterContentPart =
-  | {
-      type: "text";
-      text: string;
-    }
-  | {
-      type: "input_audio";
-      input_audio: {
-        data: string;
-        format: string;
-      };
-    };
-
-type OpenRouterMessage = {
-  role: "system" | "user" | "assistant" | "tool";
-  content?: string | OpenRouterContentPart[] | null;
-  tool_calls?: OpenRouterToolCall[];
-  tool_call_id?: string;
-};
-
 const MealSchema = z.enum(["breakfast", "lunch", "dinner", "snacks"]);
 
 type Meal = z.infer<typeof MealSchema>;
+type SessionToolCall = {
+  toolCallId: string;
+  toolName: keyof typeof aiSdkTools;
+  input: unknown;
+};
 
 type ApprovalOutput = {
   approved: boolean;
@@ -80,7 +62,7 @@ type AgentStatus = "ready" | "awaiting-approval";
 type AgentSession = {
   id: string;
   userId: string;
-  conversation: OpenRouterMessage[];
+  conversation: ModelMessage[];
   searchResultCounter: number;
   searchResultsByLocalId: Map<string, SearchResultFood>;
   pendingApprovals: Map<string, ResolvedApprovalSuggestion[]>;
@@ -131,63 +113,19 @@ type AgentAction = z.infer<typeof JsonActionSchema>;
 type UserMessageAction = z.infer<typeof UserMessageActionSchema>;
 type ApprovalAction = z.infer<typeof ApprovalActionSchema>;
 
-const openRouterTools = [
-  {
-    type: "function",
-    function: {
-      name: "searchFoods",
-      description: "Search foods in the app food database.",
-      parameters: {
-        type: "object",
-        properties: {
-          query: {
-            type: "string",
-            description: "User query for food search.",
-          },
-          limit: {
-            type: "integer",
-            minimum: 1,
-            maximum: 10,
-            description: "Max number of foods to return.",
-          },
-        },
-        required: ["query"],
-      },
-    },
-  },
-  {
-    type: "function",
-    function: {
-      name: "requestFoodApprovals",
-      description:
-        "Request user approval for one or more selected food entries using local result IDs from searchFoods.",
-      parameters: {
-        type: "object",
-        properties: {
-          suggestions: {
-            type: "array",
-            minItems: 1,
-            maxItems: 8,
-            items: {
-              type: "object",
-              properties: {
-                resultId: { type: "string" },
-                meal: {
-                  type: "string",
-                  enum: ["breakfast", "lunch", "dinner", "snacks"],
-                },
-                portion: { type: "number", minimum: 0.25 },
-                reason: { type: "string" },
-              },
-              required: ["resultId", "meal", "portion", "reason"],
-            },
-          },
-        },
-        required: ["suggestions"],
-      },
-    },
-  },
-] as const;
+const aiSdkTools = {
+  searchFoods: tool({
+    description: "Search foods in the app food database.",
+    inputSchema: SearchFoodsToolArgsSchema,
+  }),
+  requestFoodApprovals: tool({
+    description:
+      "Request user approval for one or more selected food entries using local result IDs from searchFoods.",
+    inputSchema: RequestFoodApprovalsToolArgsSchema,
+  }),
+} as const;
+
+type ToolName = keyof typeof aiSdkTools;
 
 const systemPrompt = [
   "You are Caloric's food logging assistant.",
@@ -210,6 +148,10 @@ const sseHeaders = {
 
 const aiSessions = new Map<string, AgentSession>();
 const maxAiSessionIdleMs = 1000 * 60 * 60 * 8;
+const openrouter = createOpenRouter({
+  apiKey: config.openRouterApiKey,
+  compatibility: "strict",
+});
 
 type SseWriter = {
   writeEvent: (event: AgentEvent) => void;
@@ -332,20 +274,29 @@ function createSseResponse(run: (writer: SseWriter) => Promise<void>, errorCode:
   return new Response(stream, { headers: sseHeaders });
 }
 
-function parseToolArguments(raw: string): unknown {
-  if (!raw.trim()) {
-    return {};
-  }
-
-  return JSON.parse(raw);
-}
-
 function createMessageId(): string {
   return createAiMessageId();
 }
 
 function normalizeOpenRouterUserId(userId: string): string {
   return userId.slice(0, 128);
+}
+
+function createOpenRouterModel(userId: string) {
+  const providerOnly = config.openRouterProviderOnly?.trim() ?? "";
+
+  return openrouter.chat(config.openRouterModel, {
+    user: normalizeOpenRouterUserId(userId),
+    provider: providerOnly
+      ? {
+          only: [providerOnly],
+          allow_fallbacks: true,
+          sort: "throughput",
+        }
+      : {
+          sort: "throughput",
+        },
+  });
 }
 
 function pruneOldAiSessions(now = Date.now()) {
@@ -365,144 +316,7 @@ function requireSessionOwner(sessionId: string, userId: string): AgentSession | 
   return session;
 }
 
-function parseOpenRouterText(content: unknown): string {
-  if (typeof content === "string") {
-    return content;
-  }
-
-  if (!Array.isArray(content)) {
-    return "";
-  }
-
-  return content
-    .map((part) => {
-      if (!isObjectRecord(part) || typeof part.text !== "string") {
-        return "";
-      }
-
-      return part.text;
-    })
-    .join("");
-}
-
-function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  const output: OpenRouterToolCall[] = [];
-
-  for (const candidate of raw) {
-    if (!isObjectRecord(candidate) || candidate.type !== "function" || !isObjectRecord(candidate.function)) {
-      continue;
-    }
-
-    const idValue = candidate.id;
-    const id =
-      typeof idValue === "string"
-        ? idValue.trim()
-        : typeof idValue === "number" && Number.isFinite(idValue)
-          ? String(idValue)
-          : "";
-
-    const nameValue = candidate.function.name;
-    const name =
-      typeof nameValue === "string"
-        ? nameValue.trim()
-        : typeof nameValue === "number" && Number.isFinite(nameValue)
-          ? String(nameValue)
-          : "";
-
-    if (!id || !name) {
-      continue;
-    }
-
-    const argumentsValue = candidate.function.arguments;
-    const args =
-      typeof argumentsValue === "string"
-        ? argumentsValue
-        : argumentsValue === undefined
-          ? ""
-          : JSON.stringify(argumentsValue);
-
-    output.push({
-      id,
-      type: "function",
-      function: {
-        name,
-        arguments: args,
-      },
-    });
-  }
-
-  return output;
-}
-
-function parseToolCallDeltas(raw: unknown): Array<{ index: number; toolCall: OpenRouterToolCall }> {
-  if (!Array.isArray(raw)) {
-    return [];
-  }
-
-  const byIndex = new Map<number, OpenRouterToolCall>();
-
-  for (const candidate of raw) {
-    if (!isObjectRecord(candidate) || !Number.isInteger(candidate.index)) {
-      continue;
-    }
-
-    const index = candidate.index as number;
-    const existing = byIndex.get(index) ?? {
-      id:
-        typeof candidate.id === "string" && candidate.id.trim()
-          ? candidate.id.trim()
-          : `tool-${index}`,
-      type: "function" as const,
-      function: {
-        name: "",
-        arguments: "",
-      },
-    };
-
-    if (typeof candidate.id === "string" && candidate.id.trim()) {
-      existing.id = candidate.id.trim();
-    }
-
-    if (isObjectRecord(candidate.function)) {
-      if (typeof candidate.function.name === "string" && candidate.function.name.trim()) {
-        existing.function.name = candidate.function.name.trim();
-      }
-
-      const argumentsValue = candidate.function.arguments;
-      if (typeof argumentsValue === "string") {
-        existing.function.arguments += argumentsValue;
-      } else if (argumentsValue !== undefined) {
-        existing.function.arguments += JSON.stringify(argumentsValue);
-      }
-    }
-
-    byIndex.set(index, existing);
-  }
-
-  return Array.from(byIndex.entries())
-    .filter(([, toolCall]) => toolCall.function.name.length > 0)
-    .map(([index, toolCall]) => ({ index, toolCall }));
-}
-
-function normalizeAudioFormat(value: string | undefined): string {
-  const normalized = (value ?? "m4a").trim().toLowerCase();
-
-  if (normalized === "mpeg" || normalized === "mpga") {
-    return "mp3";
-  }
-
-  if (["wav", "mp3", "aiff", "aac", "ogg", "flac", "m4a", "pcm16", "pcm24"].includes(normalized)) {
-    return normalized;
-  }
-
-  return "m4a";
-}
-
-async function encodeAudioFileForOpenRouter(audioFile: File): Promise<{ data: string; format: string }> {
+async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaType: string }> {
   if (audioFile.size <= 0) {
     throw new Error("Audio snippet was empty.");
   }
@@ -513,16 +327,56 @@ async function encodeAudioFileForOpenRouter(audioFile: File): Promise<{ data: st
 
   const bytes = new Uint8Array(await audioFile.arrayBuffer());
   const data = Buffer.from(bytes).toString("base64");
-  const typeFormat = audioFile.type.split("/").at(1);
-  const nameFormat = audioFile.name.split(".").at(-1);
+  const mediaType = audioFile.type.trim().toLowerCase().startsWith("audio/") ? audioFile.type.trim().toLowerCase() : "audio/mp4";
 
   return {
     data,
-    format: normalizeAudioFormat(typeFormat ?? nameFormat ?? undefined),
+    mediaType,
   };
 }
 
-async function requestOpenRouterTurn(
+function buildToolCallRegistry(conversation: ModelMessage[]) {
+  const registry = new Map<string, SessionToolCall>();
+
+  for (const message of conversation) {
+    if (message.role !== "assistant" || typeof message.content === "string") {
+      continue;
+    }
+
+    for (const part of message.content) {
+      if (part.type !== "tool-call" || !(part.toolName in aiSdkTools)) {
+        continue;
+      }
+
+      registry.set(part.toolCallId, {
+        toolCallId: part.toolCallId,
+        toolName: part.toolName as ToolName,
+        input: part.input,
+      });
+    }
+  }
+
+  return registry;
+}
+
+function createToolResultMessage(toolCall: SessionToolCall, value: unknown): ModelMessage {
+  return {
+    role: "tool",
+    content: [
+      {
+        type: "tool-result",
+        toolCallId: toolCall.toolCallId,
+        toolName: toolCall.toolName,
+        output: {
+          type: "json",
+          value: value as JSONValue,
+        },
+      },
+    ],
+  };
+}
+
+async function requestAiSdkTurn(
   session: AgentSession,
   options?: {
     onAssistantDelta?: (text: string) => void;
@@ -530,321 +384,262 @@ async function requestOpenRouterTurn(
   },
 ): Promise<{
   assistantText: string;
-  toolCalls: OpenRouterToolCall[];
+  toolCalls: SessionToolCall[];
+  responseMessages: ModelMessage[];
 }> {
   const providerOnly = config.openRouterProviderOnly?.trim() ?? "";
-  const requestBody: Record<string, unknown> = {
-    model: config.openRouterModel,
-    stream: true,
-    tool_choice: "auto",
-    tools: openRouterTools,
+  const result = streamText({
+    model: createOpenRouterModel(session.userId),
     messages: session.conversation,
-    user: normalizeOpenRouterUserId(session.userId),
-    session_id: session.id,
-  };
-
-  requestBody.provider = providerOnly
-    ? {
-        only: [providerOnly],
-        allow_fallbacks: true,
-        sort: "throughput",
-      }
-    : {
-        sort: "throughput",
-      };
-
-  return Sentry.startSpan(
-    {
-      name: "openrouter.chat.completions",
-      op: "ai.client",
-      attributes: {
-        "server.address": "openrouter.ai",
-        "http.request.method": "POST",
-        "url.full": "https://openrouter.ai/api/v1/chat/completions",
-        "gen_ai.system": "openrouter",
-        "gen_ai.request.model": config.openRouterModel,
-        "app.ai.message_count": session.conversation.length,
-        "app.ai.tool_count": openRouterTools.length,
-        "app.ai.provider.only": providerOnly || undefined,
+    tools: aiSdkTools,
+    abortSignal: options?.signal,
+    experimental_telemetry: {
+      isEnabled: true,
+      functionId: "backend.ai.turn",
+      metadata: {
+        sessionId: session.id,
+        messageCount: session.conversation.length,
+        toolCount: Object.keys(aiSdkTools).length,
+        providerOnly: providerOnly || "any",
       },
     },
-    async (span) => {
-      const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-        method: "POST",
-        headers: {
-          Accept: "text/event-stream",
-          Authorization: `Bearer ${config.openRouterApiKey}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(requestBody),
-        signal: options?.signal,
-      });
+  });
 
-      span.setAttribute("http.response.status_code", response.status);
+  let assistantText = "";
 
-      if (!response.ok) {
-        const textBody = await response.text();
-        const suffix = textBody ? `: ${textBody.slice(0, 300)}` : "";
-        throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
-      }
+  for await (const chunk of result.fullStream) {
+    if (chunk.type === "text-delta" && chunk.text) {
+      assistantText += chunk.text;
+      options?.onAssistantDelta?.(chunk.text);
+    }
+  }
 
-      if (!response.body) {
-        throw new Error("OpenRouter response was not streamable.");
-      }
+  const response = await result.response;
+  const toolCalls: SessionToolCall[] = [];
+  for (const toolCall of await result.toolCalls) {
+    if (!(toolCall.toolName in aiSdkTools)) {
+      continue;
+    }
 
-      let assistantText = "";
-      let messageTextFallback = "";
-      const toolCallsByIndex = new Map<number, OpenRouterToolCall>();
-      const eventStream = response.body
-        .pipeThrough(new TextDecoderStream())
-        .pipeThrough(new EventSourceParserStream());
+    toolCalls.push({
+      toolCallId: toolCall.toolCallId,
+      toolName: toolCall.toolName as ToolName,
+      input: toolCall.input,
+    });
+  }
 
-      for await (const event of eventStream) {
-        const chunk = event.data;
-        if (!chunk || chunk === "[DONE]") {
-          continue;
-        }
-
-        let parsed: unknown;
-        try {
-          parsed = JSON.parse(chunk);
-        } catch {
-          continue;
-        }
-
-        if (!isObjectRecord(parsed) || !Array.isArray(parsed.choices)) {
-          continue;
-        }
-
-        const firstChoice = parsed.choices[0];
-        if (!isObjectRecord(firstChoice)) {
-          continue;
-        }
-
-        const delta = isObjectRecord(firstChoice.delta) ? firstChoice.delta : null;
-        const textDelta = parseOpenRouterText(delta?.content);
-        if (textDelta) {
-          assistantText += textDelta;
-          options?.onAssistantDelta?.(textDelta);
-        }
-
-        for (const { index, toolCall } of parseToolCallDeltas(delta?.tool_calls)) {
-          const existing = toolCallsByIndex.get(index);
-          if (!existing) {
-            toolCallsByIndex.set(index, toolCall);
-            continue;
-          }
-
-          if (toolCall.id.trim()) {
-            existing.id = toolCall.id;
-          }
-
-          if (toolCall.function.name.trim()) {
-            existing.function.name = toolCall.function.name;
-          }
-
-          if (toolCall.function.arguments) {
-            existing.function.arguments += toolCall.function.arguments;
-          }
-        }
-
-        const message = isObjectRecord(firstChoice.message) ? firstChoice.message : null;
-        const messageText = parseOpenRouterText(message?.content);
-        if (messageText) {
-          messageTextFallback = messageText;
-        }
-
-        const messageToolCalls = parseOpenRouterToolCalls(message?.tool_calls);
-        if (messageToolCalls.length > 0) {
-          for (const [index, toolCall] of messageToolCalls.entries()) {
-            toolCallsByIndex.set(index, toolCall);
-          }
-        }
-      }
-
-      if (!assistantText && messageTextFallback) {
-        assistantText = messageTextFallback;
-      }
-
-      const toolCalls = Array.from(toolCallsByIndex.values()).filter(
-        (toolCall) => toolCall.function.name.trim().length > 0,
-      );
-
-      span.setAttribute("app.ai.assistant_text_length", assistantText.length);
-      span.setAttribute("app.ai.tool_call_count", toolCalls.length);
-
-      return {
-        assistantText,
-        toolCalls,
-      };
-    },
-  );
+  return {
+    assistantText,
+    toolCalls,
+    responseMessages: response.messages,
+  };
 }
 
 async function runToolCall(
   session: AgentSession,
-  toolCall: OpenRouterToolCall,
+  toolCall: SessionToolCall,
 ): Promise<{ pauseForApproval: boolean; output: unknown; events: AgentEvent[] }> {
-  return Sentry.startSpan(
-    {
-      name: `ai.tool.${toolCall.function.name}`,
-      op: "ai.tool",
-      attributes: {
-        "app.ai.tool_name": toolCall.function.name,
-        "app.ai.tool_call_id": toolCall.id,
-      },
-    },
-    async (span) => {
-      let rawArguments: unknown;
-      try {
-        rawArguments = parseToolArguments(toolCall.function.arguments);
-      } catch {
-        span.setAttribute("app.ai.tool.invalid_arguments", true);
-        return {
-          pauseForApproval: false,
-          output: {
-            error: "Tool arguments were invalid JSON.",
-          },
-          events: [],
-        };
-      }
-
-      if (toolCall.function.name === "searchFoods") {
-        const parsedArgs = SearchFoodsToolArgsSchema.safeParse(rawArguments);
-        if (!parsedArgs.success) {
-          return {
-            pauseForApproval: false,
-            output: {
-              error: "Invalid searchFoods input.",
-            },
-            events: [],
-          };
-        }
-
-        const query = parsedArgs.data.query;
-        const limit = parsedArgs.data.limit ?? 6;
-
-        span.setAttribute("app.search.query_length", query.length);
-        span.setAttribute("app.search.limit", limit);
-
-        const topFoods = await searchUnifiedFoods(query, limit);
-        const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
-          const resultId = `r${session.searchResultCounter}`;
-          session.searchResultCounter += 1;
-
-          const mapped: SearchResultFood = {
-            ...food,
-            resultId,
-          };
-
-          session.searchResultsByLocalId.set(resultId, mapped);
-          return mapped;
-        });
-
-        span.setAttribute("app.search.result_count", foodsWithResultIds.length);
-
-        return {
-          pauseForApproval: false,
-          output: {
-            foods: foodsWithResultIds,
-          },
-          events: [
-            {
-              kind: "search",
-              foods: foodsWithResultIds,
-            },
-          ],
-        };
-      }
-
-      if (toolCall.function.name === "requestFoodApprovals") {
-        const parsedArgs = RequestFoodApprovalsToolArgsSchema.safeParse(rawArguments);
-        if (!parsedArgs.success) {
-          return {
-            pauseForApproval: false,
-            output: {
-              error: "Invalid requestFoodApprovals input.",
-            },
-            events: [],
-          };
-        }
-
-        const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
-        const unknownResultIds: string[] = [];
-        const seenSuggestions = new Set<string>();
-
-        for (const suggestion of parsedArgs.data.suggestions) {
-          const food = session.searchResultsByLocalId.get(suggestion.resultId);
-          if (!food) {
-            unknownResultIds.push(suggestion.resultId);
-            continue;
-          }
-
-          const duplicateKey = `${suggestion.resultId}|${suggestion.meal}|${suggestion.portion}`;
-          if (seenSuggestions.has(duplicateKey)) {
-            continue;
-          }
-
-          seenSuggestions.add(duplicateKey);
-          resolvedSuggestions.push({
-            suggestionId: createMessageId(),
-            resultId: suggestion.resultId,
-            meal: suggestion.meal,
-            portion: suggestion.portion,
-            reason: suggestion.reason,
-            food,
-          });
-        }
-
-        span.setAttribute("app.ai.approval_candidate_count", parsedArgs.data.suggestions.length);
-        span.setAttribute("app.ai.approval_resolved_count", resolvedSuggestions.length);
-
-        if (unknownResultIds.length > 0) {
-          span.setAttribute("app.ai.approval_unknown_result_ids", unknownResultIds.length);
-          return {
-            pauseForApproval: false,
-            output: {
-              error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
-            },
-            events: [],
-          };
-        }
-
-        if (resolvedSuggestions.length === 0) {
-          return {
-            pauseForApproval: false,
-            output: {
-              error: "No valid suggestions to approve.",
-            },
-            events: [],
-          };
-        }
-
-        session.pendingApprovals.set(toolCall.id, resolvedSuggestions);
-
-        return {
-          pauseForApproval: true,
-          output: null,
-          events: [
-            {
-              kind: "approval",
-              toolCallId: toolCall.id,
-              suggestions: resolvedSuggestions,
-            },
-          ],
-        };
-      }
-
-      span.setAttribute("app.ai.tool_unknown", true);
+  if (toolCall.toolName === "searchFoods") {
+    const parsedArgs = SearchFoodsToolArgsSchema.safeParse(toolCall.input);
+    if (!parsedArgs.success) {
       return {
         pauseForApproval: false,
         output: {
-          error: `Unknown tool: ${toolCall.function.name}`,
+          error: "Invalid searchFoods input.",
         },
         events: [],
       };
+    }
+
+    const limit = parsedArgs.data.limit ?? 6;
+    const topFoods = await searchUnifiedFoods(parsedArgs.data.query, limit);
+    const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
+      const resultId = `r${session.searchResultCounter}`;
+      session.searchResultCounter += 1;
+
+      const mapped: SearchResultFood = {
+        ...food,
+        resultId,
+      };
+
+      session.searchResultsByLocalId.set(resultId, mapped);
+      return mapped;
+    });
+
+    return {
+      pauseForApproval: false,
+      output: {
+        foods: foodsWithResultIds,
+      },
+      events: [
+        {
+          kind: "search",
+          foods: foodsWithResultIds,
+        },
+      ],
+    };
+  }
+
+  if (toolCall.toolName === "requestFoodApprovals") {
+    const parsedArgs = RequestFoodApprovalsToolArgsSchema.safeParse(toolCall.input);
+    if (!parsedArgs.success) {
+      return {
+        pauseForApproval: false,
+        output: {
+          error: "Invalid requestFoodApprovals input.",
+        },
+        events: [],
+      };
+    }
+
+    const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
+    const unknownResultIds: string[] = [];
+    const seenSuggestions = new Set<string>();
+
+    for (const suggestion of parsedArgs.data.suggestions) {
+      const food = session.searchResultsByLocalId.get(suggestion.resultId);
+      if (!food) {
+        unknownResultIds.push(suggestion.resultId);
+        continue;
+      }
+
+      const duplicateKey = `${suggestion.resultId}|${suggestion.meal}|${suggestion.portion}`;
+      if (seenSuggestions.has(duplicateKey)) {
+        continue;
+      }
+
+      seenSuggestions.add(duplicateKey);
+      resolvedSuggestions.push({
+        suggestionId: createMessageId(),
+        resultId: suggestion.resultId,
+        meal: suggestion.meal,
+        portion: suggestion.portion,
+        reason: suggestion.reason,
+        food,
+      });
+    }
+
+    if (unknownResultIds.length > 0) {
+      return {
+        pauseForApproval: false,
+        output: {
+          error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
+        },
+        events: [],
+      };
+    }
+
+    if (resolvedSuggestions.length === 0) {
+      return {
+        pauseForApproval: false,
+        output: {
+          error: "No valid suggestions to approve.",
+        },
+        events: [],
+      };
+    }
+
+    session.pendingApprovals.set(toolCall.toolCallId, resolvedSuggestions);
+
+    return {
+      pauseForApproval: true,
+      output: null,
+      events: [
+        {
+          kind: "approval",
+          toolCallId: toolCall.toolCallId,
+          suggestions: resolvedSuggestions,
+        },
+      ],
+    };
+  }
+
+  return {
+    pauseForApproval: false,
+    output: {
+      error: `Unknown tool: ${toolCall.toolName}`,
     },
-  );
+    events: [],
+  };
+}
+
+async function runManualAssistantLoop(
+  session: AgentSession,
+  requestTurn: (
+    session: AgentSession,
+    options?: {
+      onAssistantDelta?: (text: string) => void;
+      signal?: AbortSignal;
+    },
+  ) => Promise<{
+    assistantText: string;
+    toolCalls: SessionToolCall[];
+    responseMessages: ModelMessage[];
+  }>,
+  options?: {
+    onEvent?: (event: AgentEvent) => void;
+    signal?: AbortSignal;
+  },
+): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
+  const events: AgentEvent[] = [];
+
+  const emit = (event: AgentEvent) => {
+    events.push(event);
+    options?.onEvent?.(event);
+  };
+
+  for (let step = 0; step < 8; step += 1) {
+    const turn = await requestTurn(session, {
+      signal: options?.signal,
+      onAssistantDelta: (text) => {
+        if (!text) {
+          return;
+        }
+
+        emit({
+          kind: "assistant-delta",
+          text,
+        });
+      },
+    });
+
+    if (turn.assistantText.trim()) {
+      emit({
+        kind: "assistant",
+        text: turn.assistantText,
+      });
+    }
+
+    session.conversation.push(...turn.responseMessages);
+
+    if (turn.toolCalls.length === 0) {
+      return {
+        status: "ready",
+        events,
+      };
+    }
+
+    for (const toolCall of turn.toolCalls) {
+      const toolResult = await runToolCall(session, toolCall);
+      for (const event of toolResult.events) {
+        emit(event);
+      }
+
+      if (toolResult.pauseForApproval) {
+        return {
+          status: "awaiting-approval",
+          events,
+        };
+      }
+
+      session.conversation.push(createToolResultMessage(toolCall, toolResult.output ?? null));
+    }
+  }
+
+  return {
+    status: "ready",
+    events,
+  };
 }
 
 async function runAssistantLoop(
@@ -854,105 +649,7 @@ async function runAssistantLoop(
     signal?: AbortSignal;
   },
 ): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
-  return Sentry.startSpan(
-    {
-      name: "ai.assistant.loop",
-      op: "ai.loop",
-      attributes: {
-        "app.ai.message_count": session.conversation.length,
-      },
-    },
-    async (loopSpan) => {
-      const events: AgentEvent[] = [];
-
-      const emit = (event: AgentEvent) => {
-        events.push(event);
-        options?.onEvent?.(event);
-      };
-
-      for (let step = 0; step < 8; step += 1) {
-        const turn = await Sentry.startSpan(
-          {
-            name: "ai.assistant.step",
-            op: "ai.step",
-            attributes: {
-              "app.ai.step_index": step,
-              "app.ai.message_count": session.conversation.length,
-            },
-          },
-          async (stepSpan) => {
-            const nextTurn = await requestOpenRouterTurn(session, {
-              signal: options?.signal,
-              onAssistantDelta: (text) => {
-                if (!text) {
-                  return;
-                }
-
-                emit({
-                  kind: "assistant-delta",
-                  text,
-                });
-              },
-            });
-
-            stepSpan.setAttribute("app.ai.assistant_text_length", nextTurn.assistantText.length);
-            stepSpan.setAttribute("app.ai.tool_call_count", nextTurn.toolCalls.length);
-            return nextTurn;
-          },
-        );
-
-        loopSpan.setAttribute("app.ai.step_count", step + 1);
-
-        if (turn.assistantText.trim()) {
-          emit({
-            kind: "assistant",
-            text: turn.assistantText,
-          });
-        }
-
-        session.conversation.push({
-          role: "assistant",
-          content: turn.assistantText.trim() ? turn.assistantText : null,
-          ...(turn.toolCalls.length > 0 ? { tool_calls: turn.toolCalls } : {}),
-        });
-
-        if (turn.toolCalls.length === 0) {
-          loopSpan.setAttribute("app.ai.event_count", events.length);
-          return {
-            status: "ready",
-            events,
-          };
-        }
-
-        for (const toolCall of turn.toolCalls) {
-          const toolResult = await runToolCall(session, toolCall);
-          for (const event of toolResult.events) {
-            emit(event);
-          }
-
-          if (toolResult.pauseForApproval) {
-            loopSpan.setAttribute("app.ai.event_count", events.length);
-            return {
-              status: "awaiting-approval",
-              events,
-            };
-          }
-
-          session.conversation.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: JSON.stringify(toolResult.output ?? {}),
-          });
-        }
-      }
-
-      loopSpan.setAttribute("app.ai.event_count", events.length);
-      return {
-        status: "ready",
-        events,
-      };
-    },
-  );
+  return runManualAssistantLoop(session, requestAiSdkTurn, options);
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -1166,8 +863,8 @@ async function handleUserMessageAction(
   });
 
   if (audioFile) {
-    const encodedAudio = await encodeAudioFileForOpenRouter(audioFile);
-    const content: OpenRouterContentPart[] = [];
+    const encodedAudio = await encodeAudioFile(audioFile);
+    const content: Array<{ type: "text"; text: string } | { type: "file"; data: string; mediaType: string; filename?: string }> = [];
 
     if (message) {
       content.push({
@@ -1177,8 +874,10 @@ async function handleUserMessageAction(
     }
 
     content.push({
-      type: "input_audio",
-      input_audio: encodedAudio,
+      type: "file",
+      data: encodedAudio.data,
+      mediaType: encodedAudio.mediaType,
+      filename: audioFile.name || undefined,
     });
 
     session.conversation.push({
@@ -1255,10 +954,13 @@ function handleApprovalAction(request: Request, session: AgentSession, action: A
   }
 
   session.pendingApprovals.delete(action.toolCallId);
-  session.conversation.push({
-    role: "tool",
-    tool_call_id: action.toolCallId,
-    content: JSON.stringify({
+  const toolCall = buildToolCallRegistry(session.conversation).get(action.toolCallId);
+  if (!toolCall) {
+    return jsonResponse({ error: "Tool call not found." }, 409);
+  }
+
+  session.conversation.push(
+    createToolResultMessage(toolCall, {
       decisions: nextSuggestions.map((suggestion) => ({
         suggestionId: suggestion.suggestionId,
         resultId: suggestion.resultId,
@@ -1268,7 +970,7 @@ function handleApprovalAction(request: Request, session: AgentSession, action: A
         reason: suggestion.output?.reason,
       })),
     }),
-  });
+  );
 
   return createSseResponse(async (writer) => {
     const loopResult = await runAssistantLoop(session, {
