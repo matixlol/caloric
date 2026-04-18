@@ -1,30 +1,11 @@
 import { USER_SETTINGS_ROW_ID } from "@caloric/data-model";
 import { and, eq, isNull, lte } from "drizzle-orm";
-import { authenticateUserRequest } from "../auth";
 import { db } from "../db";
 import { userFoodEntries, userSettings } from "../db/schema";
+import { isObjectRecord, jsonResponse, requireAuthenticatedUser } from "../http";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
 import { parseSyncPushBody, shouldApplyIncomingWrite } from "../sync";
-
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
-
-function json(data: JsonValue, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-}
-
-async function requireAuthenticatedUser(request: Request): Promise<{ userId: string } | Response> {
-  try {
-    return await authenticateUserRequest(request);
-  } catch {
-    return json({ error: "Unauthorized" }, 401);
-  }
-}
 
 function stringifyUnknownError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -54,7 +35,7 @@ function reportUnknownError(code: string, error: unknown): Response {
   logError(`api.${code}`, errorForCapture);
   Sentry.captureException(errorForCapture);
 
-  return json(
+  return jsonResponse(
     {
       error: code,
       message: "Unknown error.",
@@ -66,9 +47,7 @@ function reportUnknownError(code: string, error: unknown): Response {
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const parsed = await request.json();
-    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : null;
+    return isObjectRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
@@ -183,7 +162,7 @@ export async function handleSyncBootstrapRequest(request: Request): Promise<Resp
         .limit(1),
     ]);
 
-    return json({
+    return jsonResponse({
       foodEntries: foodEntryRows.map((row) => ({
         id: row.id,
         data: row.data,
@@ -223,13 +202,13 @@ export async function handleSyncPushRequest(request: Request): Promise<Response>
       acceptedSettings = await upsertUserSettingsRow(auth.userId, body.settings);
     }
 
-    return json({
+    return jsonResponse({
       acceptedFoodEntryIds,
       acceptedSettings,
     });
   } catch (error) {
     if (error instanceof Error && error.name === "ZodError") {
-      return json({ error: "Invalid sync payload" }, 400);
+      return jsonResponse({ error: "Invalid sync payload" }, 400);
     }
 
     return reportUnknownError("sync_push_failed", error);

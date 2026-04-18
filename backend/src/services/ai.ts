@@ -1,12 +1,12 @@
-import { authenticateUserRequest } from "../auth";
+import { EventSourceParserStream } from "eventsource-parser/stream";
+import { z } from "zod";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "../ai-log-context";
 import { config } from "../config";
+import { isObjectRecord, jsonResponse, requireAuthenticatedUser } from "../http";
+import { createAiMessageId, createAiSessionId } from "../id";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
-import { createAiMessageId, createAiSessionId } from "../id";
 import { searchUnifiedFoods, type SearchResultFood } from "./search";
-
-type JsonValue = Record<string, unknown> | unknown[] | string | number | boolean | null;
 
 type OpenRouterToolCall = {
   id: string;
@@ -37,7 +37,9 @@ type OpenRouterMessage = {
   tool_call_id?: string;
 };
 
-type Meal = "breakfast" | "lunch" | "dinner" | "snacks";
+const MealSchema = z.enum(["breakfast", "lunch", "dinner", "snacks"]);
+
+type Meal = z.infer<typeof MealSchema>;
 
 type ApprovalOutput = {
   approved: boolean;
@@ -84,6 +86,50 @@ type AgentSession = {
   pendingApprovals: Map<string, ResolvedApprovalSuggestion[]>;
   updatedAt: number;
 };
+
+const SearchFoodsToolArgsSchema = z.object({
+  query: z.string().trim().min(2),
+  limit: z.coerce.number().int().min(1).max(10).optional(),
+});
+
+const ApprovalSuggestionInputSchema = z.object({
+  resultId: z.string().trim().min(1),
+  meal: z
+    .string()
+    .trim()
+    .transform((value) => {
+      const parsed = MealSchema.safeParse(value.toLowerCase());
+      return parsed.success ? parsed.data : "lunch";
+    }),
+  portion: z.coerce
+    .number()
+    .finite()
+    .catch(1)
+    .transform((value) => Math.round(Math.max(0.25, value) * 4) / 4),
+  reason: z.string().trim().min(1),
+});
+
+const RequestFoodApprovalsToolArgsSchema = z.object({
+  suggestions: z.array(ApprovalSuggestionInputSchema).min(1).max(8),
+});
+
+const UserMessageActionSchema = z.object({
+  type: z.literal("user-message"),
+  message: z.string().trim().optional(),
+});
+
+const ApprovalActionSchema = z.object({
+  type: z.literal("approval"),
+  toolCallId: z.string().trim().min(1),
+  suggestionId: z.string().trim().min(1),
+  approved: z.boolean(),
+});
+
+const JsonActionSchema = z.discriminatedUnion("type", [UserMessageActionSchema, ApprovalActionSchema]);
+
+type AgentAction = z.infer<typeof JsonActionSchema>;
+type UserMessageAction = z.infer<typeof UserMessageActionSchema>;
+type ApprovalAction = z.infer<typeof ApprovalActionSchema>;
 
 const openRouterTools = [
   {
@@ -156,25 +202,21 @@ const systemPrompt = [
   "When you answer, keep the wording concise and practical.",
 ].join(" ");
 
+const sseHeaders = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+} as const;
+
 const aiSessions = new Map<string, AgentSession>();
 const maxAiSessionIdleMs = 1000 * 60 * 60 * 8;
 
-function json(data: JsonValue, status = 200): Response {
-  return new Response(JSON.stringify(data), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
-}
-
-async function requireAuthenticatedUser(request: Request): Promise<{ userId: string } | Response> {
-  try {
-    return await authenticateUserRequest(request);
-  } catch {
-    return json({ error: "Unauthorized" }, 401);
-  }
-}
+type SseWriter = {
+  writeEvent: (event: AgentEvent) => void;
+  writeResolvedUserMessage: (message: string) => void;
+  writeStatus: (status: AgentStatus) => void;
+  writeError: (code: string, message: string) => void;
+};
 
 function stringifyUnknownError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -192,7 +234,7 @@ function stringifyUnknownError(error: unknown): string {
   }
 }
 
-function reportUnknownError(code: string, error: unknown): Response {
+function captureUnknownError(code: string, error: unknown): void {
   const errorForCapture =
     error instanceof Error ? error : new Error(`${code}: ${summarizeText(stringifyUnknownError(error), 500)}`);
 
@@ -203,8 +245,12 @@ function reportUnknownError(code: string, error: unknown): Response {
 
   logError(`api.${code}`, errorForCapture);
   Sentry.captureException(errorForCapture);
+}
 
-  return json(
+function reportUnknownError(code: string, error: unknown): Response {
+  captureUnknownError(code, error);
+
+  return jsonResponse(
     {
       error: code,
       message: "Unknown error.",
@@ -217,71 +263,77 @@ function encodeSseChunk(payload: Record<string, unknown>): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    return null;
-  }
-  return value as Record<string, unknown>;
-}
+function createSseResponse(run: (writer: SseWriter) => Promise<void>, errorCode: string): Response {
+  const encoder = new TextEncoder();
 
-function asString(value: unknown): string | undefined {
-  if (typeof value === "string") {
-    const normalized = value.trim();
-    return normalized.length > 0 ? normalized : undefined;
-  }
+  const stream = new ReadableStream<Uint8Array>({
+    async start(controller) {
+      let closed = false;
 
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return String(value);
-  }
+      const writeChunk = (chunk: string) => {
+        if (closed) {
+          return;
+        }
 
-  return undefined;
-}
+        controller.enqueue(encoder.encode(chunk));
+      };
 
-function asNumber(value: unknown): number | undefined {
-  if (typeof value === "number" && Number.isFinite(value)) {
-    return value;
-  }
+      const writer: SseWriter = {
+        writeEvent(event) {
+          writeChunk(
+            encodeSseChunk({
+              type: "event",
+              event,
+            }),
+          );
+        },
+        writeResolvedUserMessage(message) {
+          writeChunk(
+            encodeSseChunk({
+              type: "resolved-user-message",
+              resolvedUserMessage: message,
+            }),
+          );
+        },
+        writeStatus(status) {
+          writeChunk(
+            encodeSseChunk({
+              type: "status",
+              status,
+            }),
+          );
+        },
+        writeError(code, message) {
+          writeChunk(
+            encodeSseChunk({
+              type: "error",
+              error: code,
+              message,
+            }),
+          );
+        },
+      };
 
-  if (typeof value === "string") {
-    const normalized = value.trim();
-    if (!normalized) {
-      return undefined;
-    }
+      try {
+        await run(writer);
+      } catch (error) {
+        captureUnknownError(errorCode, error);
+        writer.writeError(errorCode, "Unknown error.");
+      } finally {
+        if (!closed) {
+          writeChunk("data: [DONE]\n\n");
+          closed = true;
+          controller.close();
+        }
+      }
+    },
+  });
 
-    const parsed = Number(normalized);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-
-  return undefined;
-}
-
-function normalizeMeal(meal: unknown): Meal {
-  const normalized = typeof meal === "string" ? meal.trim().toLowerCase() : "";
-  if (
-    normalized === "breakfast" ||
-    normalized === "lunch" ||
-    normalized === "dinner" ||
-    normalized === "snacks"
-  ) {
-    return normalized;
-  }
-  return "lunch";
-}
-
-function sanitizePortion(value: unknown): number {
-  const parsed = asNumber(value);
-  if (parsed === undefined) {
-    return 1;
-  }
-
-  const bounded = Math.max(0.25, parsed);
-  return Math.round(bounded * 4) / 4;
+  return new Response(stream, { headers: sseHeaders });
 }
 
 function parseToolArguments(raw: string): unknown {
-  if (!raw || !raw.trim()) {
+  if (!raw.trim()) {
     return {};
   }
 
@@ -306,11 +358,7 @@ function pruneOldAiSessions(now = Date.now()) {
 
 function requireSessionOwner(sessionId: string, userId: string): AgentSession | null {
   const session = aiSessions.get(sessionId);
-  if (!session) {
-    return null;
-  }
-
-  if (session.userId !== userId) {
+  if (!session || session.userId !== userId) {
     return null;
   }
 
@@ -322,21 +370,19 @@ function parseOpenRouterText(content: unknown): string {
     return content;
   }
 
-  if (Array.isArray(content)) {
-    return content
-      .map((part) => {
-        const record = asRecord(part);
-        if (!record) {
-          return "";
-        }
-
-        const text = record.text;
-        return typeof text === "string" ? text : "";
-      })
-      .join("");
+  if (!Array.isArray(content)) {
+    return "";
   }
 
-  return "";
+  return content
+    .map((part) => {
+      if (!isObjectRecord(part) || typeof part.text !== "string") {
+        return "";
+      }
+
+      return part.text;
+    })
+    .join("");
 }
 
 function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
@@ -347,31 +393,37 @@ function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
   const output: OpenRouterToolCall[] = [];
 
   for (const candidate of raw) {
-    const record = asRecord(candidate);
-    if (!record) {
+    if (!isObjectRecord(candidate) || candidate.type !== "function" || !isObjectRecord(candidate.function)) {
       continue;
     }
 
-    const id = asString(record.id);
-    const type = record.type;
-    const fn = asRecord(record.function);
-    const name = asString(fn?.name);
+    const idValue = candidate.id;
+    const id =
+      typeof idValue === "string"
+        ? idValue.trim()
+        : typeof idValue === "number" && Number.isFinite(idValue)
+          ? String(idValue)
+          : "";
 
-    if (!id || type !== "function" || !name) {
+    const nameValue = candidate.function.name;
+    const name =
+      typeof nameValue === "string"
+        ? nameValue.trim()
+        : typeof nameValue === "number" && Number.isFinite(nameValue)
+          ? String(nameValue)
+          : "";
+
+    if (!id || !name) {
       continue;
     }
 
-    const fnArgsRaw = fn?.arguments;
-    let args = "";
-    if (typeof fnArgsRaw === "string") {
-      args = fnArgsRaw;
-    } else if (fnArgsRaw !== undefined) {
-      try {
-        args = JSON.stringify(fnArgsRaw);
-      } catch {
-        args = "";
-      }
-    }
+    const argumentsValue = candidate.function.arguments;
+    const args =
+      typeof argumentsValue === "string"
+        ? argumentsValue
+        : argumentsValue === undefined
+          ? ""
+          : JSON.stringify(argumentsValue);
 
     output.push({
       id,
@@ -386,43 +438,6 @@ function parseOpenRouterToolCalls(raw: unknown): OpenRouterToolCall[] {
   return output;
 }
 
-function parseSseDataChunks(raw: string): string[] {
-  const normalized = raw.replace(/\r\n/g, "\n");
-  const events = normalized.split("\n\n");
-  const chunks: string[] = [];
-
-  for (const event of events) {
-    const lines = event
-      .split("\n")
-      .filter((line) => line.startsWith("data:"))
-      .map((line) => line.slice(5).trim());
-
-    if (lines.length === 0) {
-      continue;
-    }
-
-    const payload = lines.join("\n");
-    if (payload === "[DONE]") {
-      continue;
-    }
-
-    chunks.push(payload);
-  }
-
-  if (chunks.length === 0) {
-    try {
-      const parsed = JSON.parse(raw);
-      if (parsed && typeof parsed === "object") {
-        return [raw];
-      }
-    } catch {
-      // Ignore non-JSON bodies.
-    }
-  }
-
-  return chunks;
-}
-
 function parseToolCallDeltas(raw: unknown): Array<{ index: number; toolCall: OpenRouterToolCall }> {
   if (!Array.isArray(raw)) {
     return [];
@@ -431,44 +446,37 @@ function parseToolCallDeltas(raw: unknown): Array<{ index: number; toolCall: Ope
   const byIndex = new Map<number, OpenRouterToolCall>();
 
   for (const candidate of raw) {
-    const record = asRecord(candidate);
-    if (!record) {
+    if (!isObjectRecord(candidate) || !Number.isInteger(candidate.index)) {
       continue;
     }
 
-    const index = typeof record.index === "number" ? record.index : undefined;
-    if (index === undefined) {
-      continue;
-    }
-
+    const index = candidate.index as number;
     const existing = byIndex.get(index) ?? {
-      id: asString(record.id) ?? `tool-${index}`,
-      type: "function",
+      id:
+        typeof candidate.id === "string" && candidate.id.trim()
+          ? candidate.id.trim()
+          : `tool-${index}`,
+      type: "function" as const,
       function: {
         name: "",
         arguments: "",
       },
     };
 
-    const maybeId = asString(record.id);
-    if (maybeId) {
-      existing.id = maybeId;
+    if (typeof candidate.id === "string" && candidate.id.trim()) {
+      existing.id = candidate.id.trim();
     }
 
-    const fn = asRecord(record.function);
-    const maybeName = asString(fn?.name);
-    if (maybeName) {
-      existing.function.name = maybeName;
-    }
+    if (isObjectRecord(candidate.function)) {
+      if (typeof candidate.function.name === "string" && candidate.function.name.trim()) {
+        existing.function.name = candidate.function.name.trim();
+      }
 
-    const argsChunk = fn?.arguments;
-    if (typeof argsChunk === "string") {
-      existing.function.arguments += argsChunk;
-    } else if (argsChunk !== undefined) {
-      try {
-        existing.function.arguments += JSON.stringify(argsChunk);
-      } catch {
-        // Ignore non-serializable chunks.
+      const argumentsValue = candidate.function.arguments;
+      if (typeof argumentsValue === "string") {
+        existing.function.arguments += argumentsValue;
+      } else if (argumentsValue !== undefined) {
+        existing.function.arguments += JSON.stringify(argumentsValue);
       }
     }
 
@@ -476,7 +484,7 @@ function parseToolCallDeltas(raw: unknown): Array<{ index: number; toolCall: Ope
   }
 
   return Array.from(byIndex.entries())
-    .filter(([, toolCall]) => toolCall.function.name.trim().length > 0)
+    .filter(([, toolCall]) => toolCall.function.name.length > 0)
     .map(([index, toolCall]) => ({ index, toolCall }));
 }
 
@@ -518,6 +526,7 @@ async function requestOpenRouterTurn(
   session: AgentSession,
   options?: {
     onAssistantDelta?: (text: string) => void;
+    signal?: AbortSignal;
   },
 ): Promise<{
   assistantText: string;
@@ -563,27 +572,39 @@ async function requestOpenRouterTurn(
       const response = await fetch("https://openrouter.ai/api/v1/chat/completions", {
         method: "POST",
         headers: {
+          Accept: "text/event-stream",
           Authorization: `Bearer ${config.openRouterApiKey}`,
           "Content-Type": "application/json",
         },
         body: JSON.stringify(requestBody),
+        signal: options?.signal,
       });
 
       span.setAttribute("http.response.status_code", response.status);
 
-      const textBody = await response.text();
-
       if (!response.ok) {
+        const textBody = await response.text();
         const suffix = textBody ? `: ${textBody.slice(0, 300)}` : "";
         throw new Error(`OpenRouter request failed (${response.status})${suffix}`);
       }
 
-      const chunks = parseSseDataChunks(textBody);
+      if (!response.body) {
+        throw new Error("OpenRouter response was not streamable.");
+      }
+
       let assistantText = "";
       let messageTextFallback = "";
       const toolCallsByIndex = new Map<number, OpenRouterToolCall>();
+      const eventStream = response.body
+        .pipeThrough(new TextDecoderStream())
+        .pipeThrough(new EventSourceParserStream());
 
-      for (const chunk of chunks) {
+      for await (const event of eventStream) {
+        const chunk = event.data;
+        if (!chunk || chunk === "[DONE]") {
+          continue;
+        }
+
         let parsed: unknown;
         try {
           parsed = JSON.parse(chunk);
@@ -591,19 +612,23 @@ async function requestOpenRouterTurn(
           continue;
         }
 
-        const root = asRecord(parsed);
-        const choices = Array.isArray(root?.choices) ? root.choices : [];
-        const firstChoice = asRecord(choices[0]);
-        const delta = asRecord(firstChoice?.delta);
+        if (!isObjectRecord(parsed) || !Array.isArray(parsed.choices)) {
+          continue;
+        }
 
+        const firstChoice = parsed.choices[0];
+        if (!isObjectRecord(firstChoice)) {
+          continue;
+        }
+
+        const delta = isObjectRecord(firstChoice.delta) ? firstChoice.delta : null;
         const textDelta = parseOpenRouterText(delta?.content);
         if (textDelta) {
           assistantText += textDelta;
           options?.onAssistantDelta?.(textDelta);
         }
 
-        const toolCallDeltas = parseToolCallDeltas(delta?.tool_calls);
-        for (const { index, toolCall } of toolCallDeltas) {
+        for (const { index, toolCall } of parseToolCallDeltas(delta?.tool_calls)) {
           const existing = toolCallsByIndex.get(index);
           if (!existing) {
             toolCallsByIndex.set(index, toolCall);
@@ -613,15 +638,17 @@ async function requestOpenRouterTurn(
           if (toolCall.id.trim()) {
             existing.id = toolCall.id;
           }
+
           if (toolCall.function.name.trim()) {
             existing.function.name = toolCall.function.name;
           }
+
           if (toolCall.function.arguments) {
             existing.function.arguments += toolCall.function.arguments;
           }
         }
 
-        const message = asRecord(firstChoice?.message);
+        const message = isObjectRecord(firstChoice.message) ? firstChoice.message : null;
         const messageText = parseOpenRouterText(message?.content);
         if (messageText) {
           messageTextFallback = messageText;
@@ -683,15 +710,8 @@ async function runToolCall(
       }
 
       if (toolCall.function.name === "searchFoods") {
-        const args = asRecord(rawArguments);
-        const query = asString(args?.query) ?? "";
-        const parsedLimit = asNumber(args?.limit);
-        const limit = Math.max(1, Math.min(10, typeof parsedLimit === "number" ? Math.round(parsedLimit) : 6));
-
-        span.setAttribute("app.search.query_length", query.trim().length);
-        span.setAttribute("app.search.limit", limit);
-
-        if (query.trim().length < 2) {
+        const parsedArgs = SearchFoodsToolArgsSchema.safeParse(rawArguments);
+        if (!parsedArgs.success) {
           return {
             pauseForApproval: false,
             output: {
@@ -701,7 +721,13 @@ async function runToolCall(
           };
         }
 
-        const topFoods = await searchUnifiedFoods(query.trim(), limit);
+        const query = parsedArgs.data.query;
+        const limit = parsedArgs.data.limit ?? 6;
+
+        span.setAttribute("app.search.query_length", query.length);
+        span.setAttribute("app.search.limit", limit);
+
+        const topFoods = await searchUnifiedFoods(query, limit);
         const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
           const resultId = `r${session.searchResultCounter}`;
           session.searchResultCounter += 1;
@@ -732,10 +758,8 @@ async function runToolCall(
       }
 
       if (toolCall.function.name === "requestFoodApprovals") {
-        const args = asRecord(rawArguments);
-        const suggestionsRaw = args?.suggestions;
-
-        if (!Array.isArray(suggestionsRaw) || suggestionsRaw.length === 0 || suggestionsRaw.length > 8) {
+        const parsedArgs = RequestFoodApprovalsToolArgsSchema.safeParse(rawArguments);
+        if (!parsedArgs.success) {
           return {
             pauseForApproval: false,
             output: {
@@ -749,39 +773,30 @@ async function runToolCall(
         const unknownResultIds: string[] = [];
         const seenSuggestions = new Set<string>();
 
-        for (const candidate of suggestionsRaw) {
-          const suggestion = asRecord(candidate);
-          const resultId = asString(suggestion?.resultId)?.trim() ?? "";
-          const food = session.searchResultsByLocalId.get(resultId);
+        for (const suggestion of parsedArgs.data.suggestions) {
+          const food = session.searchResultsByLocalId.get(suggestion.resultId);
           if (!food) {
-            unknownResultIds.push(resultId || "(empty)");
+            unknownResultIds.push(suggestion.resultId);
             continue;
           }
 
-          const meal = normalizeMeal(suggestion?.meal);
-          const portion = sanitizePortion(suggestion?.portion);
-          const reason = asString(suggestion?.reason)?.trim() ?? "";
-          if (!reason) {
-            continue;
-          }
-
-          const duplicateKey = `${resultId}|${meal}|${portion}`;
+          const duplicateKey = `${suggestion.resultId}|${suggestion.meal}|${suggestion.portion}`;
           if (seenSuggestions.has(duplicateKey)) {
             continue;
           }
-          seenSuggestions.add(duplicateKey);
 
+          seenSuggestions.add(duplicateKey);
           resolvedSuggestions.push({
             suggestionId: createMessageId(),
-            resultId,
-            meal,
-            portion,
-            reason,
+            resultId: suggestion.resultId,
+            meal: suggestion.meal,
+            portion: suggestion.portion,
+            reason: suggestion.reason,
             food,
           });
         }
 
-        span.setAttribute("app.ai.approval_candidate_count", suggestionsRaw.length);
+        span.setAttribute("app.ai.approval_candidate_count", parsedArgs.data.suggestions.length);
         span.setAttribute("app.ai.approval_resolved_count", resolvedSuggestions.length);
 
         if (unknownResultIds.length > 0) {
@@ -832,7 +847,13 @@ async function runToolCall(
   );
 }
 
-async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
+async function runAssistantLoop(
+  session: AgentSession,
+  options?: {
+    onEvent?: (event: AgentEvent) => void;
+    signal?: AbortSignal;
+  },
+): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
   return Sentry.startSpan(
     {
       name: "ai.assistant.loop",
@@ -843,6 +864,11 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
     },
     async (loopSpan) => {
       const events: AgentEvent[] = [];
+
+      const emit = (event: AgentEvent) => {
+        events.push(event);
+        options?.onEvent?.(event);
+      };
 
       for (let step = 0; step < 8; step += 1) {
         const turn = await Sentry.startSpan(
@@ -856,17 +882,19 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
           },
           async (stepSpan) => {
             const nextTurn = await requestOpenRouterTurn(session, {
+              signal: options?.signal,
               onAssistantDelta: (text) => {
                 if (!text) {
                   return;
                 }
 
-                events.push({
+                emit({
                   kind: "assistant-delta",
                   text,
                 });
               },
             });
+
             stepSpan.setAttribute("app.ai.assistant_text_length", nextTurn.assistantText.length);
             stepSpan.setAttribute("app.ai.tool_call_count", nextTurn.toolCalls.length);
             return nextTurn;
@@ -876,7 +904,7 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
         loopSpan.setAttribute("app.ai.step_count", step + 1);
 
         if (turn.assistantText.trim()) {
-          events.push({
+          emit({
             kind: "assistant",
             text: turn.assistantText,
           });
@@ -898,7 +926,9 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
 
         for (const toolCall of turn.toolCalls) {
           const toolResult = await runToolCall(session, toolCall);
-          events.push(...toolResult.events);
+          for (const event of toolResult.events) {
+            emit(event);
+          }
 
           if (toolResult.pauseForApproval) {
             loopSpan.setAttribute("app.ai.event_count", events.length);
@@ -928,10 +958,101 @@ async function runAssistantLoop(session: AgentSession): Promise<{ status: AgentS
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
   try {
     const parsed = await request.json();
-    return asRecord(parsed);
+    return isObjectRecord(parsed) ? parsed : null;
   } catch {
     return null;
   }
+}
+
+async function parseTurnRequest(request: Request): Promise<
+  | {
+      sessionId: string;
+      action: AgentAction;
+      audioFile: File | null;
+    }
+  | Response
+> {
+  const contentType = request.headers.get("content-type") ?? "";
+
+  if (contentType.includes("multipart/form-data")) {
+    let formData: FormData;
+    try {
+      formData = await request.formData();
+    } catch {
+      return jsonResponse({ error: "Invalid multipart body" }, 400);
+    }
+
+    const rawSessionId = formData.get("sessionId");
+    const sessionId = typeof rawSessionId === "string" ? rawSessionId.trim() : "";
+    if (!sessionId) {
+      return jsonResponse({ error: "sessionId is required" }, 400);
+    }
+
+    const rawActionType = formData.get("actionType");
+    const actionType = typeof rawActionType === "string" ? rawActionType.trim() : "";
+    if (!actionType) {
+      return jsonResponse({ error: "actionType is required" }, 400);
+    }
+
+    if (actionType === "user-message") {
+      const rawMessage = formData.get("message");
+      const message = typeof rawMessage === "string" ? rawMessage.trim() : undefined;
+      const parsedAction = UserMessageActionSchema.safeParse({
+        type: "user-message",
+        ...(message ? { message } : {}),
+      });
+      if (!parsedAction.success) {
+        return jsonResponse({ error: "Invalid action payload" }, 400);
+      }
+
+      const audioField = formData.get("audio");
+      const audioFile = audioField instanceof File && audioField.size > 0 ? audioField : null;
+
+      return {
+        sessionId,
+        action: parsedAction.data,
+        audioFile,
+      };
+    }
+
+    if (actionType === "approval") {
+      const parsedAction = ApprovalActionSchema.safeParse({
+        type: "approval",
+        toolCallId: typeof formData.get("toolCallId") === "string" ? formData.get("toolCallId") : "",
+        suggestionId: typeof formData.get("suggestionId") === "string" ? formData.get("suggestionId") : "",
+        approved: formData.get("approved") === "true",
+      });
+
+      if (!parsedAction.success) {
+        return jsonResponse({ error: "Invalid action payload" }, 400);
+      }
+
+      return {
+        sessionId,
+        action: parsedAction.data,
+        audioFile: null,
+      };
+    }
+
+    return jsonResponse({ error: `Unsupported action type: ${actionType}` }, 400);
+  }
+
+  const body = await parseJsonBody(request);
+  const sessionId = typeof body?.sessionId === "string" ? body.sessionId.trim() : "";
+  if (!sessionId) {
+    return jsonResponse({ error: "sessionId is required" }, 400);
+  }
+
+  const parsedAction = JsonActionSchema.safeParse(body?.action);
+  if (!parsedAction.success) {
+    return jsonResponse({ error: "Invalid action payload" }, 400);
+  }
+
+  return {
+    sessionId,
+    action: parsedAction.data,
+    audioFile: null,
+  };
 }
 
 export async function handleAiSessionRequest(request: Request): Promise<Response> {
@@ -977,7 +1098,7 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
       updatedAt: now,
     });
 
-    return json({
+    return jsonResponse({
       sessionId,
       status: "ready",
     });
@@ -992,266 +1113,170 @@ export async function handleAiTurnRequest(request: Request): Promise<Response> {
     return auth;
   }
 
-  let sessionId = "";
-  let action: Record<string, unknown> | null = null;
-  let audioFile: File | null = null;
-
-  const contentType = request.headers.get("content-type") ?? "";
-
-  if (contentType.includes("multipart/form-data")) {
-    let formData: FormData;
-    try {
-      formData = await request.formData();
-    } catch {
-      return json({ error: "Invalid multipart body" }, 400);
-    }
-
-    sessionId = asString(formData.get("sessionId"))?.trim() ?? "";
-
-    const actionType = asString(formData.get("actionType"))?.trim() ?? "";
-    if (!actionType) {
-      return json({ error: "actionType is required" }, 400);
-    }
-
-    if (actionType === "user-message") {
-      const message = asString(formData.get("message"))?.trim();
-      action = {
-        type: "user-message",
-        ...(message ? { message } : {}),
-      };
-
-      const audioField = formData.get("audio");
-      if (audioField instanceof File && audioField.size > 0) {
-        audioFile = audioField;
-      }
-    } else if (actionType === "approval") {
-      action = {
-        type: "approval",
-        toolCallId: asString(formData.get("toolCallId")) ?? "",
-        suggestionId: asString(formData.get("suggestionId")) ?? "",
-        approved: formData.get("approved") === "true",
-      };
-    } else {
-      action = {
-        type: actionType,
-      };
-    }
-  } else {
-    const body = await parseJsonBody(request);
-    sessionId = asString(body?.sessionId)?.trim() ?? "";
-    action = asRecord(body?.action);
-  }
-
-  if (!action) {
-    return json({ error: "action is required" }, 400);
-  }
-
-  const actionType = asString(action.type)?.trim() ?? "";
-
-  if (!sessionId) {
-    return json({ error: "sessionId is required" }, 400);
-  }
-
-  if (!actionType) {
-    return json({ error: "action.type is required" }, 400);
+  const parsed = await parseTurnRequest(request);
+  if (parsed instanceof Response) {
+    return parsed;
   }
 
   pruneOldAiSessions();
-  const session = requireSessionOwner(sessionId, auth.userId);
+  const session = requireSessionOwner(parsed.sessionId, auth.userId);
   if (!session) {
-    return json({ error: "Session not found for this user" }, 403);
+    return jsonResponse({ error: "Session not found for this user" }, 403);
   }
 
   Sentry.getActiveSpan()?.setAttributes({
     "app.ai.endpoint": "/ai/turn",
-    "app.ai.session_id": sessionId,
-    "app.ai.action_type": actionType,
-    "app.ai.has_audio": Boolean(audioFile),
+    "app.ai.session_id": parsed.sessionId,
+    "app.ai.action_type": parsed.action.type,
+    "app.ai.has_audio": Boolean(parsed.audioFile),
     "app.ai.pending_approval_count": session.pendingApprovals.size,
   });
 
   session.updatedAt = Date.now();
 
   try {
-    if (actionType === "user-message") {
-      const message = asString(action.message)?.trim() ?? "";
-
-      if (!message && !audioFile) {
-        return json({ error: "action.message or audio is required" }, 400);
-      }
-
-      Sentry.getActiveSpan()?.setAttributes({
-        "app.ai.user_message_length": message.length,
-      });
-
-      if (session.pendingApprovals.size > 0) {
-        return json({ error: "Resolve pending approvals before sending a new message." }, 409);
-      }
-
-      if (audioFile) {
-        const encodedAudio = await encodeAudioFileForOpenRouter(audioFile);
-        const content: OpenRouterContentPart[] = [];
-
-        if (message) {
-          content.push({
-            type: "text",
-            text: message,
-          });
-        }
-
-        content.push({
-          type: "input_audio",
-          input_audio: encodedAudio,
-        });
-
-        session.conversation.push({
-          role: "user",
-          content,
-        });
-      } else {
-        session.conversation.push({
-          role: "user",
-          content: message,
-        });
-      }
-
-      const loopResult = await runAssistantLoop(session);
-      session.updatedAt = Date.now();
-
-      return new Response(
-        encodeSseChunk({
-          type: "status",
-          status: loopResult.status,
-        }) +
-          (message
-            ? encodeSseChunk({
-                type: "resolved-user-message",
-                resolvedUserMessage: message,
-              })
-            : "") +
-          loopResult.events
-            .map((event) =>
-              encodeSseChunk({
-                type: "event",
-                event,
-              }),
-            )
-            .join("") +
-          "data: [DONE]\n\n",
-        {
-          headers: {
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-            Connection: "keep-alive",
-          },
-        },
-      );
+    if (parsed.action.type === "user-message") {
+      return handleUserMessageAction(request, session, parsed.action, parsed.audioFile);
     }
 
-    if (actionType === "approval") {
-      const toolCallId = asString(action.toolCallId)?.trim() ?? "";
-      const suggestionId = asString(action.suggestionId)?.trim() ?? "";
-      const approved = action.approved === true;
-
-      if (!toolCallId || !suggestionId) {
-        return json({ error: "action.toolCallId and action.suggestionId are required" }, 400);
-      }
-
-      Sentry.getActiveSpan()?.setAttributes({
-        "app.ai.approval.tool_call_id": toolCallId,
-        "app.ai.approval.suggestion_id": suggestionId,
-        "app.ai.approval.approved": approved,
-      });
-
-      const pendingSuggestions = session.pendingApprovals.get(toolCallId);
-      if (!pendingSuggestions) {
-        return json({ error: "No pending approval request for tool call." }, 409);
-      }
-
-      const targetIndex = pendingSuggestions.findIndex(
-        (suggestion) => suggestion.suggestionId === suggestionId,
-      );
-      if (targetIndex === -1) {
-        return json({ error: "Suggestion not found." }, 404);
-      }
-
-      if (pendingSuggestions[targetIndex]?.output) {
-        return json({
-          status: "awaiting-approval",
-          events: [],
-        });
-      }
-
-      const itemOutput: ApprovalOutput = {
-        approved,
-        reason: approved ? undefined : "User rejected this suggestion.",
-      };
-
-      const nextSuggestions = pendingSuggestions.map((suggestion, index) =>
-        index === targetIndex
-          ? {
-              ...suggestion,
-              output: itemOutput,
-            }
-          : suggestion,
-      );
-
-      const allResolved = nextSuggestions.every((suggestion) => Boolean(suggestion.output));
-
-      if (!allResolved) {
-        session.pendingApprovals.set(toolCallId, nextSuggestions);
-        session.updatedAt = Date.now();
-        return json({
-          status: "awaiting-approval",
-          events: [],
-        });
-      }
-
-      session.pendingApprovals.delete(toolCallId);
-      session.conversation.push({
-        role: "tool",
-        tool_call_id: toolCallId,
-        content: JSON.stringify({
-          decisions: nextSuggestions.map((suggestion) => ({
-            suggestionId: suggestion.suggestionId,
-            resultId: suggestion.resultId,
-            meal: suggestion.meal,
-            portion: suggestion.portion,
-            approved: suggestion.output?.approved ?? false,
-            reason: suggestion.output?.reason,
-          })),
-        }),
-      });
-
-      const loopResult = await runAssistantLoop(session);
-      session.updatedAt = Date.now();
-
-      return new Response(
-        encodeSseChunk({
-          type: "status",
-          status: loopResult.status,
-        }) +
-          loopResult.events
-            .map((event) =>
-              encodeSseChunk({
-                type: "event",
-                event,
-              }),
-            )
-            .join("") +
-          "data: [DONE]\n\n",
-        {
-          headers: {
-            "Content-Type": "text/event-stream; charset=utf-8",
-            "Cache-Control": "no-cache, no-transform",
-            Connection: "keep-alive",
-          },
-        },
-      );
-    }
-
-    return json({ error: `Unsupported action type: ${actionType}` }, 400);
+    return handleApprovalAction(request, session, parsed.action);
   } catch (error) {
     return reportUnknownError("ai_turn_failed", error);
   }
+}
+
+async function handleUserMessageAction(
+  request: Request,
+  session: AgentSession,
+  action: UserMessageAction,
+  audioFile: File | null,
+): Promise<Response> {
+  const message = action.message?.trim() ?? "";
+
+  if (!message && !audioFile) {
+    return jsonResponse({ error: "action.message or audio is required" }, 400);
+  }
+
+  if (session.pendingApprovals.size > 0) {
+    return jsonResponse({ error: "Resolve pending approvals before sending a new message." }, 409);
+  }
+
+  Sentry.getActiveSpan()?.setAttributes({
+    "app.ai.user_message_length": message.length,
+  });
+
+  if (audioFile) {
+    const encodedAudio = await encodeAudioFileForOpenRouter(audioFile);
+    const content: OpenRouterContentPart[] = [];
+
+    if (message) {
+      content.push({
+        type: "text",
+        text: message,
+      });
+    }
+
+    content.push({
+      type: "input_audio",
+      input_audio: encodedAudio,
+    });
+
+    session.conversation.push({
+      role: "user",
+      content,
+    });
+  } else {
+    session.conversation.push({
+      role: "user",
+      content: message,
+    });
+  }
+
+  return createSseResponse(async (writer) => {
+    if (message) {
+      writer.writeResolvedUserMessage(message);
+    }
+
+    const loopResult = await runAssistantLoop(session, {
+      onEvent: writer.writeEvent,
+      signal: request.signal,
+    });
+
+    session.updatedAt = Date.now();
+    writer.writeStatus(loopResult.status);
+  }, "ai_turn_failed");
+}
+
+function handleApprovalAction(request: Request, session: AgentSession, action: ApprovalAction): Response {
+  Sentry.getActiveSpan()?.setAttributes({
+    "app.ai.approval.tool_call_id": action.toolCallId,
+    "app.ai.approval.suggestion_id": action.suggestionId,
+    "app.ai.approval.approved": action.approved,
+  });
+
+  const pendingSuggestions = session.pendingApprovals.get(action.toolCallId);
+  if (!pendingSuggestions) {
+    return jsonResponse({ error: "No pending approval request for tool call." }, 409);
+  }
+
+  const targetIndex = pendingSuggestions.findIndex((suggestion) => suggestion.suggestionId === action.suggestionId);
+  if (targetIndex === -1) {
+    return jsonResponse({ error: "Suggestion not found." }, 404);
+  }
+
+  if (pendingSuggestions[targetIndex]?.output) {
+    return jsonResponse({
+      status: "awaiting-approval",
+      events: [],
+    });
+  }
+
+  const itemOutput: ApprovalOutput = {
+    approved: action.approved,
+    reason: action.approved ? undefined : "User rejected this suggestion.",
+  };
+
+  const nextSuggestions = pendingSuggestions.map((suggestion, index) =>
+    index === targetIndex
+      ? {
+          ...suggestion,
+          output: itemOutput,
+        }
+      : suggestion,
+  );
+
+  if (!nextSuggestions.every((suggestion) => Boolean(suggestion.output))) {
+    session.pendingApprovals.set(action.toolCallId, nextSuggestions);
+    session.updatedAt = Date.now();
+    return jsonResponse({
+      status: "awaiting-approval",
+      events: [],
+    });
+  }
+
+  session.pendingApprovals.delete(action.toolCallId);
+  session.conversation.push({
+    role: "tool",
+    tool_call_id: action.toolCallId,
+    content: JSON.stringify({
+      decisions: nextSuggestions.map((suggestion) => ({
+        suggestionId: suggestion.suggestionId,
+        resultId: suggestion.resultId,
+        meal: suggestion.meal,
+        portion: suggestion.portion,
+        approved: suggestion.output?.approved ?? false,
+        reason: suggestion.output?.reason,
+      })),
+    }),
+  });
+
+  return createSseResponse(async (writer) => {
+    const loopResult = await runAssistantLoop(session, {
+      onEvent: writer.writeEvent,
+      signal: request.signal,
+    });
+
+    session.updatedAt = Date.now();
+    writer.writeStatus(loopResult.status);
+  }, "ai_turn_failed");
 }
