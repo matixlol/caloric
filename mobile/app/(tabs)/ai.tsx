@@ -2,12 +2,14 @@ import { fetch as expoFetch } from "expo/fetch";
 import { useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/clerk-expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
+import * as Sentry from "@sentry/react-native";
 import {
   RecordingPresets,
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
 } from "expo-audio";
+import { File as ExpoFile } from "expo-file-system";
 import {
   type ColorValue,
   Keyboard,
@@ -218,6 +220,13 @@ class UIError extends Error {
 }
 
 function getErrorDetails(error: unknown): string | null {
+  if (isErrorLike(error) && typeof error.name === "string" && error.name === "UIError") {
+    const details = (error as UIError).details;
+    if (typeof details === "string" && details.trim()) {
+      return details.trim();
+    }
+  }
+
   return null;
 }
 
@@ -367,6 +376,15 @@ function inferAudioMeta(uri: string): Pick<AudioUpload, "mimeType" | "fileName">
     mimeType,
     fileName: `voice-${Date.now()}.${fileExtension}`,
   };
+}
+
+function createAudioUploadPart(audio: AudioUpload): Blob {
+  const file = new ExpoFile(audio.uri);
+  return {
+    name: audio.fileName,
+    type: audio.mimeType,
+    bytes: () => file.bytes(),
+  } as unknown as Blob;
 }
 
 function buildRecentLogHints(logs: unknown, now = Date.now()): RecentLogHintPayload[] {
@@ -539,6 +557,7 @@ export default function AILogScreen() {
   };
 
   const showError = (nextError: unknown) => {
+    Sentry.captureException(nextError);
     setError(getErrorMessage(nextError));
     setErrorDetails(getErrorDetails(nextError));
   };
@@ -567,6 +586,10 @@ export default function AILogScreen() {
         }),
       });
     } catch (networkError) {
+      console.error("AI session request failed", {
+        url: sessionUrl,
+        error: networkError,
+      });
       throw new UIError(
         "Could not reach backend to start AI session.",
         buildErrorDetails({
@@ -639,7 +662,7 @@ export default function AILogScreen() {
     const userMessage = action.type === "user-message" ? action.message?.trim() : undefined;
 
     const body = usingAudio
-      ? (() => {
+      ? await (async () => {
           const formData = new FormData();
           formData.append("sessionId", sessionId);
           formData.append("actionType", action.type);
@@ -649,11 +672,7 @@ export default function AILogScreen() {
 
           const audio = options?.audio;
           if (audio) {
-            formData.append("audio", {
-              uri: audio.uri,
-              type: audio.mimeType,
-              name: audio.fileName,
-            } as unknown as Blob);
+            formData.append("audio", createAudioUploadPart(audio));
           }
 
           return formData;
@@ -680,6 +699,12 @@ export default function AILogScreen() {
         body,
       });
     } catch (networkError) {
+      console.error("AI turn request failed", {
+        url: turnUrl,
+        usingAudio,
+        actionType: action.type,
+        error: networkError,
+      });
       throw new UIError(
         "Could not reach backend AI endpoint.",
         buildErrorDetails({

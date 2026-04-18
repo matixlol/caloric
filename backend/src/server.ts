@@ -1925,6 +1925,17 @@ function parseSseDataChunks(raw: string): string[] {
     chunks.push(payload);
   }
 
+  if (chunks.length === 0) {
+    try {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === "object") {
+        return [raw];
+      }
+    } catch {
+      // Ignore non-JSON bodies.
+    }
+  }
+
   return chunks;
 }
 
@@ -2089,6 +2100,7 @@ async function requestOpenRouterTurn(
 
       const chunks = parseSseDataChunks(textBody);
       let assistantText = "";
+      let messageTextFallback = "";
       const toolCallsByIndex = new Map<number, OpenRouterToolCall>();
 
       for (const chunk of chunks) {
@@ -2130,12 +2142,21 @@ async function requestOpenRouterTurn(
         }
 
         const message = asRecord(firstChoice?.message);
+        const messageText = parseOpenRouterText(message?.content);
+        if (messageText) {
+          messageTextFallback = messageText;
+        }
+
         const messageToolCalls = parseOpenRouterToolCalls(message?.tool_calls);
         if (messageToolCalls.length > 0) {
           for (const [index, toolCall] of messageToolCalls.entries()) {
             toolCallsByIndex.set(index, toolCall);
           }
         }
+      }
+
+      if (!assistantText && messageTextFallback) {
+        assistantText = messageTextFallback;
       }
 
       const toolCalls = Array.from(toolCallsByIndex.values()).filter(
