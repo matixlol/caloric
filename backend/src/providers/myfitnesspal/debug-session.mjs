@@ -2,7 +2,7 @@ import { mkdir, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { chromium } from "rebrowser-playwright";
-import { installTurnstileHook, solveTurnstileWith2Captcha } from "./mfp-turnstile.mjs";
+import { installTurnstileHook, solveTurnstileWith2Captcha } from "./turnstile.ts";
 
 const BASE_URL = "https://www.myfitnesspal.com";
 const SEARCH_URL = `${BASE_URL}/food/search`;
@@ -10,7 +10,7 @@ const LOGIN_URL = `${BASE_URL}/account/login?callbackUrl=${encodeURIComponent(SE
 const CALLBACK_URL = `${BASE_URL}/api/auth/callback/credentials`;
 const DESKTOP_CHROME_UA =
   "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36";
-const PROJECT_ROOT = path.resolve(new URL("..", import.meta.url).pathname, "..");
+const PROJECT_ROOT = path.resolve(new URL("../../..", import.meta.url).pathname);
 const DEFAULT_OUTPUT_DIR = path.join(os.tmpdir(), "mfp-debug");
 const DEFAULT_PROFILE_DIR = path.join(DEFAULT_OUTPUT_DIR, "profile");
 

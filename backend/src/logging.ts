@@ -1,5 +1,4 @@
-import * as Sentry from "@sentry/bun";
-import { getActiveTraceContext } from "./tracing";
+import { Sentry } from "./lib/sentry";
 
 type LogValue = string | number | boolean | null | LogValue[] | { [key: string]: LogValue };
 
@@ -40,24 +39,13 @@ export function summarizeText(value: string | undefined | null, maxLength = 240)
   return `${normalized.slice(0, maxLength - 3)}...`;
 }
 
-function getTraceFields(): Record<string, string> {
-  const traceContext = getActiveTraceContext();
-  if (!traceContext) {
-    return {};
-  }
-
-  return traceContext;
-}
-
 export function logInfo(event: string, fields: LogFields = {}): void {
   const payload = {
     level: "info",
     event,
-    ...getTraceFields(),
     ...compactFields(fields),
   };
 
-  console.log(JSON.stringify(payload));
   Sentry.logger.info(event, payload);
 }
 
@@ -75,11 +63,9 @@ export function logError(event: string, error: unknown, fields: LogFields = {}):
   const payload = {
     level: "error",
     event,
-    ...getTraceFields(),
     ...compactFields(fields),
     error: normalizedError,
   };
 
-  console.error(JSON.stringify(payload));
   Sentry.logger.error(event, payload);
 }

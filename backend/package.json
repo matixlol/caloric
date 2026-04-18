@@ -10,15 +10,18 @@
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",
     "db:studio": "drizzle-kit studio",
-    "anmat:import-product-html": "bun src/import-anmat-product-html.ts",
-    "anmat:import-product-derived": "bun src/import-anmat-product-derived.ts"
+    "anmat:import-product-html": "bun src/providers/anmat/import-product-html.ts",
+    "anmat:import-product-derived": "bun src/providers/anmat/import-product-derived.ts"
   },
   "dependencies": {
+    "@caloric/data-model": "workspace:*",
     "@clerk/backend": "^2.14.20",
     "@foxglove/wasm-zstd": "^1.0.1",
+    "@hono/otel": "^1.1.1",
     "@sentry/bun": "^10.47.0",
     "cheerio": "^1.1.2",
     "drizzle-orm": "^0.44.5",
+    "hono": "^4.12.14",
     "playwright": "1.52.0",
     "playwright-core": "1.52.0",
     "postgres": "^3.4.7",

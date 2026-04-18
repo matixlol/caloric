@@ -1,4 +1,4 @@
-import { FoodEntrySchema, USER_SETTINGS_ROW_ID, UserSettingsSchema } from "./data-model";
+import { FoodEntrySchema, USER_SETTINGS_ROW_ID, UserSettingsSchema } from "@caloric/data-model";
 import { z } from "zod";
 
 export const SyncFoodEntryRowSchema = z

@@ -3,14 +3,14 @@ import { mkdtemp, readFile, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { config } from "./config";
-import { db } from "./db";
-import { mfpAuthSessions } from "./db/schema";
+import { config } from "../../config";
+import { db } from "../../db";
+import { mfpAuthSessions } from "../../db/schema";
 
 export const MFP_BASE_URL = "https://www.myfitnesspal.com";
 
 const MFP_PROVIDER = "myfitnesspal";
-const BACKEND_ROOT = fileURLToPath(new URL("..", import.meta.url));
+const BACKEND_ROOT = fileURLToPath(new URL("../../..", import.meta.url));
 
 type SessionStorageState = Record<string, string>;
 
@@ -173,7 +173,7 @@ async function refreshWithPlaywright(): Promise<MfpRequestAuth> {
 
   try {
     const child = Bun.spawn({
-      cmd: ["bun", "src/mfp-debug-session.mjs", "run", "submitted"],
+      cmd: ["bun", "src/providers/myfitnesspal/debug-session.mjs", "run", "submitted"],
       cwd: BACKEND_ROOT,
       env: {
         ...process.env,

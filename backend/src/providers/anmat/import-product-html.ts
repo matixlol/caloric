@@ -1,9 +1,15 @@
-import { createHash } from "node:crypto";
 import { readdir, readFile } from "node:fs/promises";
 import { join, relative, resolve, sep } from "node:path";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import { anmatProductHtmlBlobs } from "./db/schema";
+import { anmatProductHtmlBlobs } from "../../db/schema";
+import {
+  compressHtmlWithZstd,
+  extractProductMetadataFromHtml,
+  htmlToText,
+  normalizeTextValue,
+  sha256Hex,
+} from "./html";
 
 type CliArgs = {
   rootDir: string;
@@ -91,70 +97,12 @@ async function readMetadata(htmlPath: string): Promise<MetadataShape> {
   }
 }
 
-async function compressWithZstd(filePath: string): Promise<Uint8Array> {
-  const proc = Bun.spawn(["zstd", "-q", "-19", "-c", "--", filePath], {
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-
-  const [stdoutBuffer, stderrText, exitCode] = await Promise.all([
-    new Response(proc.stdout).arrayBuffer(),
-    new Response(proc.stderr).text(),
-    proc.exited,
-  ]);
-
-  if (exitCode !== 0) {
-    throw new Error(`zstd failed with exit code ${exitCode}: ${stderrText.trim()}`);
-  }
-
-  return new Uint8Array(stdoutBuffer);
-}
-
-function decodeEntities(input: string): string {
-  if (typeof DOMParser !== "undefined") {
-    const doc = new DOMParser().parseFromString(`<!doctype html><body>${input}`, "text/html");
-    return doc.documentElement.textContent ?? input;
-  }
-  return input;
-}
-
-function htmlToText(html: string): string {
-  return decodeEntities(
-    html
-      .replace(/<script\b[^>]*>[\s\S]*?<\/script>/gi, " ")
-      .replace(/<style\b[^>]*>[\s\S]*?<\/style>/gi, " ")
-      .replace(/<[^>]+>/g, " "),
-  ).replace(/\s+/g, " ").trim();
-}
-
 function parseDate(value: string | undefined): Date | null {
   if (!value) {
     return null;
   }
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function normalizeTextValue(value: string | undefined): string | null {
-  if (!value) {
-    return null;
-  }
-
-  const trimmed = value.trim();
-  if (!trimmed) {
-    return null;
-  }
-
-  const repaired = Buffer.from(trimmed, "latin1").toString("utf8").trim();
-  const score = (input: string) => {
-    const mojibakeMatches = input.match(/Ã.|Â.|â.|¤|�/g) ?? [];
-    return mojibakeMatches.length;
-  };
-
-  const preferred = score(repaired) < score(trimmed) ? repaired : trimmed;
-  return preferred
-    .normalize("NFC")
-    .replace(/(?<=[A-ZÁÉÍÓÚÜÑ])[áéíóúñü](?=[^a-záéíóúñü]|$)/g, (char) => char.toUpperCase());
 }
 
 function getRunKey(rootDir: string, htmlPath: string): string {
@@ -166,14 +114,6 @@ function getRunKey(rootDir: string, htmlPath: string): string {
 function getDetailKeyFromPath(htmlPath: string): string | null {
   const parentDir = resolve(htmlPath, "..").split(sep).pop();
   return parentDir?.trim() ? parentDir : null;
-}
-
-function extractField(text: string, pattern: RegExp): string | null {
-  const match = pattern.exec(text);
-  if (!match) {
-    return null;
-  }
-  return normalizeTextValue(match[1]);
 }
 
 async function main() {
@@ -207,30 +147,23 @@ async function main() {
         readFile(htmlPath),
         readMetadata(htmlPath),
       ]);
-      const compressed = await compressWithZstd(htmlPath);
       const relativePath = relative(rootDir, htmlPath);
       const htmlText = htmlToText(new TextDecoder("utf-8").decode(htmlBytes));
+      const compressed = await compressHtmlWithZstd(new TextDecoder("utf-8").decode(htmlBytes));
       const product = metadata.product ?? {};
+      const extractedProduct = extractProductMetadataFromHtml(htmlText, product);
       const normalizedToken = normalizeTextValue(metadata.token);
       const normalizedQuery = normalizeTextValue(metadata.query);
       const normalizedWrapperUrl = normalizeTextValue(metadata.wrapperUrl);
       const normalizedContentUrl = normalizeTextValue(metadata.contentUrl);
       const normalizedSearchMode = normalizeTextValue(product.searchMode);
-      const normalizedProvince =
-        extractField(htmlText, /Provincia:\s*(.+?)\s*Localidad:/i) || normalizeTextValue(product.province);
-      const normalizedRnpa =
-        extractField(htmlText, /RNPA\s+N\S*:\s*([0-9-]+)/i) || normalizeTextValue(product.rnpa);
-      const normalizedDenominacion =
-        extractField(htmlText, /Denominaci[oó]n:\s*(.+?)\s*Modo de Comercializaci[oó]n:/i) ||
-        normalizeTextValue(product.denominacion);
-      const normalizedNombreFantasia =
-        extractField(htmlText, /Nombre de Fantas[ií]a:\s*(.+?)\s*Denominaci[oó]n:/i) ||
-        normalizeTextValue(product.nombreFantasia);
-      const normalizedMarca =
-        extractField(htmlText, /Marca:\s*(.+?)\s*Nombre de Fantas[ií]a:/i) || normalizeTextValue(product.marca);
-      const normalizedTitular =
-        extractField(htmlText, /Raz[oó]n Social:\s*(.+?)\s*Provincia:/i) || normalizeTextValue(product.titular);
-      const normalizedEstado = normalizeTextValue(product.estado);
+      const normalizedProvince = extractedProduct.province ?? null;
+      const normalizedRnpa = extractedProduct.rnpa ?? null;
+      const normalizedDenominacion = extractedProduct.denominacion ?? null;
+      const normalizedNombreFantasia = extractedProduct.nombreFantasia ?? null;
+      const normalizedMarca = extractedProduct.marca ?? null;
+      const normalizedTitular = extractedProduct.titular ?? null;
+      const normalizedEstado = extractedProduct.estado ?? null;
 
       await db
         .insert(anmatProductHtmlBlobs)
@@ -255,7 +188,7 @@ async function main() {
           estado: normalizedEstado,
           compressionAlgo: "zstd",
           htmlZstd: compressed,
-          htmlSha256: createHash("sha256").update(htmlBytes).digest("hex"),
+          htmlSha256: sha256Hex(htmlBytes),
           uncompressedBytes: htmlBytes.byteLength,
           compressedBytes: compressed.byteLength,
           savedAt: parseDate(metadata.savedAt),
@@ -282,7 +215,7 @@ async function main() {
             estado: normalizedEstado,
             compressionAlgo: "zstd",
             htmlZstd: compressed,
-            htmlSha256: createHash("sha256").update(htmlBytes).digest("hex"),
+            htmlSha256: sha256Hex(htmlBytes),
             uncompressedBytes: htmlBytes.byteLength,
             compressedBytes: compressed.byteLength,
             savedAt: parseDate(metadata.savedAt),

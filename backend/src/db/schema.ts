@@ -1,4 +1,4 @@
-import type { FoodEntry, UserSettings } from "../data-model";
+import type { FoodEntry, UserSettings } from "@caloric/data-model";
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array | Buffer }>({

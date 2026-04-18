@@ -558,7 +558,7 @@ async function runCli(): Promise<void> {
   const args = parseCliArgs(process.argv.slice(2));
   if (!args.rootDir) {
     console.error(
-      "Usage: bun src/anmat-ean-parser.ts --root <run_dir> [--out-json <path>] [--scan-limit N] [--include-html-any] [--product-concurrency N] [--pdf-concurrency N]",
+      "Usage: bun src/providers/anmat/ean-parser.ts --root <run_dir> [--out-json <path>] [--scan-limit N] [--include-html-any] [--product-concurrency N] [--pdf-concurrency N]",
     );
     process.exit(1);
   }

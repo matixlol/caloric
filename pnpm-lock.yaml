@@ -10,12 +10,18 @@ importers:
 
   backend:
     dependencies:
+      '@caloric/data-model':
+        specifier: workspace:*
+        version: link:../data-model
       '@clerk/backend':
         specifier: ^2.14.20
         version: 2.33.2(react-dom@19.2.0(react@19.2.0))(react@19.2.0)
       '@foxglove/wasm-zstd':
         specifier: ^1.0.1
         version: 1.0.1
+      '@hono/otel':
+        specifier: ^1.1.1
+        version: 1.1.1(hono@4.12.14)
       '@sentry/bun':
         specifier: ^10.47.0
         version: 10.49.0
@@ -25,6 +31,9 @@ importers:
       drizzle-orm:
         specifier: ^0.44.5
         version: 0.44.7(@op-engineering/op-sqlite@14.1.4(react-native@0.83.4(@babel/core@7.29.0)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.0))(react@19.2.0))(@opentelemetry/api@1.9.1)(@types/pg@8.15.6)(bun-types@1.3.12)(expo-sqlite@55.0.11(expo@55.0.15)(react-native@0.83.4(@babel/core@7.29.0)(@types/react@19.2.14)(bufferutil@4.1.0)(react@19.2.0))(react@19.2.0))(postgres@3.4.9)
+      hono:
+        specifier: ^4.12.14
+        version: 4.12.14
       playwright:
         specifier: 1.52.0
         version: 1.52.0
@@ -1769,6 +1778,11 @@ packages:
 
   '@hapi/topo@5.1.0':
     resolution: {integrity: sha512-foQZKJig7Ob0BMAYBfcJk8d77QtOe7Wo4ox7ff1lQYoNNAb6jwcY1ncdoy2e9wQZzvNy7ODZCYJkK8kzmcAnAg==}
+
+  '@hono/otel@1.1.1':
+    resolution: {integrity: sha512-zmTMS0uMMzwjO8f4IG0eFoDlr5D7XwJgiCFSHEa5MMZJRHwuSrRI78SLjn5XdFedttSlSgDwHUsf91hly16MSQ==}
+    peerDependencies:
+      hono: '>=4.0.0'
 
   '@humanfs/core@0.19.1':
     resolution: {integrity: sha512-5DyQ4+1JEUzejeK1JGICcideyfUbGixgS9jNgex5nqkW+cY7WZhxBigmieN5Qnw9ZosSNVC9KQKyb+GUaGyKUA==}
@@ -5149,6 +5163,10 @@ packages:
 
   hoist-non-react-statics@3.3.2:
     resolution: {integrity: sha512-/gGivxi8JPKWNm/W0jSmzcMPpfpPLc3dY/6GxhX2hQ9iGj3aDfklV4ET7NjKpSinLpJ5vafa9iiGIEZg10SfBw==}
+
+  hono@4.12.14:
+    resolution: {integrity: sha512-am5zfg3yu6sqn5yjKBNqhnTX7Cv+m00ox+7jbaKkrLMRJ4rAdldd1xPd/JzbBWspqaQv6RSTrgFN95EsfhC+7w==}
+    engines: {node: '>=16.9.0'}
 
   hosted-git-info@7.0.2:
     resolution: {integrity: sha512-puUZAUKT5m8Zzvs72XWy3HtvVbTWljRE66cP60bxJzAqf2DgICo7lYTY2IHUmLnNpjYvw5bvmoHvPc0QO2a62w==}
@@ -9973,6 +9991,12 @@ snapshots:
     dependencies:
       '@hapi/hoek': 9.3.0
 
+  '@hono/otel@1.1.1(hono@4.12.14)':
+    dependencies:
+      '@opentelemetry/api': 1.9.1
+      '@opentelemetry/semantic-conventions': 1.40.0
+      hono: 4.12.14
+
   '@humanfs/core@0.19.1': {}
 
   '@humanfs/node@0.16.7':
@@ -14215,6 +14239,8 @@ snapshots:
   hoist-non-react-statics@3.3.2:
     dependencies:
       react-is: 16.13.1
+
+  hono@4.12.14: {}
 
   hosted-git-info@7.0.2:
     dependencies:
