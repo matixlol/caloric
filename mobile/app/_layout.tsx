@@ -1,6 +1,8 @@
 import { ClerkProvider } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
+import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "@react-navigation/native";
 import { Stack } from "expo-router";
+import { useMemo } from "react";
 import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
@@ -8,6 +10,7 @@ import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
 import { DataProvider } from "../src/data/DataProvider";
 import * as Sentry from "@sentry/react-native";
+import { useAppTheme } from "../src/theme/useAppTheme";
 
 Sentry.init({
   dsn: 'https://b717a9ae29012fc29268ccc8b531ea67@o4510397347987456.ingest.us.sentry.io/4511171255009280',
@@ -53,6 +56,24 @@ function AppNavigator() {
 }
 
 export default Sentry.wrap(function RootLayout() {
+  const { colorScheme, palette } = useAppTheme();
+  const navigationTheme = useMemo<Theme>(() => {
+    const baseTheme = colorScheme === "dark" ? DarkTheme : DefaultTheme;
+
+    return {
+      ...baseTheme,
+      colors: {
+        ...baseTheme.colors,
+        primary: palette.tint,
+        background: palette.background,
+        card: palette.card,
+        text: palette.label,
+        border: palette.separator,
+        notification: palette.error,
+      },
+    };
+  }, [colorScheme, palette]);
+
   if (!clerkPublishableKey) {
     return <MissingClerkKeyScreen />;
   }
@@ -61,10 +82,12 @@ export default Sentry.wrap(function RootLayout() {
     <GestureHandlerRootView style={styles.gestureRoot}>
       <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
         <DataProvider>
-          <ClerkAuthGate>
-            <AutoBackupCoordinator />
-            <AppNavigator />
-          </ClerkAuthGate>
+          <ThemeProvider value={navigationTheme}>
+            <ClerkAuthGate>
+              <AutoBackupCoordinator />
+              <AppNavigator />
+            </ClerkAuthGate>
+          </ThemeProvider>
         </DataProvider>
       </ClerkProvider>
     </GestureHandlerRootView>

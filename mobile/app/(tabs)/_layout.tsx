@@ -3,6 +3,7 @@ import { useAppTheme } from "../../src/theme/useAppTheme";
 
 export default function TabsLayout() {
   const { isDark, palette } = useAppTheme();
+  const contentStyle = { backgroundColor: palette.background };
 
   return (
     <NativeTabs
@@ -21,12 +22,20 @@ export default function TabsLayout() {
       }}
       shadowColor={palette.separator}
     >
-      <NativeTabs.Trigger name="index">
+      <NativeTabs.Trigger
+        name="index"
+        contentStyle={contentStyle}
+        disableTransparentOnScrollEdge
+      >
         <NativeTabs.Trigger.Icon sf={{ default: "house", selected: "house.fill" }} md="home" />
         <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="ai">
+      <NativeTabs.Trigger
+        name="ai"
+        contentStyle={contentStyle}
+        disableTransparentOnScrollEdge
+      >
         <NativeTabs.Trigger.Icon
           sf={{ default: "sparkles", selected: "sparkles" }}
           md="auto_awesome"
@@ -34,7 +43,11 @@ export default function TabsLayout() {
         <NativeTabs.Trigger.Label>AI Log</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
 
-      <NativeTabs.Trigger name="settings">
+      <NativeTabs.Trigger
+        name="settings"
+        contentStyle={contentStyle}
+        disableTransparentOnScrollEdge
+      >
         <NativeTabs.Trigger.Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} md="settings" />
         <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
       </NativeTabs.Trigger>
