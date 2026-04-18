@@ -86,6 +86,40 @@ function formatUpdateTimestamp(value: Date | null | undefined): string {
   return value.toLocaleString();
 }
 
+function formatRelativeTimestamp(value: number): string {
+  if (!Number.isFinite(value) || value <= 0) {
+    return "Never";
+  }
+
+  const timestamp = new Date(value);
+  if (Number.isNaN(timestamp.getTime())) {
+    return "Never";
+  }
+
+  const elapsedMs = Math.max(Date.now() - timestamp.getTime(), 0);
+
+  if (elapsedMs < 60_000) {
+    return "Just now";
+  }
+
+  if (elapsedMs < 3_600_000) {
+    return `${Math.floor(elapsedMs / 60_000)}m ago`;
+  }
+
+  if (elapsedMs < 86_400_000) {
+    return `${Math.floor(elapsedMs / 3_600_000)}h ago`;
+  }
+
+  if (elapsedMs < 604_800_000) {
+    return `${Math.floor(elapsedMs / 86_400_000)}d ago`;
+  }
+
+  return timestamp.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+  });
+}
+
 function getUpdatesStatusLabel(options: {
   isEnabled: boolean;
   isChecking: boolean;
@@ -359,6 +393,9 @@ export default function SettingsScreen() {
     : isUpdateAvailable || isDownloading
       ? "Download Update"
       : "Force Check";
+  const lastSyncedValue = syncedSettings.dirty
+    ? "Pending"
+    : formatRelativeTimestamp(syncedSettings.updatedAt);
 
   const handleSave = () => {
     setSaveError(null);
@@ -455,7 +492,24 @@ export default function SettingsScreen() {
           },
         ]}
       >
-        <Text style={styles.largeTitle}>Settings</Text>
+        <View style={styles.titleRow}>
+          <Text style={styles.largeTitle}>Settings</Text>
+          <View
+            style={[
+              styles.syncBadge,
+              syncedSettings.dirty ? styles.syncBadgePending : styles.syncBadgeReady,
+            ]}
+          >
+            <View
+              style={[
+                styles.syncBadgeDot,
+                syncedSettings.dirty ? styles.syncBadgeDotPending : styles.syncBadgeDotReady,
+              ]}
+            />
+            <Text style={styles.syncBadgeLabel}>Last synced</Text>
+            <Text style={styles.syncBadgeValue}>{lastSyncedValue}</Text>
+          </View>
+        </View>
 
         <Text style={styles.sectionTitle}>Account</Text>
         <View style={styles.card}>
@@ -477,38 +531,6 @@ export default function SettingsScreen() {
           </Pressable>
         </View>
         {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
-
-        <Text style={styles.sectionTitle}>Updates</Text>
-        <View style={styles.card}>
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Status</Text>
-            <Text style={styles.accountValue}>{updatesStatusLabel}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Last checked</Text>
-            <Text style={styles.accountValue}>{lastCheckedLabel}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Current update</Text>
-            <Text style={styles.accountValue}>{currentUpdateCreatedAtLabel}</Text>
-          </View>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={updateButtonLabel}
-            onPress={() => {
-              void handleCheckForUpdates();
-            }}
-            disabled={!canCheckForUpdates}
-            style={[styles.updatesButton, !canCheckForUpdates && styles.updatesButtonDisabled]}
-          >
-            <Text style={[styles.updatesButtonText, !canCheckForUpdates && styles.updatesButtonTextDisabled]}>
-              {updateButtonLabel}
-            </Text>
-          </Pressable>
-        </View>
 
         <Text style={styles.sectionTitle}>Goals</Text>
         <View style={styles.card}>
@@ -611,6 +633,38 @@ export default function SettingsScreen() {
 
           <Text style={styles.macroHelpText}>Drag the two dividers to resize each macro section.</Text>
         </View>
+
+        <Text style={styles.sectionTitle}>Updates</Text>
+        <View style={styles.card}>
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Status</Text>
+            <Text style={styles.accountValue}>{updatesStatusLabel}</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Last checked</Text>
+            <Text style={styles.accountValue}>{lastCheckedLabel}</Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Current update</Text>
+            <Text style={styles.accountValue}>{currentUpdateCreatedAtLabel}</Text>
+          </View>
+          <View style={styles.divider} />
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={updateButtonLabel}
+            onPress={() => {
+              void handleCheckForUpdates();
+            }}
+            disabled={!canCheckForUpdates}
+            style={[styles.updatesButton, !canCheckForUpdates && styles.updatesButtonDisabled]}
+          >
+            <Text style={[styles.updatesButtonText, !canCheckForUpdates && styles.updatesButtonTextDisabled]}>
+              {updateButtonLabel}
+            </Text>
+          </Pressable>
+        </View>
       </ScrollView>
 
       <View
@@ -679,12 +733,61 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: palette.secondaryLabel,
   },
+  titleRow: {
+    paddingHorizontal: 4,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
   largeTitle: {
     fontSize: 34,
     lineHeight: 41,
     fontWeight: "700",
     color: palette.label,
-    paddingHorizontal: 4,
+  },
+  syncBadge: {
+    minHeight: 34,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    borderRadius: 12,
+    borderWidth: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    flexShrink: 1,
+  },
+  syncBadgeReady: {
+    backgroundColor: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
+    borderColor: iosColor("separator", "#E5E7EB"),
+  },
+  syncBadgePending: {
+    backgroundColor: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
+    borderColor: iosColor("systemOrangeColor", "#F59E0B"),
+  },
+  syncBadgeDot: {
+    width: 7,
+    height: 7,
+    borderRadius: 999,
+    flexShrink: 0,
+  },
+  syncBadgeDotReady: {
+    backgroundColor: palette.success,
+  },
+  syncBadgeDotPending: {
+    backgroundColor: iosColor("systemOrangeColor", "#F59E0B"),
+  },
+  syncBadgeLabel: {
+    fontSize: 12,
+    lineHeight: 16,
+    color: palette.secondaryLabel,
+  },
+  syncBadgeValue: {
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: "700",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
   },
   sectionTitle: {
     marginTop: 8,
