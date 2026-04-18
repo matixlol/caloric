@@ -68,12 +68,60 @@ function getErrorMessage(error: unknown): string {
 
   return "Unknown error.";
 }
+
+function formatCalories(value: number | undefined): string | null {
+  if (value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  return Math.round(value).toLocaleString();
+}
+
+function formatMacroValue(value: number | undefined): string | null {
+  if (value === undefined || !Number.isFinite(value)) {
+    return null;
+  }
+
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? `${rounded}` : rounded.toFixed(1);
+}
+
+function formatMacroSummary(nutrition: SearchFood["nutrition"] | undefined): string | null {
+  if (!nutrition) {
+    return null;
+  }
+
+  const parts: string[] = [];
+  const calories = formatCalories(nutrition.calories);
+  const protein = formatMacroValue(nutrition.protein);
+  const carbs = formatMacroValue(nutrition.carbs);
+  const fat = formatMacroValue(nutrition.fat);
+
+  if (calories) {
+    parts.push(`${calories} kcal`);
+  }
+
+  if (protein) {
+    parts.push(`P ${protein}g`);
+  }
+
+  if (carbs) {
+    parts.push(`C ${carbs}g`);
+  }
+
+  if (fat) {
+    parts.push(`F ${fat}g`);
+  }
+
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function FoodRow({
   sourceLabel,
   name,
   brand,
   serving,
-  calories,
+  macroSummary,
   selected,
   isLast,
   onPress,
@@ -82,7 +130,7 @@ function FoodRow({
   name: string;
   brand?: string;
   serving?: string;
-  calories: number;
+  macroSummary?: string | null;
   selected: boolean;
   isLast: boolean;
   onPress: () => void;
@@ -101,10 +149,7 @@ function FoodRow({
           {serving ? <Text style={styles.foodMeta}>{brand ? `• ${serving}` : serving}</Text> : null}
           {!brand && !serving ? <Text style={styles.foodMeta}>No serving details</Text> : null}
         </View>
-      </View>
-      <View style={styles.foodRight}>
-        <Text style={styles.foodCalories}>{calories.toLocaleString()}</Text>
-        <Text style={styles.foodUnit}>kcal</Text>
+        {macroSummary ? <Text style={styles.foodMacroSummary}>{macroSummary}</Text> : null}
       </View>
       {selected ? <Text style={styles.selectedMark}>✓</Text> : null}
     </Pressable>
@@ -334,8 +379,6 @@ export default function LogFoodScreen() {
         {visibleFoods.length > 0 ? (
           <View style={styles.card}>
             {visibleFoods.map((food, index) => {
-              const calories = food.nutrition?.calories ?? 0;
-
               return (
                 <FoodRow
                   key={food.id}
@@ -343,7 +386,7 @@ export default function LogFoodScreen() {
                   name={food.name}
                   brand={food.brand}
                   serving={food.serving}
-                  calories={calories}
+                  macroSummary={formatMacroSummary(food.nutrition)}
                   selected={selectedFoodId === food.id}
                   isLast={index === visibleFoods.length - 1}
                   onPress={() => setSelectedFoodId(food.id)}
@@ -511,6 +554,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     color: palette.secondaryLabel,
   },
+  foodMacroSummary: {
+    marginTop: 4,
+    fontSize: 12,
+    lineHeight: 17,
+    color: palette.secondaryLabel,
+    fontVariant: ["tabular-nums"],
+  },
   inlineSourceBadge: {
     paddingHorizontal: 6,
     paddingVertical: 2,
@@ -521,23 +571,6 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: palette.badgeText,
     backgroundColor: palette.badgeBackground,
-  },
-  foodRight: {
-    alignItems: "flex-end",
-    minWidth: 64,
-  },
-  foodCalories: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    color: palette.label,
-    fontVariant: ["tabular-nums"],
-  },
-  foodUnit: {
-    fontSize: 11,
-    lineHeight: 14,
-    fontWeight: "500",
-    color: palette.secondaryLabel,
   },
   selectedMark: {
     fontSize: 18,

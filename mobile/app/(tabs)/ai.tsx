@@ -1282,9 +1282,8 @@ export default function AILogScreen() {
                           {food.brand ? ` • ${food.brand}` : ""}
                         </Text>
                       </View>
-                      {food.serving ? <Text style={styles.toolMeta}>{food.serving}</Text> : null}
-                      {formatMacroSummary(food.nutrition) ? (
-                        <Text style={styles.toolMeta}>{formatMacroSummary(food.nutrition)}</Text>
+                      {food.nutrition?.calories !== undefined ? (
+                        <Text style={styles.toolMeta}>{`${formatCalories(food.nutrition.calories)} kcal`}</Text>
                       ) : null}
                     </View>
                   ))}
