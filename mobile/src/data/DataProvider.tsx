@@ -1,7 +1,7 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
-import { useAuth } from "@clerk/clerk-expo";
+import { useAuth } from "@clerk/expo";
 import { type Meal, type UserSettings } from "@caloric/data-model";
 import { localDataStore, type FoodEntryRecord, type UserSettingsRecord } from "./store";
 

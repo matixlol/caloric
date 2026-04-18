@@ -1,4 +1,4 @@
-import { useClerk, useUser } from "@clerk/clerk-expo";
+import { useClerk, useUser } from "@clerk/expo";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import * as Updates from "expo-updates";
 import { useEffect, useRef, useState } from "react";

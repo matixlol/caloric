@@ -73,6 +73,12 @@
       ],
       "./plugins/withThirdPartySQLitePod",
       "./plugins/withICloudBackup",
+      [
+        "@clerk/expo",
+        {
+          "appleSignIn": false
+        }
+      ],
       "expo-asset",
       "expo-font",
       "expo-image",
