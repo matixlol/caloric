@@ -165,7 +165,7 @@ final class ICloudBackupModule: NSObject {
   }
 
   private static func backupFileName(for timestampMs: Int64) -> String {
-    "\(backupFileNamePrefix)\(timestampMs)\(backupFileNameSuffix)"
+    "\\(backupFileNamePrefix)\\(timestampMs)\\(backupFileNameSuffix)"
   }
 }
 `;
