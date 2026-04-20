@@ -53,7 +53,7 @@ type ApprovalOutput = {
   reason?: string;
 };
 
-type ChatStatus = "ready" | "streaming" | "awaiting-approval";
+type ChatStatus = "ready" | "streaming";
 
 type SearchResultFood = SharedSearchFood & {
   resultId: string;
@@ -121,12 +121,6 @@ type AgentAction =
   | {
       type: "user-message";
       message?: string;
-    }
-  | {
-      type: "approval";
-      toolCallId: string;
-      suggestionId: string;
-      approved: boolean;
     };
 
 type AudioUpload = {
@@ -290,7 +284,7 @@ function buildStreamingResult(payloads: StreamingPayload[]): StreamingTurnResult
 
   for (const payload of payloads) {
     if (payload.type === "status") {
-      if (payload.status === "awaiting-approval" || payload.status === "ready") {
+      if (payload.status === "ready") {
         status = payload.status;
       }
       continue;
@@ -936,7 +930,7 @@ export default function AILogScreen() {
       nextStatus = result.status;
     } catch (loopError) {
       showError(loopError);
-      nextStatus = pendingApprovalsRef.current.size > 0 ? "awaiting-approval" : "ready";
+      nextStatus = "ready";
     } finally {
       loopRunningRef.current = false;
       setStatus(nextStatus);
@@ -1047,7 +1041,7 @@ export default function AILogScreen() {
     }
   };
 
-  const respondToApproval = async (toolCallId: string, suggestionId: string, approved: boolean) => {
+  const respondToApproval = (toolCallId: string, suggestionId: string, approved: boolean) => {
     if (status === "streaming") {
       return;
     }
@@ -1104,12 +1098,6 @@ export default function AILogScreen() {
     }
 
     clearError();
-    await runAssistantAction({
-      type: "approval",
-      toolCallId,
-      suggestionId,
-      approved,
-    });
   };
 
   if (!isDataReady || isLoadingEntries) {
@@ -1121,7 +1109,10 @@ export default function AILogScreen() {
   }
 
   const hasInputText = input.trim().length > 0;
-  const canUseComposerActions = Boolean(userId) && status === "ready";
+  const hasPendingApprovals = messages.some(
+    (message) => message.kind === "approval" && message.suggestions.some((suggestion) => !suggestion.output),
+  );
+  const canUseComposerActions = Boolean(userId) && !isStreaming;
 
   return (
     <KeyboardAvoidingView
@@ -1160,9 +1151,9 @@ export default function AILogScreen() {
           </View>
         ) : null}
 
-        {status === "awaiting-approval" ? (
+        {hasPendingApprovals ? (
           <View style={styles.awaitingCard}>
-            <Text style={styles.awaitingText}>Approve or reject each suggestion to continue.</Text>
+            <Text style={styles.awaitingText}>Suggestions stay available while you keep chatting.</Text>
           </View>
         ) : null}
 
@@ -1358,7 +1349,7 @@ export default function AILogScreen() {
             style={styles.input}
             multiline
             maxLength={600}
-            editable={Boolean(userId) && status === "ready"}
+            editable={Boolean(userId) && !isStreaming}
             keyboardAppearance={isDark ? "dark" : "light"}
             selectionColor={palette.tint}
           />

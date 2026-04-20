@@ -18,7 +18,6 @@ import {
   mealValues,
   saveAiSession,
   type AiSessionState,
-  type ApprovalOutput,
   type Meal,
   type ResolvedApprovalSuggestion,
 } from "./ai-store";
@@ -50,7 +49,7 @@ type AgentEvent =
       suggestions: ResolvedApprovalSuggestion[];
     };
 
-type AgentStatus = "ready" | "awaiting-approval";
+type AgentStatus = "ready";
 
 const SearchFoodsToolArgsSchema = z.object({
   query: z.string().trim().min(2),
@@ -103,7 +102,7 @@ const aiSdkTools = {
   }),
   requestFoodApprovals: tool({
     description:
-      "Request user approval for one or more selected food entries using local result IDs from searchFoods.",
+      "Request user approval for one or more selected food entries using local result IDs from searchFoods. This renders interactive suggestions in the app and ends the current turn.",
     inputSchema: RequestFoodApprovalsToolArgsSchema,
   }),
 } as const;
@@ -116,9 +115,10 @@ const systemPrompt = [
   "searchFoods returns local result IDs. Only reference those IDs later.",
   "Never send or edit nutrition/name/brand/serving in approval requests.",
   "When ready, call requestFoodApprovals once with one or more suggestions.",
+  "Calling requestFoodApprovals ends your turn.",
+  "The app handles approval and rejection locally. Do not expect approval results or react to approval clicks.",
   "Only set resultId, meal, portion, and reason in each suggestion.",
   "Portion should be in quarter increments (0.25).",
-  "If the user rejects suggestions, explain briefly and search again.",
   "If the user sends audio, understand it directly from the audio input instead of talking about transcription.",
   "When you answer, keep the wording concise and practical.",
 ].join(" ");
@@ -299,30 +299,6 @@ async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaTy
   };
 }
 
-function buildToolCallRegistry(conversation: ModelMessage[]) {
-  const registry = new Map<string, SessionToolCall>();
-
-  for (const message of conversation) {
-    if (message.role !== "assistant" || typeof message.content === "string") {
-      continue;
-    }
-
-    for (const part of message.content) {
-      if (part.type !== "tool-call" || !(part.toolName in aiSdkTools)) {
-        continue;
-      }
-
-      registry.set(part.toolCallId, {
-        toolCallId: part.toolCallId,
-        toolName: part.toolName as ToolName,
-        input: part.input,
-      });
-    }
-  }
-
-  return registry;
-}
-
 function createToolResultMessage(toolCall: SessionToolCall, value: unknown): ModelMessage {
   return {
     role: "tool",
@@ -402,12 +378,12 @@ async function requestAiSdkTurn(
 async function runToolCall(
   session: AiSessionState,
   toolCall: SessionToolCall,
-): Promise<{ pauseForApproval: boolean; output: unknown; events: AgentEvent[] }> {
+): Promise<{ stopAfterTool: boolean; output: unknown; events: AgentEvent[] }> {
   if (toolCall.toolName === "searchFoods") {
     const parsedArgs = SearchFoodsToolArgsSchema.safeParse(toolCall.input);
     if (!parsedArgs.success) {
       return {
-        pauseForApproval: false,
+        stopAfterTool: false,
         output: {
           error: "Invalid searchFoods input.",
         },
@@ -431,7 +407,7 @@ async function runToolCall(
     });
 
     return {
-      pauseForApproval: false,
+      stopAfterTool: false,
       output: {
         foods: foodsWithResultIds,
       },
@@ -448,7 +424,7 @@ async function runToolCall(
     const parsedArgs = RequestFoodApprovalsToolArgsSchema.safeParse(toolCall.input);
     if (!parsedArgs.success) {
       return {
-        pauseForApproval: false,
+        stopAfterTool: false,
         output: {
           error: "Invalid requestFoodApprovals input.",
         },
@@ -485,7 +461,7 @@ async function runToolCall(
 
     if (unknownResultIds.length > 0) {
       return {
-        pauseForApproval: false,
+        stopAfterTool: false,
         output: {
           error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
         },
@@ -495,7 +471,7 @@ async function runToolCall(
 
     if (resolvedSuggestions.length === 0) {
       return {
-        pauseForApproval: false,
+        stopAfterTool: false,
         output: {
           error: "No valid suggestions to approve.",
         },
@@ -503,11 +479,13 @@ async function runToolCall(
       };
     }
 
-    session.pendingApprovals[toolCall.toolCallId] = resolvedSuggestions;
-
     return {
-      pauseForApproval: true,
-      output: null,
+      stopAfterTool: true,
+      output: {
+        displayed: true,
+        suggestionCount: resolvedSuggestions.length,
+        note: "Suggestions are visible in the app. Approval and rejection stay local to the client.",
+      },
       events: [
         {
           kind: "approval",
@@ -519,7 +497,7 @@ async function runToolCall(
   }
 
   return {
-    pauseForApproval: false,
+    stopAfterTool: false,
     output: {
       error: `Unknown tool: ${toolCall.toolName}`,
     },
@@ -578,14 +556,14 @@ async function runAssistantLoop(
         emit(event);
       }
 
-      if (toolResult.pauseForApproval) {
+      session.conversation.push(createToolResultMessage(toolCall, toolResult.output ?? null));
+
+      if (toolResult.stopAfterTool) {
         return {
-          status: "awaiting-approval",
+          status: "ready",
           events,
         };
       }
-
-      session.conversation.push(createToolResultMessage(toolCall, toolResult.output ?? null));
     }
   }
 
@@ -790,10 +768,6 @@ async function handleUserMessageAction(
     return jsonResponse({ error: "action.message or audio is required" }, 400);
   }
 
-  if (Object.keys(session.pendingApprovals).length > 0) {
-    return jsonResponse({ error: "Resolve pending approvals before sending a new message." }, 409);
-  }
-
   Sentry.getActiveSpan()?.setAttributes({
     "app.ai.user_message_length": message.length,
   });
@@ -827,6 +801,8 @@ async function handleUserMessageAction(
     });
   }
 
+  // Approval cards are now client-local only; clear any stale server-side state from older sessions.
+  session.pendingApprovals = {};
   await saveAiSession(session);
 
   return createSseResponse(async (writer) => {
@@ -850,75 +826,11 @@ async function handleApprovalAction(request: Request, session: AiSessionState, a
     "app.ai.approval.suggestion_id": action.suggestionId,
     "app.ai.approval.approved": action.approved,
   });
-
-  const pendingSuggestions = session.pendingApprovals[action.toolCallId];
-  if (!pendingSuggestions) {
-    return jsonResponse({ error: "No pending approval request for tool call." }, 409);
-  }
-
-  const targetIndex = pendingSuggestions.findIndex((suggestion) => suggestion.suggestionId === action.suggestionId);
-  if (targetIndex === -1) {
-    return jsonResponse({ error: "Suggestion not found." }, 404);
-  }
-
-  if (pendingSuggestions[targetIndex]?.output) {
-    return jsonResponse({
-      status: "awaiting-approval",
-      events: [],
-    });
-  }
-
-  const itemOutput: ApprovalOutput = {
-    approved: action.approved,
-    reason: action.approved ? undefined : "User rejected this suggestion.",
-  };
-
-  const nextSuggestions = pendingSuggestions.map((suggestion, index) =>
-    index === targetIndex
-      ? {
-          ...suggestion,
-          output: itemOutput,
-        }
-      : suggestion,
-  );
-
-  if (!nextSuggestions.every((suggestion) => Boolean(suggestion.output))) {
-    session.pendingApprovals[action.toolCallId] = nextSuggestions;
-    await saveAiSession(session);
-    return jsonResponse({
-      status: "awaiting-approval",
-      events: [],
-    });
-  }
-
-  delete session.pendingApprovals[action.toolCallId];
-  const toolCall = buildToolCallRegistry(session.conversation).get(action.toolCallId);
-  if (!toolCall) {
-    return jsonResponse({ error: "Tool call not found." }, 409);
-  }
-
-  session.conversation.push(
-    createToolResultMessage(toolCall, {
-      decisions: nextSuggestions.map((suggestion) => ({
-        suggestionId: suggestion.suggestionId,
-        resultId: suggestion.resultId,
-        meal: suggestion.meal,
-        portion: suggestion.portion,
-        approved: suggestion.output?.approved ?? false,
-        reason: suggestion.output?.reason,
-      })),
-    }),
-  );
-
+  session.pendingApprovals = {};
   await saveAiSession(session);
 
-  return createSseResponse(async (writer) => {
-    const loopResult = await runAssistantLoop(session, {
-      onEvent: writer.writeEvent,
-      signal: request.signal,
-    });
-
-    await saveAiSession(session);
-    writer.writeStatus(loopResult.status);
-  }, "ai_turn_failed");
+  return jsonResponse({
+    status: "ready",
+    events: [],
+  });
 }
