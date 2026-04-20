@@ -21,6 +21,7 @@ import {
 } from "../src/food-search";
 import { MacroBadges } from "../src/components/MacroBadges";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
+import type { FoodEntryRecord } from "../src/data/store";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 
 const iosColor = (name: string, fallback: string) =>
@@ -69,6 +70,66 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Unknown error.";
+}
+
+function normalizeSearchText(value: string | undefined): string {
+  if (!value) {
+    return "";
+  }
+
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function buildRecentEntryKey(entry: FoodEntryRecord): string {
+  return [
+    normalizeSearchText(entry.foodName),
+    normalizeSearchText(entry.brand),
+    normalizeSearchText(entry.serving),
+  ].join("|");
+}
+
+function matchesRecentEntry(entry: FoodEntryRecord, query: string): boolean {
+  const normalizedQuery = normalizeSearchText(query);
+  if (!normalizedQuery) {
+    return true;
+  }
+
+  const tokens = normalizedQuery.split(" ").filter(Boolean);
+  if (tokens.length === 0) {
+    return true;
+  }
+
+  const searchableText = normalizeSearchText(
+    [entry.foodName, entry.brand, entry.serving].filter(Boolean).join(" "),
+  );
+
+  return tokens.every((token) => searchableText.includes(token));
+}
+
+function getRecentSearchMatches(entries: FoodEntryRecord[], query: string): FoodEntryRecord[] {
+  const matches: FoodEntryRecord[] = [];
+  const seenKeys = new Set<string>();
+
+  for (const entry of entries) {
+    if (!matchesRecentEntry(entry, query)) {
+      continue;
+    }
+
+    const dedupeKey = buildRecentEntryKey(entry);
+    if (seenKeys.has(dedupeKey)) {
+      continue;
+    }
+
+    seenKeys.add(dedupeKey);
+    matches.push(entry);
+  }
+
+  return matches;
 }
 
 function FoodRow({
@@ -210,6 +271,9 @@ export default function LogFoodScreen() {
   const trimmedQuery = query.trim();
   const canShowResults = trimmedQuery.length >= 2;
   const recentEntries = allFoodEntries.slice(-RECENT_ITEMS_LIMIT).reverse();
+  const recentSearchMatches = canShowResults
+    ? getRecentSearchMatches(recentEntries, trimmedQuery)
+    : recentEntries;
   const allFetchedFoods = [
     ...foodsBySource.anmat,
     ...foodsBySource.openfoodfacts,
@@ -218,9 +282,7 @@ export default function LogFoodScreen() {
   const selectedFood =
     canShowResults ? allFetchedFoods.find((food) => food.id === selectedFoodId) || null : null;
   const selectedRecentEntry =
-    !canShowResults
-      ? recentEntries.find((entry) => entry.id === selectedRecentEntryId) || null
-      : null;
+    recentSearchMatches.find((entry) => entry.id === selectedRecentEntryId) || null;
   const providerCounts: Record<SearchFoodSource, number> = {
     anmat: foodsBySource.anmat.length,
     openfoodfacts: foodsBySource.openfoodfacts.length,
@@ -309,7 +371,7 @@ export default function LogFoodScreen() {
 
         {!canShowResults ? (
           <>
-            <Text style={styles.sectionTitle}>Recent</Text>
+            <Text style={styles.sectionTitle}>Recents</Text>
             {recentEntries.length > 0 ? (
               <View style={styles.card}>
                 {recentEntries.map((entry, index) => (
@@ -331,6 +393,28 @@ export default function LogFoodScreen() {
             ) : (
               <Text style={styles.helperText}>No recent items yet.</Text>
             )}
+          </>
+        ) : null}
+        {canShowResults && recentSearchMatches.length > 0 ? (
+          <>
+            <Text style={styles.sectionTitle}>Recents</Text>
+            <View style={styles.card}>
+              {recentSearchMatches.map((entry, index) => (
+                <FoodRow
+                  key={entry.id}
+                  name={entry.foodName}
+                  brand={entry.brand}
+                  serving={entry.serving}
+                  nutrition={entry.nutrition}
+                  selected={selectedRecentEntryId === entry.id}
+                  isLast={index === recentSearchMatches.length - 1}
+                  onPress={() => {
+                    setSelectedRecentEntryId(entry.id);
+                    setSelectedFoodId(null);
+                  }}
+                />
+              ))}
+            </View>
           </>
         ) : null}
         {canShowResults ? (
