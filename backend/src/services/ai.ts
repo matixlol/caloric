@@ -132,7 +132,132 @@ const sseHeaders = {
 const openrouter = createOpenRouter({
   apiKey: config.openRouterApiKey,
   compatibility: "strict",
+  fetch: fetchWithOpenRouterSentryLogging as typeof fetch,
 });
+
+const sentryPayloadMaxLength = 80_000;
+const openRouterSpanCallCounters = new WeakMap<object, number>();
+
+function truncateForSentry(value: string, maxLength = sentryPayloadMaxLength): { value: string; truncated: boolean } {
+  if (value.length <= maxLength) {
+    return {
+      value,
+      truncated: false,
+    };
+  }
+
+  return {
+    value: `${value.slice(0, maxLength - 3)}...`,
+    truncated: true,
+  };
+}
+
+function headerRecord(headers: Headers): Record<string, string> {
+  return Object.fromEntries(
+    Array.from(headers.entries()).map(([key, value]) => [
+      key,
+      key.toLowerCase() === "authorization" ? "[redacted]" : value,
+    ]),
+  );
+}
+
+async function requestBodyText(request: Request): Promise<string | null> {
+  if (!request.body) {
+    return null;
+  }
+
+  try {
+    return await request.clone().text();
+  } catch (error) {
+    return `[unavailable: ${stringifyUnknownError(error)}]`;
+  }
+}
+
+function addOpenRouterSpanEvent(
+  name: string,
+  attributes: Record<string, string | number | boolean | null | undefined>,
+): void {
+  const compactAttributes: Record<string, string | number | boolean> = {};
+
+  for (const [key, value] of Object.entries(attributes)) {
+    if (value !== undefined && value !== null) {
+      compactAttributes[key] = value;
+    }
+  }
+
+  Sentry.getActiveSpan()?.addEvent(name, compactAttributes);
+}
+
+function nextOpenRouterSpanCallIndex(): number {
+  const span = Sentry.getActiveSpan();
+  if (!span) {
+    return 1;
+  }
+
+  const next = (openRouterSpanCallCounters.get(span) ?? 0) + 1;
+  openRouterSpanCallCounters.set(span, next);
+  span.setAttributes({
+    "app.ai.openrouter.call_count": next,
+  });
+
+  return next;
+}
+
+async function fetchWithOpenRouterSentryLogging(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
+  const callIndex = nextOpenRouterSpanCallIndex();
+  const startedAt = performance.now();
+  const rawRequestBody = await requestBodyText(request);
+  const requestBody = rawRequestBody ? truncateForSentry(rawRequestBody) : null;
+
+  addOpenRouterSpanEvent("openrouter.request", {
+    "app.ai.openrouter.call_index": callIndex,
+    "http.request.method": request.method,
+    "url.full": request.url,
+    "http.request.headers": JSON.stringify(headerRecord(request.headers)),
+    "http.request.body": requestBody?.value,
+    "http.request.body_length": rawRequestBody?.length ?? 0,
+    "http.request.body_truncated": requestBody?.truncated ?? false,
+  });
+
+  try {
+    const response = await fetch(request);
+    const clonedResponse = response.clone();
+
+    clonedResponse
+      .text()
+      .then((rawResponseBody) => {
+        const responseBody = truncateForSentry(rawResponseBody);
+        addOpenRouterSpanEvent("openrouter.response", {
+          "app.ai.openrouter.call_index": callIndex,
+          "http.response.status_code": response.status,
+          "http.response.headers": JSON.stringify(headerRecord(response.headers)),
+          "http.response.body": responseBody.value,
+          "http.response.body_length": rawResponseBody.length,
+          "http.response.body_truncated": responseBody.truncated,
+          "app.ai.openrouter.duration_ms": Math.round(performance.now() - startedAt),
+        });
+      })
+      .catch((error) => {
+        addOpenRouterSpanEvent("openrouter.response_body_failed", {
+          "app.ai.openrouter.call_index": callIndex,
+          "http.response.status_code": response.status,
+          "app.ai.openrouter.error": stringifyUnknownError(error),
+          "app.ai.openrouter.duration_ms": Math.round(performance.now() - startedAt),
+        });
+      });
+
+    return response;
+  } catch (error) {
+    addOpenRouterSpanEvent("openrouter.fetch_failed", {
+      "app.ai.openrouter.call_index": callIndex,
+      "app.ai.openrouter.error": stringifyUnknownError(error),
+      "app.ai.openrouter.duration_ms": Math.round(performance.now() - startedAt),
+    });
+
+    throw error;
+  }
+}
 
 type SseWriter = {
   writeEvent: (event: AgentEvent) => void;
