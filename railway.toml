@@ -1,6 +1,6 @@
 [build]
 builder = "RAILPACK"
-buildCommand = "apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libnss3 libnspr4 && rm -rf /var/lib/apt/lists/* && PLAYWRIGHT_BROWSERS_PATH=0 pnpm --dir backend exec playwright install chromium"
+buildCommand = "apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libnss3 libnspr4 && rm -rf /var/lib/apt/lists/* && PLAYWRIGHT_BROWSERS_PATH=0 pnpm --dir backend run mfp:install-browser"
 
 [deploy]
 startCommand = "apt-get update && apt-get install -y --no-install-recommends libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0 libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libnss3 libnspr4 && rm -rf /var/lib/apt/lists/* && cd backend && PLAYWRIGHT_BROWSERS_PATH=0 bun src/migrate.ts && PLAYWRIGHT_BROWSERS_PATH=0 bun --import ./src/instrument.ts src/server.ts"

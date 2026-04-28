@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun --watch --import ./src/instrument.ts src/server.ts",
     "start": "bun --import ./src/instrument.ts src/server.ts",
+    "mfp:install-browser": "node -e \"const { execFileSync } = require('node:child_process'); const path = require('node:path'); const packageJson = require.resolve('rebrowser-playwright/package.json'); execFileSync(process.execPath, [path.join(path.dirname(packageJson), 'cli.js'), 'install', 'chromium', ...process.argv.slice(1)], { stdio: 'inherit' });\" --",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
     "db:push": "drizzle-kit push",

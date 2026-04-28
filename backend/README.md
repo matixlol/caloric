@@ -100,7 +100,7 @@ Optional:
 ```bash
 cd backend
 pnpm install
-pnpm exec playwright install chrome
+PLAYWRIGHT_BROWSERS_PATH=0 pnpm run mfp:install-browser
 pnpm run db:push
 pnpm run dev
 ```
