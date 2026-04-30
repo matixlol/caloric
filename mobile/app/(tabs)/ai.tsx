@@ -97,6 +97,7 @@ type AudioUIMessage = {
 type SearchUIMessage = {
   id: string;
   kind: "search";
+  query?: string;
   foods: SearchResultFood[];
 };
 
@@ -120,6 +121,7 @@ type AgentEvent =
     }
   | {
       kind: "search";
+      query?: string;
       foods: SearchResultFood[];
     }
   | {
@@ -189,6 +191,10 @@ const composerLayoutTransition = LinearTransition.springify()
 const composerEnterTransition = FadeIn.duration(130);
 const composerExitTransition = FadeOut.duration(90);
 const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+const searchLayoutTransition = LinearTransition.springify()
+  .mass(0.8)
+  .damping(24)
+  .stiffness(280);
 
 function formatRecordingDuration(totalSeconds: number): string {
   const safeSeconds = Math.max(0, Math.floor(totalSeconds));
@@ -220,6 +226,49 @@ function formatCalories(value: number | undefined): string {
   }
 
   return Math.round(value).toLocaleString();
+}
+
+function inferSearchQueryFromFoods(foods: SearchResultFood[]): string {
+  const ignoredTokens = new Set([
+    "and",
+    "con",
+    "de",
+    "del",
+    "deshidratada",
+    "food",
+    "foods",
+    "fresh",
+    "la",
+    "las",
+    "los",
+    "the",
+    "with",
+  ]);
+  const counts = new Map<string, number>();
+
+  for (const food of foods.slice(0, 6)) {
+    const seenInFood = new Set<string>();
+    const rawText = `${food.name} ${food.brand ?? ""}`.toLowerCase();
+    const tokens = rawText.match(/[\p{L}\p{N}]{3,}/gu) ?? [];
+
+    for (const token of tokens) {
+      if (ignoredTokens.has(token) || seenInFood.has(token)) {
+        continue;
+      }
+
+      seenInFood.add(token);
+      counts.set(token, (counts.get(token) ?? 0) + 1);
+    }
+  }
+
+  const [topToken, topCount] =
+    [...counts.entries()].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))[0] ?? [];
+
+  if (topToken && topCount >= 2) {
+    return topToken;
+  }
+
+  return foods[0]?.name.trim() || "search results";
 }
 
 function isErrorLike(value: unknown): value is { message?: unknown; stack?: unknown; name?: unknown } {
@@ -698,6 +747,58 @@ function RecordingCancelHint({
   );
 }
 
+function SearchResultsDisclosure({
+  expanded,
+  foods,
+  styles,
+}: {
+  expanded: boolean;
+  foods: SearchResultFood[];
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const [contentHeight, setContentHeight] = useState(0);
+  const progress = useSharedValue(expanded ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withTiming(expanded ? 1 : 0, {
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [expanded, progress]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    height: (contentHeight + 10) * progress.value,
+    opacity: progress.value,
+  }));
+
+  return (
+    <Animated.View pointerEvents={expanded ? "auto" : "none"} style={[styles.searchResultsClip, animatedStyle]}>
+      <View
+        style={styles.searchResults}
+        onLayout={(event) => {
+          setContentHeight(event.nativeEvent.layout.height);
+        }}
+      >
+        {foods.slice(0, 6).map((food) => (
+          <View key={food.resultId} style={styles.searchResultRow}>
+            <Text style={styles.searchResultName}>
+              {food.name}
+              {food.brand ? ` • ${food.brand}` : ""}
+            </Text>
+            <View style={styles.searchResultMetaRow}>
+              <Text style={styles.sourceBadge}>{food.sourceLabel}</Text>
+              <Text style={styles.searchResultMeta}>{food.resultId}</Text>
+              {food.nutrition?.calories !== undefined ? (
+                <Text style={styles.searchResultMeta}>{formatCalories(food.nutrition.calories)} kcal</Text>
+              ) : null}
+            </View>
+          </View>
+        ))}
+      </View>
+    </Animated.View>
+  );
+}
+
 export default function AILogScreen() {
   const { palette, markdownTheme, isDark, styles } = useThemedStyles(createStyles);
   const insets = useSafeAreaInsets();
@@ -712,6 +813,7 @@ export default function AILogScreen() {
   const [error, setError] = useState<string | null>(null);
   const [errorDetails, setErrorDetails] = useState<string | null>(null);
   const [isKeyboardVisible, setIsKeyboardVisible] = useState(false);
+  const [expandedSearchIds, setExpandedSearchIds] = useState<Set<string>>(new Set());
   const scrollViewRef = useRef<ScrollView | null>(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
@@ -804,6 +906,18 @@ export default function AILogScreen() {
     inputHeight.value = withTiming(nextHeight, {
       duration: 130,
       easing: Easing.out(Easing.cubic),
+    });
+  };
+
+  const toggleSearchExpanded = (messageId: string) => {
+    setExpandedSearchIds((current) => {
+      const next = new Set(current);
+      if (next.has(messageId)) {
+        next.delete(messageId);
+      } else {
+        next.add(messageId);
+      }
+      return next;
     });
   };
 
@@ -1134,6 +1248,7 @@ export default function AILogScreen() {
           next.push({
             id: createMessageId(),
             kind: "search",
+            query: event.query,
             foods: event.foods,
           });
           continue;
@@ -1624,31 +1739,41 @@ export default function AILogScreen() {
               return null;
             }
 
+            const isExpanded = expandedSearchIds.has(message.id);
+            const query = message.query?.trim() || inferSearchQueryFromFoods(message.foods);
+
             return (
-              <View key={message.id} style={[styles.messageBubble, styles.assistantBubble]}>
-                <View style={styles.toolCard}>
-                  <Text style={styles.toolHeading}>Found foods</Text>
-                  {message.foods.slice(0, 6).map((food) => (
-                    <View key={food.resultId} style={styles.suggestionCard}>
-                      <View style={styles.toolTitleRow}>
-                        <Text style={styles.sourceBadge}>{food.sourceLabel}</Text>
-                        <Text style={styles.toolText}>
-                          {food.resultId} • {food.name}
-                          {food.brand ? ` • ${food.brand}` : ""}
-                        </Text>
-                      </View>
-                      {food.nutrition?.calories !== undefined ? (
-                        <Text style={styles.toolMeta}>{`${formatCalories(food.nutrition.calories)} kcal`}</Text>
-                      ) : null}
-                    </View>
-                  ))}
-                </View>
-              </View>
+              <Animated.View
+                key={message.id}
+                layout={searchLayoutTransition}
+                style={[styles.messageBubble, styles.assistantBubble, styles.searchBubble]}
+              >
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={isExpanded ? "Hide search results" : "Show search results"}
+                  onPress={() => {
+                    toggleSearchExpanded(message.id);
+                  }}
+                  style={styles.searchSummaryRow}
+                >
+                  <Ionicons name="search" size={15} color={palette.secondaryLabel} />
+                  <Text style={styles.searchSummaryText}>
+                    Searched for <Text style={styles.searchSummaryQuery}>{query}</Text>
+                  </Text>
+                  <Ionicons
+                    name={isExpanded ? "chevron-up" : "chevron-down"}
+                    size={15}
+                    color={palette.secondaryLabel}
+                  />
+                </Pressable>
+
+                <SearchResultsDisclosure expanded={isExpanded} foods={message.foods} styles={styles} />
+              </Animated.View>
             );
           }
 
           return (
-            <View key={message.id} style={[styles.messageBubble, styles.assistantBubble]}>
+            <View key={message.id} style={[styles.messageBubble, styles.assistantBubble, styles.approvalBubble]}>
               <View style={styles.toolCard}>
                 <Text style={styles.toolHeading}>Review suggestions</Text>
                 {message.suggestions.map((suggestion) => {
@@ -1983,6 +2108,57 @@ function createStyles({ palette }: AppTheme) {
       backgroundColor: palette.assistantBubble,
       borderBottomLeftRadius: 6,
     },
+    searchBubble: {
+      paddingHorizontal: 12,
+      paddingVertical: 9,
+      maxWidth: "92%",
+      minWidth: 260,
+    },
+    searchSummaryRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+    },
+    searchSummaryText: {
+      flex: 1,
+      fontSize: 14,
+      lineHeight: 19,
+      color: palette.secondaryLabel,
+    },
+    searchSummaryQuery: {
+      color: palette.label,
+      fontWeight: "600",
+    },
+    searchResultsClip: {
+      overflow: "hidden",
+    },
+    searchResults: {
+      marginTop: 9,
+      paddingTop: 9,
+      paddingBottom: 4,
+      borderTopWidth: StyleSheet.hairlineWidth,
+      borderTopColor: palette.separator,
+      gap: 8,
+    },
+    searchResultRow: {
+      gap: 4,
+    },
+    searchResultName: {
+      fontSize: 14,
+      lineHeight: 19,
+      color: palette.label,
+    },
+    searchResultMetaRow: {
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 7,
+      flexWrap: "wrap",
+    },
+    searchResultMeta: {
+      fontSize: 12,
+      lineHeight: 16,
+      color: palette.secondaryLabel,
+    },
     audioBubble: {
       flexDirection: "row",
       alignItems: "center",
@@ -2025,10 +2201,16 @@ function createStyles({ palette }: AppTheme) {
       width: "100%",
       marginBottom: -12,
     },
+    approvalBubble: {
+      maxWidth: "92%",
+      width: "92%",
+      paddingHorizontal: 10,
+      paddingVertical: 10,
+    },
     toolCard: {
       borderRadius: 10,
       backgroundColor: palette.cardElevated,
-      padding: 10,
+      padding: 12,
       gap: 2,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: palette.separator,
@@ -2051,6 +2233,7 @@ function createStyles({ palette }: AppTheme) {
       color: palette.label,
     },
     toolText: {
+      flex: 1,
       marginTop: 2,
       fontSize: 14,
       lineHeight: 19,
@@ -2083,12 +2266,14 @@ function createStyles({ palette }: AppTheme) {
       color: palette.secondaryLabel,
     },
     approvalRow: {
-      marginTop: 10,
+      marginTop: 12,
       flexDirection: "row",
       gap: 8,
+      alignSelf: "stretch",
     },
     approveButton: {
       flex: 1,
+      minWidth: 0,
       minHeight: 40,
       borderRadius: 10,
       backgroundColor: palette.success,
@@ -2103,6 +2288,7 @@ function createStyles({ palette }: AppTheme) {
     },
     denyButton: {
       flex: 1,
+      minWidth: 0,
       minHeight: 40,
       borderRadius: 10,
       backgroundColor: palette.error,

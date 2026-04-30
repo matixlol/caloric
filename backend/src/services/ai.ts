@@ -41,6 +41,7 @@ type AgentEvent =
     }
   | {
       kind: "search";
+      query: string;
       foods: SearchResultFood[];
     }
   | {
@@ -539,6 +540,7 @@ async function runToolCall(
       events: [
         {
           kind: "search",
+          query: parsedArgs.data.query,
           foods: foodsWithResultIds,
         },
       ],
