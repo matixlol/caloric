@@ -1,5 +1,5 @@
 import { fetch as expoFetch } from "expo/fetch";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import { useAuth } from "@clerk/expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import * as Sentry from "@sentry/react-native";
@@ -12,17 +12,27 @@ import {
 import { File as ExpoFile } from "expo-file-system";
 import {
   type ColorValue,
+  type GestureResponderEvent,
   Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
+  type StyleProp,
   Text,
   TextInput,
+  type TextInputContentSizeChangeEventData,
+  type NativeSyntheticEvent,
   View,
+  type ViewStyle,
 } from "react-native";
 import Animated, {
+  cancelAnimation,
+  FadeIn,
+  FadeOut,
+  LinearTransition,
+  type SharedValue,
   useAnimatedStyle,
   useSharedValue,
   withDelay,
@@ -81,6 +91,7 @@ type AudioUIMessage = {
   kind: "audio";
   role: "user";
   label: string;
+  durationLabel: string;
 };
 
 type SearchUIMessage = {
@@ -165,8 +176,26 @@ type StreamingPayload = {
 
 const recentLogWindowMs = 3 * 24 * 60 * 60 * 1000;
 const maxRecentLogHints = 80;
+const recordingLockDistance = 54;
+const recordingCancelDistance = 82;
+const recordingWaveHeights = [10, 18, 12, 24, 15, 28, 12, 22, 16, 26, 13, 19, 11, 21];
+const audioBubbleWaveHeights = [8, 14, 10, 18, 12, 20, 9, 16, 11, 15];
 
 const createMessageId = () => createAiMessageId();
+const composerLayoutTransition = LinearTransition.springify()
+  .mass(0.85)
+  .damping(22)
+  .stiffness(260);
+const composerEnterTransition = FadeIn.duration(130);
+const composerExitTransition = FadeOut.duration(90);
+const AnimatedTextInput = Animated.createAnimatedComponent(TextInput);
+
+function formatRecordingDuration(totalSeconds: number): string {
+  const safeSeconds = Math.max(0, Math.floor(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  return `${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
 
 function cloneNutrition(nutrition: SearchResultFood["nutrition"]) {
   if (!nutrition) {
@@ -490,6 +519,185 @@ function TypingIndicator({ color }: { color: ColorValue }) {
   );
 }
 
+function RecordingWaveBar({ delay, height, color }: { delay: number; height: number; color: ColorValue }) {
+  const progress = useSharedValue(0);
+
+  useEffect(() => {
+    progress.value = withDelay(
+      delay,
+      withRepeat(
+        withSequence(
+          withTiming(1, { duration: 420, easing: Easing.inOut(Easing.ease) }),
+          withTiming(0, { duration: 420, easing: Easing.inOut(Easing.ease) }),
+        ),
+        -1,
+        false,
+      ),
+    );
+
+    return () => {
+      cancelAnimation(progress);
+    };
+  }, [delay, progress]);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 0.42 + progress.value * 0.42,
+    transform: [{ scaleY: 0.72 + progress.value * 0.46 }],
+  }));
+
+  return (
+    <Animated.View
+      style={[
+        {
+          width: 3,
+          height,
+          borderRadius: 2,
+          backgroundColor: color,
+        },
+        animatedStyle,
+      ]}
+    />
+  );
+}
+
+function RecordingWaveform({ color }: { color: ColorValue }) {
+  return (
+    <View
+      style={{
+        height: 30,
+        flex: 1,
+        flexDirection: "row",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 3,
+      }}
+    >
+      {recordingWaveHeights.map((height, index) => (
+        <RecordingWaveBar
+          key={`${height}-${index}`}
+          delay={index * 55}
+          height={height}
+          color={color}
+        />
+      ))}
+    </View>
+  );
+}
+
+function AudioBubbleWaveform({ color }: { color: ColorValue }) {
+  return (
+    <View style={{ height: 22, flexDirection: "row", alignItems: "center", gap: 3 }}>
+      {audioBubbleWaveHeights.map((height, index) => (
+        <View
+          key={`${height}-${index}`}
+          style={{
+            width: 3,
+            height,
+            borderRadius: 2,
+            backgroundColor: color,
+            opacity: index % 3 === 0 ? 0.54 : 0.82,
+          }}
+        />
+      ))}
+    </View>
+  );
+}
+
+function RecordingCardView({
+  children,
+  style,
+  progress,
+}: {
+  children: ReactNode;
+  style: StyleProp<ViewStyle>;
+  progress: SharedValue<number>;
+}) {
+  const animatedStyle = useAnimatedStyle(() => ({
+    opacity: 0.88 + progress.value * 0.12,
+    transform: [{ translateY: (1 - progress.value) * 8 }],
+  }));
+
+  return (
+    <Animated.View
+      entering={composerEnterTransition}
+      exiting={composerExitTransition}
+      layout={composerLayoutTransition}
+      style={[style, animatedStyle]}
+    >
+      {children}
+    </Animated.View>
+  );
+}
+
+function RecordingLockTarget({
+  progress,
+  locked,
+  palette,
+  styles,
+}: {
+  progress: SharedValue<number>;
+  locked: boolean;
+  palette: AppTheme["palette"];
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const targetStyle = useAnimatedStyle(() => ({
+    opacity: 0.72 + progress.value * 0.28,
+    transform: [
+      { translateY: (1 - progress.value) * 10 },
+      { scale: 0.94 + progress.value * 0.06 },
+    ],
+  }));
+
+  const fillStyle = useAnimatedStyle(() => ({
+    height: 42 * Math.max(0.06, progress.value),
+  }));
+
+  const hintStyle = useAnimatedStyle(() => ({
+    opacity: progress.value < 0.18 ? 0.8 : 1,
+  }));
+
+  return (
+    <Animated.View pointerEvents="none" style={[styles.recordingLockTarget, targetStyle]}>
+      <View style={[styles.recordingLockBubble, locked && styles.recordingLockBubbleActive]}>
+        <Ionicons
+          name={locked ? "lock-closed" : "lock-open"}
+          size={18}
+          color={locked ? palette.buttonText : palette.error}
+        />
+      </View>
+      <View style={styles.recordingLockRail}>
+        <Animated.View style={[styles.recordingLockRailFill, fillStyle]} />
+      </View>
+      <Ionicons name="chevron-up" size={16} color={palette.error} />
+      <Animated.Text style={[styles.recordingLockHint, hintStyle]}>
+        {locked ? "Locked" : "Slide up"}
+      </Animated.Text>
+    </Animated.View>
+  );
+}
+
+function RecordingCancelHint({
+  progress,
+  palette,
+  styles,
+}: {
+  progress: SharedValue<number>;
+  palette: AppTheme["palette"];
+  styles: ReturnType<typeof createStyles>;
+}) {
+  const hintStyle = useAnimatedStyle(() => ({
+    opacity: 0.68 + progress.value * 0.32,
+    transform: [{ translateX: -progress.value * 10 }],
+  }));
+
+  return (
+    <Animated.View style={[styles.recordingCancelHint, hintStyle]}>
+      <Ionicons name="chevron-back" size={13} color={palette.error} />
+      <Text style={styles.recordingCancelHintText}>Slide left to cancel</Text>
+    </Animated.View>
+  );
+}
+
 export default function AILogScreen() {
   const { palette, markdownTheme, isDark, styles } = useThemedStyles(createStyles);
   const insets = useSafeAreaInsets();
@@ -507,11 +715,23 @@ export default function AILogScreen() {
   const scrollViewRef = useRef<ScrollView | null>(null);
   const audioRecorder = useAudioRecorder(RecordingPresets.HIGH_QUALITY);
   const [isRecording, setIsRecording] = useState(false);
+  const [isRecordingLocked, setIsRecordingLocked] = useState(false);
+  const [recordingSeconds, setRecordingSeconds] = useState(0);
 
   const isStreaming = status === "streaming";
   const sessionIdRef = useRef<string | null>(null);
   const pendingApprovalsRef = useRef(new Map<string, ResolvedApprovalSuggestion[]>());
   const loopRunningRef = useRef(false);
+  const recordingStartedAtRef = useRef<number | null>(null);
+  const recordingLockedRef = useRef(false);
+  const recordingCancelledRef = useRef(false);
+  const voicePressingRef = useRef(false);
+  const voicePressStartXRef = useRef<number | null>(null);
+  const voicePressStartYRef = useRef<number | null>(null);
+  const recordingUiProgress = useSharedValue(0);
+  const recordingDragProgress = useSharedValue(0);
+  const recordingCancelProgress = useSharedValue(0);
+  const inputHeight = useSharedValue(36);
 
   useEffect(() => {
     requestAnimationFrame(() => {
@@ -536,6 +756,56 @@ export default function AILogScreen() {
       hideSubscription.remove();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isRecording) {
+      recordingUiProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.cubic) });
+      recordingDragProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.cubic) });
+      recordingCancelProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.cubic) });
+      setRecordingSeconds(0);
+      recordingStartedAtRef.current = null;
+      return;
+    }
+
+    recordingUiProgress.value = withTiming(1, { duration: 180, easing: Easing.out(Easing.cubic) });
+
+    if (!recordingStartedAtRef.current) {
+      recordingStartedAtRef.current = Date.now();
+    }
+
+    const updateRecordingSeconds = () => {
+      const startedAt = recordingStartedAtRef.current ?? Date.now();
+      setRecordingSeconds(Math.floor((Date.now() - startedAt) / 1000));
+    };
+
+    updateRecordingSeconds();
+    const interval = setInterval(updateRecordingSeconds, 250);
+
+    return () => {
+      clearInterval(interval);
+    };
+  }, [isRecording, recordingCancelProgress, recordingDragProgress, recordingUiProgress]);
+
+  const voiceButtonAnimatedStyle = useAnimatedStyle(() => ({
+    transform: [
+      { translateY: -recordingDragProgress.value * 8 },
+      { scale: 1 + recordingUiProgress.value * 0.05 + recordingDragProgress.value * 0.05 },
+    ],
+  }));
+
+  const inputHeightAnimatedStyle = useAnimatedStyle(() => ({
+    height: inputHeight.value,
+  }));
+
+  const handleInputContentSizeChange = (
+    event: NativeSyntheticEvent<TextInputContentSizeChangeEventData>,
+  ) => {
+    const nextHeight = Math.min(140, Math.max(36, Math.ceil(event.nativeEvent.contentSize.height)));
+    inputHeight.value = withTiming(nextHeight, {
+      duration: 130,
+      easing: Easing.out(Easing.cubic),
+    });
+  };
 
   const appendApprovedFoodToLog = (suggestion: ResolvedApprovalSuggestion) => {
     const meal = normalizeMeal(suggestion.meal) ?? "lunch";
@@ -967,13 +1237,19 @@ export default function AILogScreen() {
       return;
     }
 
+    voicePressingRef.current = true;
     clearError();
 
     try {
       const permission = await requestRecordingPermissionsAsync();
       if (!permission.granted) {
+        voicePressingRef.current = false;
         setError("Microphone permission is required for voice input.");
         setErrorDetails(null);
+        return;
+      }
+
+      if (!voicePressingRef.current) {
         return;
       }
 
@@ -982,21 +1258,155 @@ export default function AILogScreen() {
         playsInSilentMode: true,
       });
 
+      if (!voicePressingRef.current) {
+        await setAudioModeAsync({
+          allowsRecording: false,
+        }).catch(() => {
+          // Ignore cleanup errors when the press was released during setup.
+        });
+        return;
+      }
+
       await audioRecorder.prepareToRecordAsync();
+      if (!voicePressingRef.current) {
+        await setAudioModeAsync({
+          allowsRecording: false,
+        }).catch(() => {
+          // Ignore cleanup errors when the press was released during setup.
+        });
+        return;
+      }
+
       audioRecorder.record();
+      recordingStartedAtRef.current = Date.now();
+      recordingLockedRef.current = false;
+      recordingCancelledRef.current = false;
+      recordingDragProgress.value = 0;
+      recordingCancelProgress.value = 0;
+      setRecordingSeconds(0);
+      setIsRecordingLocked(false);
       setIsRecording(true);
     } catch (recordingError) {
+      voicePressingRef.current = false;
+      voicePressStartXRef.current = null;
+      voicePressStartYRef.current = null;
+      recordingStartedAtRef.current = null;
+      recordingLockedRef.current = false;
+      recordingCancelledRef.current = false;
+      recordingDragProgress.value = withTiming(0, { duration: 120, easing: Easing.out(Easing.ease) });
+      recordingCancelProgress.value = withTiming(0, { duration: 120, easing: Easing.out(Easing.ease) });
+      setIsRecordingLocked(false);
       setIsRecording(false);
       showError(recordingError);
     }
   };
 
-  const stopVoiceRecording = async () => {
+  const handleVoiceRecordingMove = (event: GestureResponderEvent) => {
+    if (!isRecording || recordingLockedRef.current) {
+      return;
+    }
+
+    const startX = voicePressStartXRef.current;
+    const startY = voicePressStartYRef.current;
+    if (startX === null || startY === null) {
+      return;
+    }
+
+    const lockDistance = Math.max(0, startY - event.nativeEvent.pageY);
+    const cancelDistance = Math.max(0, startX - event.nativeEvent.pageX);
+    const nextLockProgress = Math.min(1, lockDistance / recordingLockDistance);
+    const nextCancelProgress = Math.min(1, cancelDistance / recordingCancelDistance);
+    recordingDragProgress.value = nextLockProgress;
+    recordingCancelProgress.value = nextCancelProgress;
+
+    if (nextCancelProgress >= 1) {
+      recordingCancelledRef.current = true;
+      recordingCancelProgress.value = withTiming(1, { duration: 100, easing: Easing.out(Easing.ease) });
+      void cancelVoiceRecording();
+      return;
+    }
+
+    if (nextLockProgress >= 1) {
+      recordingLockedRef.current = true;
+      recordingDragProgress.value = withTiming(1, { duration: 120, easing: Easing.out(Easing.ease) });
+      setIsRecordingLocked(true);
+    }
+  };
+
+  const handleVoicePressIn = (event: GestureResponderEvent) => {
+    recordingCancelledRef.current = false;
+    voicePressStartXRef.current = event.nativeEvent.pageX;
+    voicePressStartYRef.current = event.nativeEvent.pageY;
+    recordingDragProgress.value = 0;
+    recordingCancelProgress.value = 0;
+    void startVoiceRecording();
+  };
+
+  const handleVoicePressOut = () => {
+    voicePressStartXRef.current = null;
+    voicePressStartYRef.current = null;
+    voicePressingRef.current = false;
+
+    if (recordingCancelledRef.current) {
+      recordingCancelledRef.current = false;
+      return;
+    }
+
+    if (recordingLockedRef.current) {
+      return;
+    }
+
+    recordingDragProgress.value = withTiming(0, { duration: 140, easing: Easing.out(Easing.ease) });
+    recordingCancelProgress.value = withTiming(0, { duration: 140, easing: Easing.out(Easing.ease) });
+    void sendVoiceRecording();
+  };
+
+  const cancelVoiceRecording = async () => {
+    voicePressingRef.current = false;
+    voicePressStartXRef.current = null;
+    voicePressStartYRef.current = null;
+    recordingLockedRef.current = false;
+    recordingDragProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.ease) });
+    recordingCancelProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.ease) });
+    setIsRecordingLocked(false);
+
     if (!isRecording) {
       return;
     }
 
     setIsRecording(false);
+
+    try {
+      await audioRecorder.stop();
+    } catch (recordingError) {
+      showError(recordingError);
+    } finally {
+      await setAudioModeAsync({
+        allowsRecording: false,
+      }).catch(() => {
+        // Ignore cleanup errors after cancelling.
+      });
+    }
+  };
+
+  const sendVoiceRecording = async () => {
+    voicePressingRef.current = false;
+    voicePressStartXRef.current = null;
+    voicePressStartYRef.current = null;
+    recordingLockedRef.current = false;
+    recordingDragProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.ease) });
+    recordingCancelProgress.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.ease) });
+
+    if (!isRecording) {
+      return;
+    }
+
+    const elapsedSeconds = recordingStartedAtRef.current
+      ? Math.max(1, Math.ceil((Date.now() - recordingStartedAtRef.current) / 1000))
+      : Math.max(1, recordingSeconds);
+
+    setIsRecording(false);
+    setIsRecordingLocked(false);
 
     try {
       await audioRecorder.stop();
@@ -1014,6 +1424,7 @@ export default function AILogScreen() {
           kind: "audio",
           role: "user",
           label: "Voice note",
+          durationLabel: formatRecordingDuration(elapsedSeconds),
         },
       ]);
 
@@ -1109,9 +1520,6 @@ export default function AILogScreen() {
   }
 
   const hasInputText = input.trim().length > 0;
-  const hasPendingApprovals = messages.some(
-    (message) => message.kind === "approval" && message.suggestions.some((suggestion) => !suggestion.output),
-  );
   const canUseComposerActions = Boolean(userId) && !isStreaming;
 
   return (
@@ -1148,12 +1556,6 @@ export default function AILogScreen() {
             <Text style={styles.warningText}>
               Sign in to enable AI logging.
             </Text>
-          </View>
-        ) : null}
-
-        {hasPendingApprovals ? (
-          <View style={styles.awaitingCard}>
-            <Text style={styles.awaitingText}>Suggestions stay available while you keep chatting.</Text>
           </View>
         ) : null}
 
@@ -1205,8 +1607,14 @@ export default function AILogScreen() {
                 key={message.id}
                 style={[styles.messageBubble, styles.userBubble, styles.audioBubble]}
               >
-                <Ionicons name="mic" size={15} color={palette.buttonText} />
-                <Text style={[styles.messageText, styles.userMessageText]}>{message.label}</Text>
+                <View style={styles.audioIconCircle}>
+                  <Ionicons name="mic" size={15} color={palette.userBubble} />
+                </View>
+                <AudioBubbleWaveform color={palette.buttonText} />
+                <View style={styles.audioMetaColumn}>
+                  <Text style={[styles.audioLabel, styles.userMessageText]}>{message.label}</Text>
+                  <Text style={styles.audioDuration}>{message.durationLabel}</Text>
+                </View>
               </View>
             );
           }
@@ -1329,68 +1737,164 @@ export default function AILogScreen() {
         ) : null}
       </ScrollView>
 
-      <View
+      <Animated.View
+        layout={composerLayoutTransition}
         style={[
           styles.composerContainer,
           { paddingBottom: isKeyboardVisible ? 10 : insets.bottom + 10 },
         ]}
       >
-        <View style={styles.composerCard}>
-          <TextInput
-            value={input}
-            onChangeText={setInput}
-            onFocus={() => {
-              requestAnimationFrame(() => {
-                scrollViewRef.current?.scrollToEnd({ animated: true });
-              });
-            }}
-            placeholder="Message the food assistant"
-            placeholderTextColor={palette.secondaryLabel}
-            style={styles.input}
-            multiline
-            maxLength={600}
-            editable={Boolean(userId) && !isStreaming}
-            keyboardAppearance={isDark ? "dark" : "light"}
-            selectionColor={palette.tint}
-          />
-          <Pressable
-            accessibilityRole="button"
-            disabled={!canUseComposerActions || !hasInputText}
-            onPress={() => {
-              void submitMessage();
-            }}
-            style={[
-              styles.sendButton,
-              (!canUseComposerActions || !hasInputText) && styles.buttonDisabled,
-            ]}
-          >
-            <Ionicons name="send" size={16} color={palette.buttonText} />
-          </Pressable>
-          {!hasInputText ? (
-            <Pressable
-              accessibilityRole="button"
-              disabled={!canUseComposerActions}
-              onPressIn={() => {
-                void startVoiceRecording();
-              }}
-              onPressOut={() => {
-                void stopVoiceRecording();
-              }}
-              style={[
-                styles.voiceButton,
-                isRecording && styles.voiceButtonRecording,
-                !canUseComposerActions && styles.buttonDisabled,
-              ]}
+        <Animated.View layout={composerLayoutTransition} style={styles.composerRow}>
+          {isRecording ? (
+            <RecordingCardView
+              progress={recordingUiProgress}
+              style={[styles.recordingCard, isRecordingLocked && styles.recordingCardLocked]}
             >
-              <Ionicons
-                name={isRecording ? "radio-button-on" : "mic"}
-                size={16}
-                color={palette.buttonText}
+              <View style={styles.recordingStatusRow}>
+                <View style={styles.recordingLiveDot} />
+                <Text style={styles.recordingTimer}>{formatRecordingDuration(recordingSeconds)}</Text>
+              </View>
+              <RecordingWaveform color={palette.error} />
+              {isRecordingLocked ? null : (
+                <RecordingCancelHint
+                  progress={recordingCancelProgress}
+                  palette={palette}
+                  styles={styles}
+                />
+              )}
+            </RecordingCardView>
+          ) : (
+            <Animated.View
+              entering={composerEnterTransition}
+              exiting={composerExitTransition}
+              layout={composerLayoutTransition}
+              style={styles.inputBox}
+            >
+              <AnimatedTextInput
+                value={input}
+                onChangeText={setInput}
+                onContentSizeChange={handleInputContentSizeChange}
+                onFocus={() => {
+                  requestAnimationFrame(() => {
+                    scrollViewRef.current?.scrollToEnd({ animated: true });
+                  });
+                }}
+                placeholder="Message the food assistant"
+                placeholderTextColor={palette.secondaryLabel}
+                style={[styles.input, inputHeightAnimatedStyle]}
+                multiline
+                maxLength={600}
+                editable={Boolean(userId) && !isStreaming}
+                keyboardAppearance={isDark ? "dark" : "light"}
+                selectionColor={palette.tint}
               />
-            </Pressable>
+            </Animated.View>
+          )}
+
+          {hasInputText && !isRecording ? (
+            <Animated.View
+              key="send"
+              entering={composerEnterTransition}
+              exiting={composerExitTransition}
+              layout={composerLayoutTransition}
+            >
+              <Pressable
+                accessibilityRole="button"
+                disabled={!canUseComposerActions || !hasInputText}
+                onPress={() => {
+                  void submitMessage();
+                }}
+                style={[
+                  styles.sendButton,
+                  (!canUseComposerActions || !hasInputText) && styles.buttonDisabled,
+                ]}
+              >
+                <Ionicons name="send" size={20} color={palette.buttonText} />
+              </Pressable>
+            </Animated.View>
           ) : null}
-        </View>
-      </View>
+
+          {isRecordingLocked ? (
+            <Animated.View
+              entering={composerEnterTransition}
+              exiting={composerExitTransition}
+              layout={composerLayoutTransition}
+            >
+              <Pressable
+                accessibilityLabel="Cancel voice note"
+                accessibilityRole="button"
+                onPress={() => {
+                  void cancelVoiceRecording();
+                }}
+                style={styles.cancelRecordingButton}
+              >
+                <Ionicons name="trash" size={20} color={palette.secondaryLabel} />
+              </Pressable>
+            </Animated.View>
+          ) : null}
+
+          {isRecordingLocked ? (
+            <Animated.View
+              entering={composerEnterTransition}
+              exiting={composerExitTransition}
+              layout={composerLayoutTransition}
+            >
+              <Pressable
+                accessibilityLabel="Send voice note"
+                accessibilityRole="button"
+                onPress={() => {
+                  void sendVoiceRecording();
+                }}
+                style={[styles.sendButton, styles.voiceSendButton]}
+              >
+                <Ionicons name="send" size={20} color={palette.buttonText} />
+              </Pressable>
+            </Animated.View>
+          ) : null}
+
+          {!hasInputText && !isRecordingLocked ? (
+            <Animated.View
+              entering={composerEnterTransition}
+              exiting={composerExitTransition}
+              layout={composerLayoutTransition}
+              style={styles.voiceActionWrap}
+            >
+              {isRecording ? (
+                <RecordingLockTarget
+                  progress={recordingDragProgress}
+                  locked={isRecordingLocked}
+                  palette={palette}
+                  styles={styles}
+                />
+              ) : null}
+              <Animated.View
+                key="voice"
+                accessible
+                accessibilityLabel={isRecording ? "Drag up to hold recording" : "Hold to record voice note"}
+                accessibilityRole="button"
+                accessibilityState={{ disabled: !canUseComposerActions }}
+                onResponderGrant={handleVoicePressIn}
+                onResponderMove={handleVoiceRecordingMove}
+                onResponderRelease={handleVoicePressOut}
+                onResponderTerminate={handleVoicePressOut}
+                onStartShouldSetResponder={() => canUseComposerActions}
+                style={[
+                  styles.voiceButton,
+                  isRecording && styles.voiceButtonRecording,
+                  !canUseComposerActions && styles.buttonDisabled,
+                  voiceButtonAnimatedStyle,
+                ]}
+              >
+                <Ionicons
+                  name={isRecording ? "lock-open" : "mic"}
+                  size={isRecording ? 20 : 22}
+                  color={palette.buttonText}
+                />
+              </Animated.View>
+            </Animated.View>
+          ) : null}
+        </Animated.View>
+      </Animated.View>
     </KeyboardAvoidingView>
   );
 }
@@ -1446,20 +1950,6 @@ function createStyles({ palette }: AppTheme) {
       lineHeight: 19,
       fontWeight: "500",
     },
-    awaitingCard: {
-      backgroundColor: palette.card,
-      borderRadius: 14,
-      padding: 12,
-      marginBottom: 10,
-      borderWidth: StyleSheet.hairlineWidth,
-      borderColor: palette.separator,
-    },
-    awaitingText: {
-      color: palette.secondaryLabel,
-      fontSize: 13,
-      lineHeight: 18,
-      fontWeight: "500",
-    },
     emptyCard: {
       backgroundColor: palette.card,
       borderRadius: 16,
@@ -1496,7 +1986,31 @@ function createStyles({ palette }: AppTheme) {
     audioBubble: {
       flexDirection: "row",
       alignItems: "center",
-      gap: 8,
+      gap: 9,
+      paddingVertical: 8,
+      minWidth: 206,
+    },
+    audioIconCircle: {
+      width: 28,
+      height: 28,
+      borderRadius: 14,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.buttonText,
+    },
+    audioMetaColumn: {
+      gap: 1,
+    },
+    audioLabel: {
+      fontSize: 13,
+      lineHeight: 16,
+      fontWeight: "600",
+    },
+    audioDuration: {
+      fontSize: 11,
+      lineHeight: 14,
+      fontVariant: ["tabular-nums"],
+      color: "rgba(255,255,255,0.74)",
     },
     messageText: {
       fontSize: 16,
@@ -1631,21 +2145,44 @@ function createStyles({ palette }: AppTheme) {
       paddingHorizontal: 12,
       paddingTop: 8,
       backgroundColor: palette.overlay,
+      overflow: "visible",
     },
-    composerCard: {
+    composerRow: {
+      flexDirection: "row",
+      alignItems: "flex-end",
+      gap: 8,
+      overflow: "visible",
+    },
+    inputBox: {
+      flex: 1,
       backgroundColor: palette.card,
       borderRadius: 22,
       paddingVertical: 6,
       paddingLeft: 16,
-      paddingRight: 6,
-      flexDirection: "row",
-      alignItems: "flex-end",
-      gap: 6,
+      paddingRight: 14,
       borderWidth: StyleSheet.hairlineWidth,
       borderColor: palette.separator,
     },
-    input: {
+    recordingCard: {
       flex: 1,
+      minHeight: 44,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 10,
+      backgroundColor: palette.cardElevated,
+      borderRadius: 22,
+      paddingVertical: 7,
+      paddingLeft: 12,
+      paddingRight: 12,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.error,
+    },
+    recordingCardLocked: {
+      paddingLeft: 10,
+      backgroundColor: palette.cardElevated,
+      borderColor: palette.error,
+    },
+    input: {
       minHeight: 36,
       maxHeight: 140,
       color: palette.label,
@@ -1655,23 +2192,120 @@ function createStyles({ palette }: AppTheme) {
       lineHeight: 20,
     },
     sendButton: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: palette.tint,
     },
+    voiceSendButton: {
+      backgroundColor: palette.error,
+    },
+    recordingStatusRow: {
+      minWidth: 54,
+      flexDirection: "row",
+      alignItems: "center",
+      gap: 6,
+    },
+    recordingLiveDot: {
+      width: 8,
+      height: 8,
+      borderRadius: 4,
+      backgroundColor: palette.error,
+    },
+    recordingTimer: {
+      color: palette.label,
+      fontSize: 15,
+      lineHeight: 20,
+      fontVariant: ["tabular-nums"],
+      fontWeight: "600",
+    },
+    recordingCancelHint: {
+      width: 128,
+      flexDirection: "row",
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 1,
+    },
+    recordingCancelHintText: {
+      color: palette.secondaryLabel,
+      fontSize: 11,
+      lineHeight: 14,
+      fontWeight: "500",
+    },
+    cancelRecordingButton: {
+      width: 44,
+      height: 44,
+      borderRadius: 22,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.card,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.separator,
+    },
+    voiceActionWrap: {
+      width: 44,
+      height: 44,
+      position: "relative",
+      overflow: "visible",
+      zIndex: 3,
+    },
     voiceButton: {
-      width: 32,
-      height: 32,
-      borderRadius: 16,
+      width: 44,
+      height: 44,
+      borderRadius: 22,
       alignItems: "center",
       justifyContent: "center",
       backgroundColor: palette.tint,
     },
     voiceButtonRecording: {
       backgroundColor: palette.error,
+    },
+    recordingLockTarget: {
+      position: "absolute",
+      right: -10,
+      bottom: 54,
+      width: 64,
+      height: 132,
+      alignItems: "center",
+      justifyContent: "flex-end",
+      gap: 5,
+      paddingBottom: 2,
+      zIndex: 4,
+    },
+    recordingLockBubble: {
+      width: 42,
+      height: 42,
+      borderRadius: 21,
+      alignItems: "center",
+      justifyContent: "center",
+      backgroundColor: palette.cardElevated,
+      borderWidth: StyleSheet.hairlineWidth,
+      borderColor: palette.error,
+    },
+    recordingLockBubbleActive: {
+      backgroundColor: palette.error,
+    },
+    recordingLockRail: {
+      width: 4,
+      height: 42,
+      borderRadius: 2,
+      backgroundColor: "rgba(127,127,127,0.20)",
+      overflow: "hidden",
+      justifyContent: "flex-end",
+    },
+    recordingLockRailFill: {
+      width: 4,
+      borderRadius: 2,
+      backgroundColor: palette.error,
+    },
+    recordingLockHint: {
+      color: palette.secondaryLabel,
+      fontSize: 11,
+      lineHeight: 13,
+      fontWeight: "600",
+      textAlign: "center",
     },
     buttonDisabled: {
       backgroundColor: palette.tintDisabled,
