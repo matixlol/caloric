@@ -56,7 +56,6 @@ export const config = {
   openFoodFactsUserAgent:
     Bun.env.OPEN_FOOD_FACTS_USER_AGENT ?? "Caloric/1.0 (OpenFoodFacts integration; contact required)",
   openFoodFactsUserEmail: Bun.env.OPEN_FOOD_FACTS_USER_EMAIL,
-  openRouterApiKey: getRequiredEnv("OPENROUTER_API_KEY"),
-  openRouterModel: Bun.env.OPENROUTER_MODEL ?? "google/gemini-3-flash-preview",
-  openRouterProviderOnly: Bun.env.OPENROUTER_PROVIDER_ONLY,
+  googleAiStudioApiKey: getRequiredEnv("GOOGLE_AI_STUDIO_API_KEY"),
+  geminiModel: Bun.env.GEMINI_MODEL ?? "gemini-3-flash-preview",
 };

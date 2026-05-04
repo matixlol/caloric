@@ -4,7 +4,7 @@ const hasRequiredEnv =
   Boolean(Bun.env.DATABASE_URL) &&
   Boolean(Bun.env.CLERK_SECRET_KEY) &&
   Boolean(Bun.env.CLERK_PUBLISHABLE_KEY) &&
-  Boolean(Bun.env.OPENROUTER_API_KEY);
+  Boolean(Bun.env.GOOGLE_AI_STUDIO_API_KEY);
 
 const liveIt = hasRequiredEnv ? it : it.skip;
 

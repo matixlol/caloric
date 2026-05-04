@@ -4,7 +4,7 @@ import {
   type JSONValue,
   type ModelMessage,
 } from "ai";
-import { createOpenRouter } from "@openrouter/ai-sdk-provider";
+import { createGoogleGenerativeAI } from "@ai-sdk/google";
 import { z } from "zod";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "../ai-log-context";
 import { config } from "../config";
@@ -130,14 +130,13 @@ const sseHeaders = {
   Connection: "keep-alive",
 } as const;
 
-const openrouter = createOpenRouter({
-  apiKey: config.openRouterApiKey,
-  compatibility: "strict",
-  fetch: fetchWithOpenRouterSentryLogging as typeof fetch,
+const googleAiStudio = createGoogleGenerativeAI({
+  apiKey: config.googleAiStudioApiKey,
+  fetch: fetchWithGeminiSentryLogging as typeof fetch,
 });
 
 const sentryPayloadMaxLength = 80_000;
-const openRouterSpanCallCounters = new WeakMap<object, number>();
+const geminiSpanCallCounters = new WeakMap<object, number>();
 
 function truncateForSentry(value: string, maxLength = sentryPayloadMaxLength): { value: string; truncated: boolean } {
   if (value.length <= maxLength) {
@@ -155,10 +154,13 @@ function truncateForSentry(value: string, maxLength = sentryPayloadMaxLength): {
 
 function headerRecord(headers: Headers): Record<string, string> {
   return Object.fromEntries(
-    Array.from(headers.entries()).map(([key, value]) => [
-      key,
-      key.toLowerCase() === "authorization" ? "[redacted]" : value,
-    ]),
+    Array.from(headers.entries()).map(([key, value]) => {
+      const normalizedKey = key.toLowerCase();
+      return [
+        key,
+        normalizedKey === "authorization" || normalizedKey === "x-goog-api-key" ? "[redacted]" : value,
+      ];
+    }),
   );
 }
 
@@ -174,7 +176,7 @@ async function requestBodyText(request: Request): Promise<string | null> {
   }
 }
 
-function addOpenRouterSpanEvent(
+function addGeminiSpanEvent(
   name: string,
   attributes: Record<string, string | number | boolean | null | undefined>,
 ): void {
@@ -189,30 +191,30 @@ function addOpenRouterSpanEvent(
   Sentry.getActiveSpan()?.addEvent(name, compactAttributes);
 }
 
-function nextOpenRouterSpanCallIndex(): number {
+function nextGeminiSpanCallIndex(): number {
   const span = Sentry.getActiveSpan();
   if (!span) {
     return 1;
   }
 
-  const next = (openRouterSpanCallCounters.get(span) ?? 0) + 1;
-  openRouterSpanCallCounters.set(span, next);
+  const next = (geminiSpanCallCounters.get(span) ?? 0) + 1;
+  geminiSpanCallCounters.set(span, next);
   span.setAttributes({
-    "app.ai.openrouter.call_count": next,
+    "app.ai.gemini.call_count": next,
   });
 
   return next;
 }
 
-async function fetchWithOpenRouterSentryLogging(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+async function fetchWithGeminiSentryLogging(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
-  const callIndex = nextOpenRouterSpanCallIndex();
+  const callIndex = nextGeminiSpanCallIndex();
   const startedAt = performance.now();
   const rawRequestBody = await requestBodyText(request);
   const requestBody = rawRequestBody ? truncateForSentry(rawRequestBody) : null;
 
-  addOpenRouterSpanEvent("openrouter.request", {
-    "app.ai.openrouter.call_index": callIndex,
+  addGeminiSpanEvent("gemini.request", {
+    "app.ai.gemini.call_index": callIndex,
     "http.request.method": request.method,
     "url.full": request.url,
     "http.request.headers": JSON.stringify(headerRecord(request.headers)),
@@ -229,31 +231,31 @@ async function fetchWithOpenRouterSentryLogging(input: RequestInfo | URL, init?:
       .text()
       .then((rawResponseBody) => {
         const responseBody = truncateForSentry(rawResponseBody);
-        addOpenRouterSpanEvent("openrouter.response", {
-          "app.ai.openrouter.call_index": callIndex,
+        addGeminiSpanEvent("gemini.response", {
+          "app.ai.gemini.call_index": callIndex,
           "http.response.status_code": response.status,
           "http.response.headers": JSON.stringify(headerRecord(response.headers)),
           "http.response.body": responseBody.value,
           "http.response.body_length": rawResponseBody.length,
           "http.response.body_truncated": responseBody.truncated,
-          "app.ai.openrouter.duration_ms": Math.round(performance.now() - startedAt),
+          "app.ai.gemini.duration_ms": Math.round(performance.now() - startedAt),
         });
       })
       .catch((error) => {
-        addOpenRouterSpanEvent("openrouter.response_body_failed", {
-          "app.ai.openrouter.call_index": callIndex,
+        addGeminiSpanEvent("gemini.response_body_failed", {
+          "app.ai.gemini.call_index": callIndex,
           "http.response.status_code": response.status,
-          "app.ai.openrouter.error": stringifyUnknownError(error),
-          "app.ai.openrouter.duration_ms": Math.round(performance.now() - startedAt),
+          "app.ai.gemini.error": stringifyUnknownError(error),
+          "app.ai.gemini.duration_ms": Math.round(performance.now() - startedAt),
         });
       });
 
     return response;
   } catch (error) {
-    addOpenRouterSpanEvent("openrouter.fetch_failed", {
-      "app.ai.openrouter.call_index": callIndex,
-      "app.ai.openrouter.error": stringifyUnknownError(error),
-      "app.ai.openrouter.duration_ms": Math.round(performance.now() - startedAt),
+    addGeminiSpanEvent("gemini.fetch_failed", {
+      "app.ai.gemini.call_index": callIndex,
+      "app.ai.gemini.error": stringifyUnknownError(error),
+      "app.ai.gemini.duration_ms": Math.round(performance.now() - startedAt),
     });
 
     throw error;
@@ -385,25 +387,8 @@ function createMessageId(): string {
   return createAiMessageId();
 }
 
-function normalizeOpenRouterUserId(userId: string): string {
-  return userId.slice(0, 128);
-}
-
-function createOpenRouterModel(userId: string) {
-  const providerOnly = config.openRouterProviderOnly?.trim() ?? "";
-
-  return openrouter.chat(config.openRouterModel, {
-    user: normalizeOpenRouterUserId(userId),
-    provider: providerOnly
-      ? {
-          only: [providerOnly],
-          allow_fallbacks: true,
-          sort: "throughput",
-        }
-      : {
-          sort: "throughput",
-      },
-  });
+function createGeminiModel() {
+  return googleAiStudio.chat(config.geminiModel);
 }
 
 async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaType: string }> {
@@ -453,9 +438,8 @@ async function requestAiSdkTurn(
   toolCalls: SessionToolCall[];
   responseMessages: ModelMessage[];
 }> {
-  const providerOnly = config.openRouterProviderOnly?.trim() ?? "";
   const result = streamText({
-    model: createOpenRouterModel(session.userId),
+    model: createGeminiModel(),
     messages: session.conversation,
     tools: aiSdkTools,
     abortSignal: options?.signal,
@@ -466,7 +450,8 @@ async function requestAiSdkTurn(
         sessionId: session.id,
         messageCount: session.conversation.length,
         toolCount: Object.keys(aiSdkTools).length,
-        providerOnly: providerOnly || "any",
+        provider: "google-ai-studio",
+        model: config.geminiModel,
       },
     },
   });

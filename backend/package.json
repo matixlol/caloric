@@ -15,11 +15,11 @@
     "anmat:import-product-derived": "bun src/providers/anmat/import-product-derived.ts"
   },
   "dependencies": {
+    "@ai-sdk/google": "^3.0.67",
     "@caloric/data-model": "workspace:*",
     "@clerk/backend": "^2.14.20",
     "@foxglove/wasm-zstd": "^1.0.1",
     "@hono/otel": "^1.1.1",
-    "@openrouter/ai-sdk-provider": "^2.8.0",
     "@sentry/bun": "^10.47.0",
     "ai": "^6.0.168",
     "cheerio": "^1.1.2",
