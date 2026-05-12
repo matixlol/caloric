@@ -900,9 +900,17 @@ type OpenFoodFactsProduct = {
 function getOpenFoodFactsValue(
   nutriments: OpenFoodFactsNutriments | null | undefined,
   key: string,
+  preferServing: boolean,
 ): number | undefined {
   if (!nutriments) {
     return undefined;
+  }
+
+  if (preferServing) {
+    const servingValue = asNumber(nutriments[`${key}_serving`]);
+    if (servingValue !== undefined) {
+      return servingValue;
+    }
   }
 
   return (
@@ -915,8 +923,10 @@ function getOpenFoodFactsValue(
 function convertOpenFoodFactsMineralToMg(
   nutriments: OpenFoodFactsNutriments | null | undefined,
   key: string,
+  preferServing: boolean,
 ): number | undefined {
   const value =
+    (preferServing ? asNumber(nutriments?.[`${key}_serving`]) : undefined) ??
     asNumber(nutriments?.[`${key}_100g`]) ??
     asNumber(nutriments?.[`${key}_value`]) ??
     asNumber(nutriments?.[key]);
@@ -943,16 +953,17 @@ function convertOpenFoodFactsMineralToMg(
 
 function mapOpenFoodFactsNutrition(
   nutriments: OpenFoodFactsNutriments | null | undefined,
+  preferServing: boolean,
 ): FoodSearchResult["nutrition"] {
   const nutrition = {
-    calories: getOpenFoodFactsValue(nutriments, "energy-kcal"),
-    protein: getOpenFoodFactsValue(nutriments, "proteins"),
-    carbs: getOpenFoodFactsValue(nutriments, "carbohydrates"),
-    fat: getOpenFoodFactsValue(nutriments, "fat"),
-    fiber: getOpenFoodFactsValue(nutriments, "fiber"),
-    sugars: getOpenFoodFactsValue(nutriments, "sugars"),
-    sodiumMg: convertOpenFoodFactsMineralToMg(nutriments, "sodium"),
-    potassiumMg: convertOpenFoodFactsMineralToMg(nutriments, "potassium"),
+    calories: getOpenFoodFactsValue(nutriments, "energy-kcal", preferServing),
+    protein: getOpenFoodFactsValue(nutriments, "proteins", preferServing),
+    carbs: getOpenFoodFactsValue(nutriments, "carbohydrates", preferServing),
+    fat: getOpenFoodFactsValue(nutriments, "fat", preferServing),
+    fiber: getOpenFoodFactsValue(nutriments, "fiber", preferServing),
+    sugars: getOpenFoodFactsValue(nutriments, "sugars", preferServing),
+    sodiumMg: convertOpenFoodFactsMineralToMg(nutriments, "sodium", preferServing),
+    potassiumMg: convertOpenFoodFactsMineralToMg(nutriments, "potassium", preferServing),
   };
 
   return hasNutrition(nutrition) ? nutrition : undefined;
@@ -981,9 +992,17 @@ function mapOpenFoodFactsSearchResults(payload: {
       continue;
     }
 
-    const nutrition = mapOpenFoodFactsNutrition(product?.nutriments ?? null);
+    const rawServing = asString(product?.serving_size) || asString(product?.quantity);
+    const hasServingData = !!asNumber(product?.nutriments?.["energy-kcal_serving"]);
+    const nutrition = mapOpenFoodFactsNutrition(product?.nutriments ?? null, hasServingData);
+
     if (!nutrition) {
       continue;
+    }
+
+    let serving = rawServing;
+    if (!hasServingData) {
+      serving = rawServing ? `${rawServing} (per 100g)` : "100g";
     }
 
     seen.add(code);
@@ -994,7 +1013,7 @@ function mapOpenFoodFactsSearchResults(payload: {
       sourceLabel: "OFF",
       name,
       brand: asString(product?.brands),
-      serving: asString(product?.serving_size) ?? asString(product?.quantity),
+      serving,
       nutrition,
     });
   }
