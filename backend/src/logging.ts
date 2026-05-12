@@ -49,6 +49,27 @@ export function logInfo(event: string, fields: LogFields = {}): void {
   Sentry.logger.info(event, payload);
 }
 
+export function logWarn(event: string, error: unknown, fields: LogFields = {}): void {
+  const normalizedError = error instanceof Error
+    ? {
+        name: error.name,
+        message: error.message,
+        stack: summarizeText(error.stack, 1000),
+      }
+    : {
+        message: String(error),
+      };
+
+  const payload = {
+    level: "warn",
+    event,
+    ...compactFields(fields),
+    error: normalizedError,
+  };
+
+  Sentry.logger.warn?.(event, payload) ?? Sentry.logger.info(event, payload);
+}
+
 export function logError(event: string, error: unknown, fields: LogFields = {}): void {
   const normalizedError = error instanceof Error
     ? {

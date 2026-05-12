@@ -285,17 +285,28 @@ function stringifyUnknownError(error: unknown): string {
   }
 }
 
-function captureUnknownError(code: string, error: unknown): void {
+function captureUnknownError(code: string, error: unknown) {
+  const isConnectionClosed =
+    error instanceof Error &&
+    (error.name === "AbortError" ||
+      error.message.includes("connection was closed") ||
+      error.message.includes("Connection closed") ||
+      error.message.includes("stream closed"));
+
   const errorForCapture =
     error instanceof Error ? error : new Error(`${code}: ${summarizeText(stringifyUnknownError(error), 500)}`);
 
   Sentry.getActiveSpan()?.setAttributes({
     "app.error.code": code,
     "app.error.exposed": false,
+    "app.error.is_connection_closed": isConnectionClosed,
   });
 
   logError(`api.${code}`, errorForCapture);
-  Sentry.captureException(errorForCapture);
+
+  if (!isConnectionClosed) {
+    Sentry.captureException(errorForCapture);
+  }
 }
 
 function reportUnknownError(code: string, error: unknown): Response {

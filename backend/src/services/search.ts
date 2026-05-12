@@ -9,7 +9,7 @@ import {
   mfpSearchResponses,
   openFoodFactsSearchResponses,
 } from "../db/schema";
-import { logError, logInfo, summarizeText } from "../logging";
+import { logError, logInfo, logWarn, summarizeText } from "../logging";
 import { normalizeTextValue } from "../providers/anmat/html";
 import { fetchFoodDetail, searchNutrition } from "../providers/myfitnesspal/client";
 import { getMfpAuthHeaders, MFP_BASE_URL } from "../providers/myfitnesspal/session";
@@ -633,12 +633,6 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
   } else {
     const searchResponse = await searchNutrition(searchLookup);
 
-    if (!isSuccessfulMfpStatus(searchResponse.status) || !searchResponse.json) {
-      throw new Error(
-        `MyFitnessPal search failed with status ${searchResponse.status}${searchResponse.text ? `: ${summarizeText(searchResponse.text)}` : ""}`,
-      );
-    }
-
     const [savedSearch] = await db
       .insert(mfpSearchResponses)
       .values({
@@ -763,14 +757,13 @@ async function executeSearch(params: SearchParams): Promise<SearchResponsePayloa
       const message = error instanceof Error ? error.message : String(error);
       const fallbackUrl = `${MFP_BASE_URL}/api/services/foods/${key.foodId}?version=${key.version}`;
 
-      logError("mfp.detail.fetch_failed", error, {
+      logWarn("mfp.detail.fetch_failed", error, {
         traceId,
         searchResponseId,
         foodId: key.foodId,
         version: key.version,
         fallbackUrl,
       });
-
       await saveDetailForSearch({
         searchResponseId,
         foodId: key.foodId,
@@ -1349,12 +1342,6 @@ async function executeOpenFoodFactsSearch(params: {
     durationMs: Date.now() - startedAt,
   });
 
-  if (searchResponse.status < 200 || searchResponse.status >= 300 || !searchResponse.json) {
-    throw new Error(
-      `OpenFoodFacts search failed with status ${searchResponse.status}${searchResponse.text ? `: ${summarizeText(searchResponse.text)}` : ""}`,
-    );
-  }
-
   return {
     status: searchResponse.status,
     url: searchResponse.url,
@@ -1465,14 +1452,14 @@ export async function searchUnifiedFoods(query: string, limit: number): Promise<
       const openFoodFactsFoods = openFoodFactsResult.status === "fulfilled" ? openFoodFactsResult.value : [];
 
       if (anmatResult.status === "rejected") {
-        logError("food_search.anmat_failed", anmatResult.reason, {
+        logWarn("food_search.anmat_failed", anmatResult.reason, {
           query,
           limit,
         });
       }
 
       if (mfpResult.status === "rejected") {
-        logError("food_search.mfp_failed", mfpResult.reason, {
+        logWarn("food_search.mfp_failed", mfpResult.reason, {
           query,
           limit,
           anmatCount: anmatFoods.length,
@@ -1480,7 +1467,7 @@ export async function searchUnifiedFoods(query: string, limit: number): Promise<
       }
 
       if (openFoodFactsResult.status === "rejected") {
-        logError("food_search.open_food_facts_failed", openFoodFactsResult.reason, {
+        logWarn("food_search.open_food_facts_failed", openFoodFactsResult.reason, {
           query,
           limit,
           anmatCount: anmatFoods.length,

@@ -1,5 +1,5 @@
 import { config } from "../../config";
-import { logError, logInfo, summarizeText } from "../../logging";
+import { logInfo, logWarn, summarizeText } from "../../logging";
 
 export const OPEN_FOOD_FACTS_BASE_URL = config.openFoodFactsBaseUrl.replace(/\/+$/, "");
 
@@ -66,7 +66,7 @@ export async function searchOpenFoodFacts(params: OpenFoodFactsSearchParams): Pr
       signal: AbortSignal.timeout(config.requestTimeoutMs),
     });
   } catch (error) {
-    logError("open_food_facts.request.fetch_failed", error, {
+    logWarn("open_food_facts.request.fetch_failed", error, {
       url: url.toString(),
       durationMs: Date.now() - startedAt,
     });

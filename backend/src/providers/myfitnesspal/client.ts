@@ -1,5 +1,5 @@
 import { config } from "../../config";
-import { logError, logInfo, redactSecret, summarizeText } from "../../logging";
+import { logError, logInfo, logWarn, redactSecret, summarizeText } from "../../logging";
 import { getMfpAuthHeaders, MFP_BASE_URL } from "./session";
 
 const MFP_API_USER_AGENT =
@@ -100,7 +100,7 @@ async function request(pathWithQuery: string): Promise<MfpResponse> {
 
     return response;
   } catch (error) {
-    logError("mfp.request.fetch_failed", error, {
+    logWarn("mfp.request.fetch_failed", error, {
       url: url.toString(),
       durationMs: Date.now() - startedAt,
     });
