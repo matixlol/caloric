@@ -2,7 +2,6 @@ const fs = require("fs");
 const path = require("path");
 const { withDangerousMod, withEntitlementsPlist, withInfoPlist } = require("expo/config-plugins");
 
-const CONTAINER_IDENTIFIER = "iCloud.lol.mati.caloric";
 const BACKUP_MODULE_FILE_NAME = "ICloudBackupModule.m";
 const PBX_FILE_REF = "A19C10A44F694DF5A0FAE801";
 const PBX_BUILD_FILE = "A19C10A54F694DF5A0FAE801";
@@ -13,11 +12,24 @@ RCT_EXTERN_METHOD(ensureBackup:(NSString *)json resolver:(RCTPromiseResolveBlock
 @end
 `;
 
-const BACKUP_SWIFT_SNIPPET = `
+function getBundleIdentifier(config) {
+  const bundleIdentifier = config.ios?.bundleIdentifier;
+  if (!bundleIdentifier) {
+    throw new Error("Expected ios.bundleIdentifier to be configured for iCloud backup.");
+  }
+  return bundleIdentifier;
+}
+
+function getContainerIdentifier(config) {
+  return `iCloud.${getBundleIdentifier(config)}`;
+}
+
+function getBackupSwiftSnippet(containerIdentifier) {
+  return `
 
 @objc(ICloudBackupModule)
 final class ICloudBackupModule: NSObject {
-  private static let containerIdentifier = "iCloud.lol.mati.caloric"
+  private static let containerIdentifier = "${containerIdentifier}"
   private static let legacyBackupFileName = "caloric-backup.json"
   private static let backupFileNamePrefix = "caloric-backup-"
   private static let backupFileNameSuffix = ".json"
@@ -169,25 +181,29 @@ final class ICloudBackupModule: NSObject {
   }
 }
 `;
+}
 
 function withICloudEntitlements(config) {
   return withEntitlementsPlist(config, (config) => {
-    config.modResults["com.apple.developer.icloud-container-identifiers"] = [CONTAINER_IDENTIFIER];
+    const bundleIdentifier = getBundleIdentifier(config);
+    const containerIdentifier = getContainerIdentifier(config);
+    config.modResults["com.apple.developer.icloud-container-identifiers"] = [containerIdentifier];
     config.modResults["com.apple.developer.icloud-services"] = ["CloudDocuments"];
-    config.modResults["com.apple.developer.ubiquity-container-identifiers"] = [CONTAINER_IDENTIFIER];
-    config.modResults["com.apple.developer.ubiquity-kvstore-identifier"] = "$(TeamIdentifierPrefix)lol.mati.caloric";
+    config.modResults["com.apple.developer.ubiquity-container-identifiers"] = [containerIdentifier];
+    config.modResults["com.apple.developer.ubiquity-kvstore-identifier"] = `$(TeamIdentifierPrefix)${bundleIdentifier}`;
     return config;
   });
 }
 
 function withICloudInfoPlist(config) {
   return withInfoPlist(config, (config) => {
+    const containerIdentifier = getContainerIdentifier(config);
     config.modResults.LSSupportsOpeningDocumentsInPlace = true;
     config.modResults.NSUbiquitousContainers = {
       ...(config.modResults.NSUbiquitousContainers || {}),
-      [CONTAINER_IDENTIFIER]: {
+      [containerIdentifier]: {
         NSUbiquitousContainerIsDocumentScopePublic: true,
-        NSUbiquitousContainerName: "Caloric",
+        NSUbiquitousContainerName: config.name || "Caloric",
         NSUbiquitousContainerSupportedFolderLevels: "Any",
       },
     };
@@ -207,6 +223,7 @@ function patchOnce(source, marker, addition) {
 
 function withICloudBackupNativeFiles(config) {
   return withDangerousMod(config, ["ios", async (config) => {
+    const containerIdentifier = getContainerIdentifier(config);
     const iosRoot = config.modRequest.platformProjectRoot;
     const projectName = config.modRequest.projectName;
     const modulePath = path.join(iosRoot, projectName, BACKUP_MODULE_FILE_NAME);
@@ -218,7 +235,7 @@ function withICloudBackupNativeFiles(config) {
       appDelegate = appDelegate.replace("internal import Expo", "import Foundation\ninternal import Expo");
     }
     if (!appDelegate.includes("@objc(ICloudBackupModule)")) {
-      appDelegate += BACKUP_SWIFT_SNIPPET;
+      appDelegate += getBackupSwiftSnippet(containerIdentifier);
     }
     fs.writeFileSync(appDelegatePath, appDelegate);
 

@@ -26,6 +26,17 @@
         "simulator": true
       },
       "environment": "development"
+    },
+    "development-device": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "ios": {
+        "simulator": false
+      },
+      "env": {
+        "APP_VARIANT": "development"
+      },
+      "environment": "development"
     }
   },
   "submit": {

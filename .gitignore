@@ -3,6 +3,10 @@
 
 # dependencies
 node_modules/
+.cache/
+.eas-home/
+.expo-home/
+.pnpm-store/
 
 # Expo
 .expo/

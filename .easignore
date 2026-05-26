@@ -1,0 +1,9 @@
+node_modules/
+.pnpm-store/
+.cache/
+.eas-home/
+.expo-home/
+mobile/node_modules/
+backend/node_modules/
+data-model/node_modules/
+.git/
