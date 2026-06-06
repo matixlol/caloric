@@ -19,7 +19,7 @@
   "dependencies": {
     "@caloric/data-model": "workspace:*",
     "@azure/core-asynciterator-polyfill": "^1.0.2",
-    "@clerk/expo": "^3.1.0",
+    "@clerk/expo": "^3.3.1",
     "@expo/dom-webview": "^55.0.5",
     "@expo/metro-runtime": "~55.0.9",
     "@expo/vector-icons": "^15.0.3",
