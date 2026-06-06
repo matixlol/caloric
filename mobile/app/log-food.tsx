@@ -23,6 +23,7 @@ import { MacroBadges } from "../src/components/MacroBadges";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
 import type { FoodEntryRecord } from "../src/data/store";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
+import { formatPortionLabel, sanitizePortion } from "../src/portion";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -90,6 +91,7 @@ function buildRecentEntryKey(entry: FoodEntryRecord): string {
     normalizeSearchText(entry.foodName),
     normalizeSearchText(entry.brand),
     normalizeSearchText(entry.serving),
+    formatPortionLabel(entry.portion),
   ].join("|");
 }
 
@@ -137,6 +139,8 @@ function FoodRow({
   name,
   brand,
   serving,
+  portionLabel,
+  nutritionMultiplier = 1,
   nutrition,
   selected,
   isLast,
@@ -146,6 +150,8 @@ function FoodRow({
   name: string;
   brand?: string;
   serving?: string;
+  portionLabel?: string;
+  nutritionMultiplier?: number;
   nutrition?: SearchFood["nutrition"];
   selected: boolean;
   isLast: boolean;
@@ -160,12 +166,19 @@ function FoodRow({
       <View style={styles.foodMain}>
         <Text style={styles.foodName}>{name}</Text>
         <View style={styles.foodMetaRow}>
-          {brand ? <Text style={styles.foodMeta}>{brand}</Text> : null}
+          {portionLabel ? <Text style={styles.foodMeta}>{portionLabel}</Text> : null}
+          {brand ? (
+            <Text style={styles.foodMeta}>{portionLabel ? `• ${brand}` : brand}</Text>
+          ) : null}
           {sourceLabel ? <Text style={styles.inlineSourceBadge}>{sourceLabel}</Text> : null}
-          {serving ? <Text style={styles.foodMeta}>{brand ? `• ${serving}` : serving}</Text> : null}
-          {!brand && !serving ? <Text style={styles.foodMeta}>No serving details</Text> : null}
+          {serving ? (
+            <Text style={styles.foodMeta}>{portionLabel || brand ? `• ${serving}` : serving}</Text>
+          ) : null}
+          {!portionLabel && !brand && !serving ? (
+            <Text style={styles.foodMeta}>No serving details</Text>
+          ) : null}
         </View>
-        <MacroBadges nutrition={nutrition} />
+        <MacroBadges nutrition={nutrition} multiplier={nutritionMultiplier} />
       </View>
       {selected ? <Text style={styles.selectedMark}>✓</Text> : null}
     </Pressable>
@@ -316,12 +329,14 @@ export default function LogFoodScreen() {
         dateKey: selectedDateKey,
       });
     } else if (selectedRecentEntry) {
+      const portion = sanitizePortion(selectedRecentEntry.portion);
+
       void createFoodEntry({
         meal: selectedMeal,
         foodName: selectedRecentEntry.foodName,
         brand: selectedRecentEntry.brand,
         serving: selectedRecentEntry.serving,
-        portion: selectedRecentEntry.portion,
+        portion,
         nutrition: selectedRecentEntry.nutrition,
         createdAt,
         dateKey: selectedDateKey,
@@ -380,6 +395,8 @@ export default function LogFoodScreen() {
                     name={entry.foodName}
                     brand={entry.brand}
                     serving={entry.serving}
+                    portionLabel={formatPortionLabel(entry.portion)}
+                    nutritionMultiplier={sanitizePortion(entry.portion)}
                     nutrition={entry.nutrition}
                     selected={selectedRecentEntryId === entry.id}
                     isLast={index === recentEntries.length - 1}
@@ -405,6 +422,8 @@ export default function LogFoodScreen() {
                   name={entry.foodName}
                   brand={entry.brand}
                   serving={entry.serving}
+                  portionLabel={formatPortionLabel(entry.portion)}
+                  nutritionMultiplier={sanitizePortion(entry.portion)}
                   nutrition={entry.nutrition}
                   selected={selectedRecentEntryId === entry.id}
                   isLast={index === recentSearchMatches.length - 1}
