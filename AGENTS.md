@@ -13,6 +13,11 @@
 - If CocoaPods/prebuild fails with `Unicode Normalization not appropriate for ASCII-8BIT`, rerun with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` set.
 - If `npx expo run:ios` fails after SDK/dependency changes, run iOS prebuild clean first, then retry.
 
+## Expo Dev Server
+- Run the Expo dev server in tmux so it stays up after the agent turn ends:
+  - `cd mobile && tmux new-session -d -s caloric-expo-dev 'APP_VARIANT=development EXPO_NO_TELEMETRY=1 npx expo start --dev-client --host lan --port 8081'`
+- Check logs with `tmux capture-pane -pt caloric-expo-dev` and stop it with `tmux kill-session -t caloric-expo-dev`.
+
 ## iOS Release / OTA Notes
 - If a change touches native iOS code, Expo config plugins, entitlements, Info.plist, or anything generated into `ios/`, do a full iOS build for TestFlight/App Store. OTA is not enough for those changes.
 - Only use OTA for JS-only changes, and do not assume OTA is configured just because `mobile/eas.json` has a production channel. This app currently does **not** have `expo-updates` installed, so channel-based OTA will warn until that package/config is added.

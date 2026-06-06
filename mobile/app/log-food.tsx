@@ -1,7 +1,9 @@
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
+import type * as ExpoHaptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
+  Keyboard,
   Platform,
   PlatformColor,
   Pressable,
@@ -11,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { normalizeLocalDateKey } from "../src/date";
 import {
@@ -48,6 +51,15 @@ const palette = {
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MAX_ITEMS = 20;
 const RECENT_ITEMS_LIMIT = 50;
+const QUICK_ADD_DEFAULT_CALORIES = 250;
+const QUICK_ADD_MIN_CALORIES = 50;
+const QUICK_ADD_SLIDER_MAX_CALORIES = 600;
+const QUICK_ADD_CALORIE_STEP = 50;
+const QUICK_ADD_DRAG_STEP_PX = 25;
+const QUICK_ADD_FIRST_STEP_OFFSET_PX = 54;
+const QUICK_ADD_LONG_PRESS_MS = 260;
+const QUICK_ADD_MAX_TYPED_CALORIES = 10000;
+const QUICK_ADD_MAX_TYPED_MACRO_GRAMS = 1000;
 type SearchProviderFilter = "all" | SearchFoodSource;
 
 const PROVIDER_FILTERS: { key: SearchProviderFilter; label: string }[] = [
@@ -56,6 +68,15 @@ const PROVIDER_FILTERS: { key: SearchProviderFilter; label: string }[] = [
   { key: "openfoodfacts", label: "OFF" },
   { key: "anmat", label: "ANMAT" },
 ];
+
+const QUICK_ADD_CALORIE_VALUES = Array.from(
+  {
+    length:
+      (QUICK_ADD_SLIDER_MAX_CALORIES - QUICK_ADD_MIN_CALORIES) / QUICK_ADD_CALORIE_STEP + 1,
+  },
+  (_, index) => QUICK_ADD_MIN_CALORIES + index * QUICK_ADD_CALORIE_STEP,
+);
+const QUICK_ADD_REVERSED_CALORIE_VALUES = [...QUICK_ADD_CALORIE_VALUES].reverse();
 
 function createEmptyFoodsBySource(): SearchFoodsBySource {
   return {
@@ -71,6 +92,88 @@ function getErrorMessage(error: unknown): string {
   }
 
   return "Unknown error.";
+}
+
+function formatCalories(value: number): string {
+  return Math.round(value).toLocaleString();
+}
+
+function parseCalorieInput(value: string): number | null {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return null;
+  }
+
+  const parsedValue = Number(trimmedValue);
+  if (
+    !Number.isFinite(parsedValue) ||
+    parsedValue <= 0 ||
+    parsedValue > QUICK_ADD_MAX_TYPED_CALORIES
+  ) {
+    return null;
+  }
+
+  return Math.round(parsedValue);
+}
+
+function parseOptionalMacroInput(value: string): number | null | undefined {
+  const trimmedValue = value.trim();
+  if (!trimmedValue) {
+    return undefined;
+  }
+
+  const parsedValue = Number(trimmedValue);
+  if (
+    !Number.isFinite(parsedValue) ||
+    parsedValue < 0 ||
+    parsedValue > QUICK_ADD_MAX_TYPED_MACRO_GRAMS
+  ) {
+    return null;
+  }
+
+  return Math.round(parsedValue * 10) / 10;
+}
+
+function getCaloriesFromDragDelta(deltaY: number): number | null {
+  const upwardDrag = -deltaY;
+  const sliderDrag = upwardDrag - QUICK_ADD_FIRST_STEP_OFFSET_PX;
+  if (sliderDrag < 0) {
+    return null;
+  }
+
+  const deltaSteps = Math.round(sliderDrag / QUICK_ADD_DRAG_STEP_PX);
+  const nextIndex = Math.min(
+    QUICK_ADD_CALORIE_VALUES.length - 1,
+    Math.max(0, deltaSteps),
+  );
+
+  return QUICK_ADD_CALORIE_VALUES[nextIndex];
+}
+
+function logQuickAddGesture(event: string, details?: Record<string, unknown>) {
+  if (!__DEV__) {
+    return;
+  }
+
+  console.log(`[quick-add] ${event}`, details ?? {});
+}
+
+function triggerSelectionHaptic() {
+  if (Platform.OS === "web") {
+    return;
+  }
+
+  const Haptics = require("expo-haptics") as typeof ExpoHaptics;
+  void Haptics.selectionAsync().catch(() => {});
+}
+
+function triggerImpactHaptic() {
+  if (Platform.OS === "web") {
+    return;
+  }
+
+  const Haptics = require("expo-haptics") as typeof ExpoHaptics;
+  void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
 }
 
 function normalizeSearchText(value: string | undefined): string {
@@ -201,8 +304,277 @@ export default function LogFoodScreen() {
   const [selectedFoodId, setSelectedFoodId] = useState<string | null>(null);
   const [selectedRecentEntryId, setSelectedRecentEntryId] = useState<string | null>(null);
   const [activeProviderFilter, setActiveProviderFilter] = useState<SearchProviderFilter>("all");
+  const [isQuickAddExpanded, setIsQuickAddExpanded] = useState(false);
+  const [isQuickAddPickerActive, setIsQuickAddPickerActive] = useState(false);
+  const [quickAddCaloriesText, setQuickAddCaloriesText] = useState(
+    String(QUICK_ADD_DEFAULT_CALORIES),
+  );
+  const [quickAddProteinText, setQuickAddProteinText] = useState("");
+  const [quickAddCarbsText, setQuickAddCarbsText] = useState("");
+  const [quickAddFatText, setQuickAddFatText] = useState("");
+  const [quickAddSliderCalories, setQuickAddSliderCalories] = useState<number | null>(null);
+  const [keyboardBottomOffset, setKeyboardBottomOffset] = useState(0);
+  const isQuickAddExpandedRef = useRef(false);
+  const isQuickAddPickerActiveRef = useRef(false);
+  const isQuickAddLongPressingRef = useRef(false);
+  const quickAddDragCaloriesRef = useRef<number | null>(null);
+  const quickAddLongPressStartDeltaYRef = useRef(0);
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+  const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
+  const selectedDay = Array.isArray(params.day) ? params.day[0] : params.day;
+  const selectedDateKey = normalizeLocalDateKey(selectedDay, Date.now());
+  const selectedMealLabel = mealLabelFor(selectedMeal);
+  const parsedQuickAddCalories = parseCalorieInput(quickAddCaloriesText);
+  const parsedQuickAddProtein = parseOptionalMacroInput(quickAddProteinText);
+  const parsedQuickAddCarbs = parseOptionalMacroInput(quickAddCarbsText);
+  const parsedQuickAddFat = parseOptionalMacroInput(quickAddFatText);
+  const isQuickAddButtonActive = isQuickAddExpanded || isQuickAddPickerActive;
+  const canQuickAdd =
+    parsedQuickAddCalories !== null &&
+    parsedQuickAddProtein !== null &&
+    parsedQuickAddCarbs !== null &&
+    parsedQuickAddFat !== null;
+
+  isQuickAddExpandedRef.current = isQuickAddExpanded;
+  isQuickAddPickerActiveRef.current = isQuickAddPickerActive;
+
+  const navigateAfterAdd = useCallback(() => {
+    if (router.canGoBack()) {
+      router.back();
+      return;
+    }
+
+    router.replace("/");
+  }, [router]);
+
+  const handleQuickAddToLog = useCallback(
+    (caloriesOverride?: number) => {
+      const isCaloriesOnlyOverride = caloriesOverride !== undefined;
+      const calories = caloriesOverride ?? parsedQuickAddCalories;
+      if (calories === null) {
+        return false;
+      }
+
+      if (
+        !isCaloriesOnlyOverride &&
+        (parsedQuickAddProtein === null ||
+          parsedQuickAddCarbs === null ||
+          parsedQuickAddFat === null)
+      ) {
+        return false;
+      }
+
+      const nutrition: NonNullable<FoodEntryRecord["nutrition"]> = { calories };
+      if (!isCaloriesOnlyOverride) {
+        if (typeof parsedQuickAddProtein === "number") {
+          nutrition.protein = parsedQuickAddProtein;
+        }
+        if (typeof parsedQuickAddCarbs === "number") {
+          nutrition.carbs = parsedQuickAddCarbs;
+        }
+        if (typeof parsedQuickAddFat === "number") {
+          nutrition.fat = parsedQuickAddFat;
+        }
+      }
+
+      logQuickAddGesture("add-entry", {
+        calories,
+        meal: selectedMeal,
+        mode: isCaloriesOnlyOverride ? "hold" : "typed",
+      });
+
+      void createFoodEntry({
+        meal: selectedMeal,
+        foodName: "Quick add",
+        serving: "Manual entry",
+        portion: 1,
+        nutrition,
+        createdAt: Date.now(),
+        dateKey: selectedDateKey,
+      });
+
+      navigateAfterAdd();
+      return true;
+    },
+    [
+      createFoodEntry,
+      navigateAfterAdd,
+      parsedQuickAddCalories,
+      parsedQuickAddCarbs,
+      parsedQuickAddFat,
+      parsedQuickAddProtein,
+      selectedDateKey,
+      selectedMeal,
+    ],
+  );
+
+  const applyQuickAddDragCalories = useCallback((deltaY: number) => {
+    const nextCalories = getCaloriesFromDragDelta(deltaY);
+    if (quickAddDragCaloriesRef.current === nextCalories) {
+      return;
+    }
+
+    quickAddDragCaloriesRef.current = nextCalories;
+    logQuickAddGesture("move:value-change", {
+      deltaY,
+      nextCalories,
+      firstStepOffset: QUICK_ADD_FIRST_STEP_OFFSET_PX,
+      stepPx: QUICK_ADD_DRAG_STEP_PX,
+    });
+    setQuickAddSliderCalories(nextCalories);
+    if (nextCalories !== null) {
+      triggerSelectionHaptic();
+    }
+  }, []);
+
+  const toggleQuickAddPanel = useCallback(() => {
+    logQuickAddGesture("tap:toggle-panel", {
+      wasExpanded: isQuickAddExpandedRef.current,
+      wasPickerActive: isQuickAddPickerActiveRef.current,
+    });
+    setIsQuickAddExpanded((isExpanded) => !isExpanded);
+    setIsQuickAddPickerActive(false);
+    setSelectedFoodId(null);
+    setSelectedRecentEntryId(null);
+  }, []);
+
+  const startQuickAddPicker = useCallback((startTranslationY: number) => {
+    logQuickAddGesture("long-press:start-picker", {
+      startTranslationY,
+      firstSelectableCalories: QUICK_ADD_MIN_CALORIES,
+    });
+    isQuickAddLongPressingRef.current = true;
+    quickAddLongPressStartDeltaYRef.current = startTranslationY;
+    quickAddDragCaloriesRef.current = null;
+    setQuickAddSliderCalories(null);
+    setIsQuickAddExpanded(false);
+    setIsQuickAddPickerActive(true);
+    setSelectedFoodId(null);
+    setSelectedRecentEntryId(null);
+    triggerSelectionHaptic();
+  }, []);
+
+  const finishQuickAddHoldGesture = useCallback(() => {
+    if (!isQuickAddLongPressingRef.current) {
+      logQuickAddGesture("release:hold-without-active");
+      return;
+    }
+
+    const selectedCalories = quickAddDragCaloriesRef.current;
+    logQuickAddGesture("release:hold", {
+      selectedCalories,
+      longPressStartDeltaY: quickAddLongPressStartDeltaYRef.current,
+    });
+    isQuickAddLongPressingRef.current = false;
+    setIsQuickAddPickerActive(false);
+    setIsQuickAddExpanded(false);
+    if (selectedCalories === null) {
+      logQuickAddGesture("release:hold-empty");
+      return;
+    }
+
+    setQuickAddCaloriesText(String(selectedCalories));
+    const didAdd = handleQuickAddToLog(selectedCalories);
+    logQuickAddGesture("release:hold-add", {
+      selectedCalories,
+      didAdd,
+    });
+    triggerImpactHaptic();
+  }, [handleQuickAddToLog]);
+
+  const cancelQuickAddGesture = useCallback(() => {
+    logQuickAddGesture("terminate", {
+      wasLongPressing: isQuickAddLongPressingRef.current,
+      calories: quickAddDragCaloriesRef.current,
+    });
+    isQuickAddLongPressingRef.current = false;
+    setIsQuickAddPickerActive(false);
+    setIsQuickAddExpanded(false);
+  }, []);
+
+  const quickAddGesture = useMemo(() => {
+    const holdDragGesture = Gesture.Pan()
+      .activateAfterLongPress(QUICK_ADD_LONG_PRESS_MS)
+      .minDistance(0)
+      .shouldCancelWhenOutside(false)
+      .runOnJS(true)
+      .onBegin(() => {
+        logQuickAddGesture("grant", {
+          isExpanded: isQuickAddExpandedRef.current,
+          isPickerActive: isQuickAddPickerActiveRef.current,
+        });
+        isQuickAddLongPressingRef.current = false;
+        quickAddLongPressStartDeltaYRef.current = 0;
+      })
+      .onStart((event) => {
+        startQuickAddPicker(event.translationY);
+      })
+      .onUpdate((event) => {
+        if (!isQuickAddLongPressingRef.current) {
+          return;
+        }
+
+        const adjustedDy = event.translationY - quickAddLongPressStartDeltaYRef.current;
+        logQuickAddGesture("move:active", {
+          dx: event.translationX,
+          dy: event.translationY,
+          adjustedDy,
+        });
+        applyQuickAddDragCalories(adjustedDy);
+      })
+      .onEnd((_event, success) => {
+        logQuickAddGesture("pan:end", { success });
+        if (success) {
+          finishQuickAddHoldGesture();
+        }
+      })
+      .onFinalize((_event, success) => {
+        logQuickAddGesture("pan:finalize", {
+          success,
+          wasLongPressing: isQuickAddLongPressingRef.current,
+        });
+        if (!success && isQuickAddLongPressingRef.current) {
+          cancelQuickAddGesture();
+        }
+      });
+
+    const tapGesture = Gesture.Tap()
+      .maxDuration(QUICK_ADD_LONG_PRESS_MS)
+      .maxDistance(16)
+      .runOnJS(true)
+      .onEnd((_event, success) => {
+        logQuickAddGesture("tap:end", { success });
+        if (success) {
+          toggleQuickAddPanel();
+        }
+      });
+
+    return Gesture.Exclusive(holdDragGesture, tapGesture);
+  }, [
+    applyQuickAddDragCalories,
+    cancelQuickAddGesture,
+    finishQuickAddHoldGesture,
+    startQuickAddPicker,
+    toggleQuickAddPanel,
+  ]);
+
+  useEffect(() => {
+    const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
+    const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
+
+    const showSubscription = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardBottomOffset(Math.max(0, event.endCoordinates.height - insets.bottom));
+    });
+    const hideSubscription = Keyboard.addListener(hideEvent, () => {
+      setKeyboardBottomOffset(0);
+    });
+
+    return () => {
+      showSubscription.remove();
+      hideSubscription.remove();
+    };
+  }, [insets.bottom]);
 
   useEffect(() => {
     const timeout = setTimeout(() => {
@@ -277,10 +649,6 @@ export default function LogFoodScreen() {
     );
   }
 
-  const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
-  const selectedDay = Array.isArray(params.day) ? params.day[0] : params.day;
-  const selectedDateKey = normalizeLocalDateKey(selectedDay, Date.now());
-  const selectedMealLabel = mealLabelFor(selectedMeal);
   const trimmedQuery = query.trim();
   const canShowResults = trimmedQuery.length >= 2;
   const recentEntries = allFoodEntries.slice(-RECENT_ITEMS_LIMIT).reverse();
@@ -345,12 +713,7 @@ export default function LogFoodScreen() {
       return;
     }
 
-    if (router.canGoBack()) {
-      router.back();
-      return;
-    }
-
-    router.replace("/");
+    navigateAfterAdd();
   };
 
   return (
@@ -502,7 +865,15 @@ export default function LogFoodScreen() {
         ) : null}
       </ScrollView>
 
-      <View style={[styles.actionBarContainer, { paddingBottom: insets.bottom + 12 }]}>
+      <View
+        style={[
+          styles.actionBarContainer,
+          {
+            bottom: isQuickAddExpanded ? keyboardBottomOffset : 0,
+            paddingBottom: insets.bottom + 12,
+          },
+        ]}
+      >
         {canUseGlass ? (
           <GlassView
             glassEffectStyle="regular"
@@ -510,17 +881,142 @@ export default function LogFoodScreen() {
             style={StyleSheet.absoluteFillObject}
           />
         ) : null}
-        <Pressable
-          accessibilityRole="button"
-          disabled={!selectedFood && !selectedRecentEntry}
-          onPress={handleAddToLog}
-          style={[
-            styles.actionButton,
-            !selectedFood && !selectedRecentEntry && styles.actionButtonDisabled,
-          ]}
-        >
-          <Text style={styles.actionButtonText}>Add to {selectedMealLabel}</Text>
-        </Pressable>
+        {isQuickAddPickerActive ? (
+          <View pointerEvents="none" style={styles.quickAddSliderPopover}>
+            <View style={styles.quickAddSliderCard}>
+              <Text style={styles.quickAddSliderHint}>Hold & slide</Text>
+              <Text style={styles.quickAddSliderValue}>
+                {quickAddSliderCalories === null
+                  ? "Slide up"
+                  : `${formatCalories(quickAddSliderCalories)} kcal`}
+              </Text>
+              <View style={styles.quickAddSliderRail}>
+                {QUICK_ADD_REVERSED_CALORIE_VALUES.map((calories) => {
+                  const isSelected = quickAddSliderCalories === calories;
+                  const isPassed =
+                    quickAddSliderCalories !== null && calories <= quickAddSliderCalories;
+
+                  return (
+                    <View key={calories} style={styles.quickAddSliderStepRow}>
+                      <Text
+                        style={[
+                          styles.quickAddSliderStepLabel,
+                          isSelected && styles.quickAddSliderStepLabelSelected,
+                        ]}
+                      >
+                        {calories}
+                      </Text>
+                      <View
+                        style={[
+                          styles.quickAddSliderStepSquare,
+                          isPassed && styles.quickAddSliderStepSquarePassed,
+                          isSelected && styles.quickAddSliderStepSquareSelected,
+                        ]}
+                      />
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={styles.quickAddSliderStem} />
+          </View>
+        ) : null}
+        {isQuickAddExpanded && !isQuickAddPickerActive ? (
+          <View style={styles.quickAddPanel}>
+            <View style={styles.quickAddHeaderRow}>
+              <Text style={styles.quickAddTitle}>Quick add</Text>
+              <Text style={styles.quickAddValueText}>
+                {parsedQuickAddCalories
+                  ? `${formatCalories(parsedQuickAddCalories)} kcal`
+                  : "Calories"}
+              </Text>
+            </View>
+            <View style={styles.quickAddForm}>
+              <View style={styles.quickAddCaloriesField}>
+                <Text style={styles.quickAddFieldLabel}>Calories</Text>
+                <TextInput
+                  value={quickAddCaloriesText}
+                  onChangeText={setQuickAddCaloriesText}
+                  keyboardType="number-pad"
+                  placeholder="250"
+                  placeholderTextColor={palette.secondaryLabel}
+                  selectTextOnFocus
+                  style={styles.quickAddCaloriesInput}
+                />
+              </View>
+              <View style={styles.quickAddMacroRow}>
+                <View style={styles.quickAddMacroField}>
+                  <Text style={styles.quickAddFieldLabel}>Protein</Text>
+                  <TextInput
+                    value={quickAddProteinText}
+                    onChangeText={setQuickAddProteinText}
+                    keyboardType="decimal-pad"
+                    placeholder="g"
+                    placeholderTextColor={palette.secondaryLabel}
+                    style={styles.quickAddMacroInput}
+                  />
+                </View>
+                <View style={styles.quickAddMacroField}>
+                  <Text style={styles.quickAddFieldLabel}>Carbs</Text>
+                  <TextInput
+                    value={quickAddCarbsText}
+                    onChangeText={setQuickAddCarbsText}
+                    keyboardType="decimal-pad"
+                    placeholder="g"
+                    placeholderTextColor={palette.secondaryLabel}
+                    style={styles.quickAddMacroInput}
+                  />
+                </View>
+                <View style={styles.quickAddMacroField}>
+                  <Text style={styles.quickAddFieldLabel}>Fat</Text>
+                  <TextInput
+                    value={quickAddFatText}
+                    onChangeText={setQuickAddFatText}
+                    keyboardType="decimal-pad"
+                    placeholder="g"
+                    placeholderTextColor={palette.secondaryLabel}
+                    style={styles.quickAddMacroInput}
+                  />
+                </View>
+              </View>
+            </View>
+          </View>
+        ) : null}
+        <View style={styles.actionButtonRow}>
+          <Pressable
+            accessibilityRole="button"
+            disabled={isQuickAddExpanded ? !canQuickAdd : !selectedFood && !selectedRecentEntry}
+            onPress={isQuickAddExpanded ? () => handleQuickAddToLog() : handleAddToLog}
+            style={[
+              styles.actionButton,
+              (isQuickAddExpanded ? !canQuickAdd : !selectedFood && !selectedRecentEntry) &&
+                styles.actionButtonDisabled,
+            ]}
+          >
+            <Text style={styles.actionButtonText}>
+              {isQuickAddExpanded ? "Add quick" : `Add to ${selectedMealLabel}`}
+            </Text>
+          </Pressable>
+          <GestureDetector gesture={quickAddGesture}>
+            <View
+              accessible
+              accessibilityRole="button"
+              accessibilityLabel="Quick add"
+              accessibilityState={{ selected: isQuickAddButtonActive }}
+              collapsable={false}
+              style={[styles.quickAddButton, isQuickAddButtonActive && styles.quickAddButtonActive]}
+            >
+              <Text
+                style={[
+                  styles.quickAddButtonText,
+                  isQuickAddButtonActive && styles.quickAddButtonTextActive,
+                ]}
+              >
+                Quick add
+              </Text>
+            </View>
+          </GestureDetector>
+        </View>
       </View>
     </View>
   );
@@ -695,9 +1191,199 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingTop: 10,
     backgroundColor: "rgba(255,255,255,0.35)",
-    overflow: "hidden",
+    overflow: "visible",
+    zIndex: 10,
+  },
+  quickAddSliderPopover: {
+    position: "absolute",
+    right: 16,
+    bottom: 82,
+    width: 132,
+    alignItems: "center",
+    zIndex: 20,
+  },
+  quickAddSliderCard: {
+    width: 132,
+    borderRadius: 14,
+    backgroundColor: palette.card,
+    paddingHorizontal: 10,
+    paddingTop: 10,
+    paddingBottom: 12,
+    shadowColor: "#000000",
+    shadowOpacity: 0.16,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 8,
+  },
+  quickAddSliderHint: {
+    textAlign: "center",
+    fontSize: 11,
+    lineHeight: 14,
+    fontWeight: "700",
+    color: palette.secondaryLabel,
+  },
+  quickAddSliderValue: {
+    marginTop: 2,
+    marginBottom: 8,
+    textAlign: "center",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "800",
+    color: palette.tint,
+    fontVariant: ["tabular-nums"],
+  },
+  quickAddSliderRail: {
+    gap: 3,
+  },
+  quickAddSliderStepRow: {
+    height: 22,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 9,
+  },
+  quickAddSliderStepLabel: {
+    width: 44,
+    textAlign: "right",
+    fontSize: 10,
+    lineHeight: 12,
+    color: palette.secondaryLabel,
+    fontVariant: ["tabular-nums"],
+  },
+  quickAddSliderStepLabelSelected: {
+    color: palette.tint,
+    fontWeight: "800",
+  },
+  quickAddSliderStepSquare: {
+    width: 20,
+    height: 20,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: palette.separator,
+    backgroundColor: palette.separator,
+  },
+  quickAddSliderStepSquarePassed: {
+    borderColor: palette.badgeSelectedBorder,
+    backgroundColor: palette.badgeSelectedBorder,
+  },
+  quickAddSliderStepSquareSelected: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    borderColor: palette.tint,
+    backgroundColor: palette.tint,
+  },
+  quickAddSliderStem: {
+    width: 3,
+    height: 20,
+    borderRadius: 2,
+    backgroundColor: palette.tint,
+    opacity: 0.65,
+  },
+  quickAddPanel: {
+    marginBottom: 10,
+    borderRadius: 14,
+    backgroundColor: palette.card,
+    padding: 12,
+    shadowColor: "#000000",
+    shadowOpacity: 0.08,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 4,
+  },
+  quickAddHeaderRow: {
+    minHeight: 28,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 12,
+  },
+  quickAddTitle: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "700",
+    color: palette.label,
+  },
+  quickAddValueText: {
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "700",
+    color: palette.tint,
+    fontVariant: ["tabular-nums"],
+  },
+  quickAddForm: {
+    marginTop: 10,
+    gap: 10,
+  },
+  quickAddCaloriesField: {
+    gap: 6,
+  },
+  quickAddFieldLabel: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: palette.secondaryLabel,
+  },
+  quickAddCaloriesInput: {
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: palette.searchInputBackground,
+    color: palette.label,
+    paddingHorizontal: 12,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  quickAddMacroRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  quickAddMacroField: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  quickAddMacroInput: {
+    minHeight: 42,
+    borderRadius: 10,
+    backgroundColor: palette.searchInputBackground,
+    color: palette.label,
+    paddingHorizontal: 10,
+    fontSize: 16,
+    lineHeight: 20,
+    fontVariant: ["tabular-nums"],
+  },
+  actionButtonRow: {
+    flexDirection: "row",
+    gap: 10,
+  },
+  quickAddButton: {
+    minHeight: 50,
+    minWidth: 104,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: palette.separator,
+    backgroundColor: palette.card,
+    paddingHorizontal: 12,
+  },
+  quickAddButtonActive: {
+    borderColor: palette.badgeSelectedBorder,
+    backgroundColor: palette.badgeSelectedBackground,
+  },
+  quickAddButtonText: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: palette.label,
+  },
+  quickAddButtonTextActive: {
+    color: palette.tint,
   },
   actionButton: {
+    flex: 1,
     borderRadius: 12,
     minHeight: 50,
     alignItems: "center",
