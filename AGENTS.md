@@ -7,13 +7,11 @@
 
 ## Expo Native Sync Rule
 - Treat `ios/` and `android/` as generated output from Expo config/plugins.
-- Before manually patching generated native files, first resync with prebuild:
+- resync with prebuild:
   - iOS: `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8 npx expo prebuild --platform ios --clean`
   - Android: `npx expo prebuild --platform android --clean`
 - If CocoaPods/prebuild fails with `Unicode Normalization not appropriate for ASCII-8BIT`, rerun with `LANG=en_US.UTF-8 LC_ALL=en_US.UTF-8` set.
 - If `npx expo run:ios` fails after SDK/dependency changes, run iOS prebuild clean first, then retry.
-- If Metro fails with `Cannot find module 'babel-preset-expo'`, run:
-  - `npx expo install babel-preset-expo`
 
 ## iOS Release / OTA Notes
 - If a change touches native iOS code, Expo config plugins, entitlements, Info.plist, or anything generated into `ios/`, do a full iOS build for TestFlight/App Store. OTA is not enough for those changes.
