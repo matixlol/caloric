@@ -255,6 +255,7 @@ export default function SettingsScreen() {
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [updatesActionError, setUpdatesActionError] = useState<string | null>(null);
   const [friendCodeInput, setFriendCodeInput] = useState("");
+  const [socialNameInput, setSocialNameInput] = useState("");
   const macroTrackWidthRef = useRef(macroTrackWidth);
   const macroSplitARef = useRef(macroSplitA);
   const macroSplitBRef = useRef(macroSplitB);
@@ -391,8 +392,7 @@ export default function SettingsScreen() {
     fatPct !== loadedMacros.fat;
 
   const profileEmail = clerkEmail;
-  const profileDisplayName = user?.fullName || user?.username || undefined;
-  const socialOverviewQueryKey = ["socialOverview", user?.id ?? null, profileDisplayName ?? null] as const;
+  const socialOverviewQueryKey = ["socialOverview", user?.id ?? null] as const;
   const updatesErrorMessage = updatesActionError ?? (checkError || downloadError ? "Unknown error." : null);
   const updatesStatusLabel = getUpdatesStatusLabel({
     isEnabled: Updates.isEnabled,
@@ -453,14 +453,7 @@ export default function SettingsScreen() {
 
   const socialOverviewQuery = useQuery({
     queryKey: socialOverviewQueryKey,
-    queryFn: async () => {
-      const overview = await getSocialOverview();
-      if (profileDisplayName && overview.profile.displayName !== profileDisplayName) {
-        return updateSocialProfile(profileDisplayName);
-      }
-
-      return overview;
-    },
+    queryFn: getSocialOverview,
     enabled: isDataReady && Boolean(user?.id),
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
@@ -481,6 +474,13 @@ export default function SettingsScreen() {
       setFriendCodeInput("");
     },
   });
+  const updateSocialProfileMutation = useMutation({
+    mutationFn: updateSocialProfile,
+    onSuccess: (overview) => {
+      handleSocialMutationSuccess(overview);
+      setSocialNameInput("");
+    },
+  });
   const acceptFriendRequestMutation = useMutation({
     mutationFn: acceptFriendRequest,
     onSuccess: handleSocialMutationSuccess,
@@ -495,12 +495,16 @@ export default function SettingsScreen() {
   });
   const socialMutations = [
     sendFriendRequestMutation,
+    updateSocialProfileMutation,
     acceptFriendRequestMutation,
     ignoreFriendRequestMutation,
     removeFriendMutation,
   ] as const;
   const socialActionPending = socialMutations.some((mutation) => mutation.isPending);
   const socialActionError = socialMutations.find((mutation) => mutation.error)?.error ?? socialOverviewQuery.error;
+  const trimmedSocialName = socialNameInput.replace(/\s+/g, " ").trim();
+  const socialDisplayName = socialOverview?.profile.displayName ?? null;
+  const socialNameChanged = Boolean(socialDisplayName && trimmedSocialName && trimmedSocialName !== socialDisplayName);
   const trimmedFriendCode = friendCodeInput.trim();
 
   if (!isDataReady || isLoadingSettings || isLoadingSyncStatus || !syncedSettings) {
@@ -748,6 +752,41 @@ export default function SettingsScreen() {
 
         <Text style={styles.sectionTitle}>Friends</Text>
         <View style={styles.card}>
+          {socialDisplayName ? (
+            <>
+              <View style={styles.socialNameRow}>
+                <Text style={styles.formRowLabel}>Name</Text>
+                <View style={styles.socialNameControls}>
+                  <TextInput
+                    key={socialDisplayName}
+                    defaultValue={socialDisplayName}
+                    onChangeText={setSocialNameInput}
+                    autoCapitalize="words"
+                    autoCorrect={false}
+                    accessibilityLabel="Social name"
+                    placeholder="Name"
+                    placeholderTextColor={palette.tertiaryLabel}
+                    maxLength={80}
+                    style={styles.socialNameInput}
+                  />
+                  <SmallButton
+                    label={updateSocialProfileMutation.isPending ? "Saving" : "Save"}
+                    accessibilityLabel="Save social name"
+                    disabled={!socialNameChanged || socialActionPending}
+                    showDisabledState
+                    onPress={() => {
+                      if (!socialNameChanged) {
+                        return;
+                      }
+
+                      updateSocialProfileMutation.mutate(trimmedSocialName);
+                    }}
+                  />
+                </View>
+              </View>
+              <View style={styles.divider} />
+            </>
+          ) : null}
           <View style={styles.formRow}>
             <Text style={styles.formRowLabel}>Your Code</Text>
             <Text selectable style={styles.friendCodeValue}>
@@ -999,6 +1038,32 @@ const styles = StyleSheet.create({
     fontWeight: "700",
     color: palette.tint,
     letterSpacing: 1.2,
+  },
+  socialNameRow: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  socialNameControls: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "flex-end",
+    gap: 10,
+  },
+  socialNameInput: {
+    flex: 1,
+    minWidth: 0,
+    minHeight: 42,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
+    color: palette.label,
+    fontSize: 16,
+    lineHeight: 20,
   },
   friendCodeRow: {
     minHeight: 58,

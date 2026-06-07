@@ -200,9 +200,6 @@ function FriendSummaryRow({ friend, index }: { friend: FriendDailySummary; index
   const progress = clampPercent((friend.calories / Math.max(friend.calorieGoal ?? DEFAULT_CALORIE_GOAL, 1)) * 100);
   return (
     <View style={[styles.friendRow, index > 0 && styles.friendRowDivider]}>
-      <View style={styles.friendAvatar}>
-        <Text style={styles.friendAvatarText}>{friend.displayName.trim().slice(0, 1).toUpperCase() || "C"}</Text>
-      </View>
       <View style={styles.friendMain}>
         <View style={styles.friendTopRow}>
           <Text numberOfLines={1} style={styles.friendName}>{friend.displayName}</Text>
@@ -1145,26 +1142,11 @@ const styles = StyleSheet.create({
     minHeight: 68,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
     paddingVertical: 9,
   },
   friendRowDivider: {
     borderTopWidth: StyleSheet.hairlineWidth,
     borderTopColor: palette.separator,
-  },
-  friendAvatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.background,
-  },
-  friendAvatarText: {
-    fontSize: 15,
-    lineHeight: 20,
-    fontWeight: "700",
-    color: palette.tint,
   },
   friendMain: {
     flex: 1,
