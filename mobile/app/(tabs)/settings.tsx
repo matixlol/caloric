@@ -1,6 +1,6 @@
 import { useClerk, useUser } from "@clerk/expo";
 import * as Updates from "expo-updates";
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Alert,
   PanResponder,
@@ -13,6 +13,7 @@ import {
   TextInput,
   View,
 } from "react-native";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   useDataStoreActions,
@@ -20,6 +21,7 @@ import {
   useSyncStatus,
   useUserSettings,
 } from "../../src/data/DataProvider";
+import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
 
 const DEFAULT_CALORIE_GOAL = 2500;
@@ -87,40 +89,6 @@ function formatUpdateTimestamp(value: Date | null | undefined): string {
   }
 
   return value.toLocaleString();
-}
-
-function formatRelativeTimestamp(value: number): string {
-  if (!Number.isFinite(value) || value <= 0) {
-    return "Never";
-  }
-
-  const timestamp = new Date(value);
-  if (Number.isNaN(timestamp.getTime())) {
-    return "Never";
-  }
-
-  const elapsedMs = Math.max(Date.now() - timestamp.getTime(), 0);
-
-  if (elapsedMs < 60_000) {
-    return "Just now";
-  }
-
-  if (elapsedMs < 3_600_000) {
-    return `${Math.floor(elapsedMs / 60_000)}m ago`;
-  }
-
-  if (elapsedMs < 86_400_000) {
-    return `${Math.floor(elapsedMs / 3_600_000)}h ago`;
-  }
-
-  if (elapsedMs < 604_800_000) {
-    return `${Math.floor(elapsedMs / 86_400_000)}d ago`;
-  }
-
-  return timestamp.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
-  });
 }
 
 function getUpdatesStatusLabel(options: {
@@ -197,12 +165,73 @@ function FormRow({
   );
 }
 
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error && error.message.trim() ? error.message : fallback;
+}
+
+type SmallButtonProps = {
+  label: string; accessibilityLabel: string; disabled?: boolean; onPress: () => void; secondary?: boolean; showDisabledState?: boolean;
+};
+
+function SmallButton(props: SmallButtonProps) {
+  const disabledStyle = props.showDisabledState && props.disabled;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={props.accessibilityLabel}
+      disabled={props.disabled}
+      onPress={props.onPress}
+      style={[
+        styles.smallButton,
+        props.secondary ? styles.smallSecondaryButton : styles.smallPrimaryButton,
+        disabledStyle && styles.smallPrimaryButtonDisabled,
+      ]}
+    >
+      <Text
+        style={[
+          styles.smallButtonText,
+          props.secondary ? styles.smallSecondaryButtonText : styles.smallPrimaryButtonText,
+          disabledStyle && styles.smallPrimaryButtonTextDisabled,
+        ]}
+      >
+        {props.label}
+      </Text>
+    </Pressable>
+  );
+}
+
+function SocialRow({ name, meta, index, children }: { name: string; meta: string; index: number; children?: ReactNode }) {
+  return (
+    <View style={[styles.socialRow, index > 0 && styles.socialRowDivider]}>
+      <View style={styles.socialRowMain}>
+        <Text numberOfLines={1} style={styles.socialName}>{name}</Text>
+        <Text style={styles.socialMeta}>{meta}</Text>
+      </View>
+      {children}
+    </View>
+  );
+}
+
+function SocialSection<T>(props: { items: readonly T[] | undefined; renderItem: (item: T, index: number) => ReactNode }) {
+  const { items, renderItem } = props;
+  return items?.length ? <><View style={styles.divider} />{items.map(renderItem)}</> : null;
+}
+
 export default function SettingsScreen() {
   const insets = useSafeAreaInsets();
   const clerk = useClerk();
   const { user } = useUser();
+  const queryClient = useQueryClient();
   const isDataReady = useDataStoreReady();
-  const { upsertUserSettings } = useDataStoreActions();
+  const {
+    acceptFriendRequest,
+    getSocialOverview,
+    ignoreFriendRequest,
+    removeFriend,
+    sendFriendRequest,
+    updateSocialProfile,
+    upsertUserSettings,
+  } = useDataStoreActions();
   const { data: syncedSettings, isLoading: isLoadingSettings } = useUserSettings();
   const { data: syncStatus, isLoading: isLoadingSyncStatus } = useSyncStatus();
   const {
@@ -225,6 +254,7 @@ export default function SettingsScreen() {
   const [signOutError, setSignOutError] = useState<string | null>(null);
   const [isSigningOut, setIsSigningOut] = useState(false);
   const [updatesActionError, setUpdatesActionError] = useState<string | null>(null);
+  const [friendCodeInput, setFriendCodeInput] = useState("");
   const macroTrackWidthRef = useRef(macroTrackWidth);
   const macroSplitARef = useRef(macroSplitA);
   const macroSplitBRef = useRef(macroSplitB);
@@ -361,6 +391,8 @@ export default function SettingsScreen() {
     fatPct !== loadedMacros.fat;
 
   const profileEmail = clerkEmail;
+  const profileDisplayName = user?.fullName || user?.username || undefined;
+  const socialOverviewQueryKey = ["socialOverview", user?.id ?? null, profileDisplayName ?? null] as const;
   const updatesErrorMessage = updatesActionError ?? (checkError || downloadError ? "Unknown error." : null);
   const updatesStatusLabel = getUpdatesStatusLabel({
     isEnabled: Updates.isEnabled,
@@ -419,6 +451,58 @@ export default function SettingsScreen() {
     validationError,
   ]);
 
+  const socialOverviewQuery = useQuery({
+    queryKey: socialOverviewQueryKey,
+    queryFn: async () => {
+      const overview = await getSocialOverview();
+      if (profileDisplayName && overview.profile.displayName !== profileDisplayName) {
+        return updateSocialProfile(profileDisplayName);
+      }
+
+      return overview;
+    },
+    enabled: isDataReady && Boolean(user?.id),
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+  });
+  const socialOverview = socialOverviewQuery.data ?? null;
+
+  const setSocialOverview = (overview: NonNullable<typeof socialOverview>) =>
+    queryClient.setQueryData(socialOverviewQueryKey, overview);
+  const handleSocialMutationSuccess = (overview: NonNullable<typeof socialOverview>) => {
+    setSocialOverview(overview);
+    void queryClient.invalidateQueries({ queryKey: ["friendDailySummaries"] });
+  };
+
+  const sendFriendRequestMutation = useMutation({
+    mutationFn: sendFriendRequest,
+    onSuccess: (overview) => {
+      handleSocialMutationSuccess(overview);
+      setFriendCodeInput("");
+    },
+  });
+  const acceptFriendRequestMutation = useMutation({
+    mutationFn: acceptFriendRequest,
+    onSuccess: handleSocialMutationSuccess,
+  });
+  const ignoreFriendRequestMutation = useMutation({
+    mutationFn: ignoreFriendRequest,
+    onSuccess: setSocialOverview,
+  });
+  const removeFriendMutation = useMutation({
+    mutationFn: removeFriend,
+    onSuccess: handleSocialMutationSuccess,
+  });
+  const socialMutations = [
+    sendFriendRequestMutation,
+    acceptFriendRequestMutation,
+    ignoreFriendRequestMutation,
+    removeFriendMutation,
+  ] as const;
+  const socialActionPending = socialMutations.some((mutation) => mutation.isPending);
+  const socialActionError = socialMutations.find((mutation) => mutation.error)?.error ?? socialOverviewQuery.error;
+  const trimmedFriendCode = friendCodeInput.trim();
+
   if (!isDataReady || isLoadingSettings || isLoadingSyncStatus || !syncedSettings) {
     return (
       <View style={styles.loadingContainer}>
@@ -470,6 +554,17 @@ export default function SettingsScreen() {
     } catch {
       setUpdatesActionError("Unknown error.");
     }
+  };
+
+  const confirmRemoveFriend = (friendUserId: string, displayName: string) => {
+    Alert.alert("Remove friend?", `Stop sharing daily calories with ${displayName}?`, [
+      { text: "Cancel", style: "cancel" },
+      {
+        text: "Remove",
+        style: "destructive",
+        onPress: () => removeFriendMutation.mutate(friendUserId),
+      },
+    ]);
   };
 
   const confirmSignOut = () => {
@@ -651,6 +746,105 @@ export default function SettingsScreen() {
         </View>
         {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
 
+        <Text style={styles.sectionTitle}>Friends</Text>
+        <View style={styles.card}>
+          <View style={styles.formRow}>
+            <Text style={styles.formRowLabel}>Your Code</Text>
+            <Text selectable style={styles.friendCodeValue}>
+              {socialOverview?.profile.friendCode ?? (socialOverviewQuery.isLoading ? "Loading..." : "Unavailable")}
+            </Text>
+          </View>
+          <View style={styles.divider} />
+          <View style={styles.friendCodeRow}>
+            <TextInput
+              value={friendCodeInput}
+              onChangeText={(next) => setFriendCodeInput(next.toUpperCase())}
+              autoCapitalize="characters"
+              autoCorrect={false}
+              accessibilityLabel="Friend code"
+              placeholder="Friend code"
+              placeholderTextColor={palette.tertiaryLabel}
+              maxLength={12}
+              style={styles.friendCodeInput}
+            />
+            <SmallButton
+              label="Add"
+              accessibilityLabel="Add friend"
+              disabled={!trimmedFriendCode || socialActionPending}
+              showDisabledState
+              onPress={() => {
+                sendFriendRequestMutation.mutate(trimmedFriendCode);
+              }}
+            />
+          </View>
+
+          <SocialSection
+            items={socialOverview?.incomingRequests}
+            renderItem={(request, index) => (
+              <SocialRow key={request.id} name={request.requester.displayName} meta="Request" index={index}>
+                <View style={styles.socialActions}>
+                  <SmallButton
+                    label="Ignore"
+                    secondary
+                    accessibilityLabel={`Ignore ${request.requester.displayName}`}
+                    disabled={socialActionPending}
+                    onPress={() => ignoreFriendRequestMutation.mutate(request.id)}
+                  />
+                  <SmallButton
+                    label="Accept"
+                    accessibilityLabel={`Accept ${request.requester.displayName}`}
+                    disabled={socialActionPending}
+                    onPress={() => acceptFriendRequestMutation.mutate(request.id)}
+                  />
+                </View>
+              </SocialRow>
+            )}
+          />
+
+          <SocialSection
+            items={socialOverview?.friends}
+            renderItem={(friend, index) => (
+              <SocialRow key={friend.userId} name={friend.displayName} meta="Friend" index={index}>
+                <SmallButton
+                  label="Remove"
+                  secondary
+                  accessibilityLabel={`Remove ${friend.displayName}`}
+                  disabled={socialActionPending}
+                  onPress={() => confirmRemoveFriend(friend.userId, friend.displayName)}
+                />
+              </SocialRow>
+            )}
+          />
+
+          <SocialSection
+            items={socialOverview?.outgoingRequests}
+            renderItem={(request, index) => (
+              <SocialRow key={request.id} name={request.recipient.displayName} meta="Pending" index={index} />
+            )}
+          />
+
+          {!socialOverviewQuery.isLoading && socialOverview ? null : (
+            <>
+              <View style={styles.divider} />
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Refresh friends"
+                onPress={() => {
+                  void socialOverviewQuery.refetch();
+                }}
+                style={styles.updatesButton}
+              >
+                <Text style={styles.updatesButtonText}>Refresh</Text>
+              </Pressable>
+            </>
+          )}
+        </View>
+        {socialActionError ? (
+          <Text style={styles.sectionErrorText}>
+            {errorMessage(socialActionError, "Could not update friends.")}
+          </Text>
+        ) : null}
+
         <Text style={styles.sectionTitle}>Updates</Text>
         <View style={styles.card}>
           <View style={styles.formRow}>
@@ -795,6 +989,96 @@ const styles = StyleSheet.create({
     textAlign: "right",
     fontSize: 15,
     lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+  friendCodeValue: {
+    flex: 1,
+    textAlign: "right",
+    fontSize: 17,
+    lineHeight: 22,
+    fontWeight: "700",
+    color: palette.tint,
+    letterSpacing: 1.2,
+  },
+  friendCodeRow: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
+  friendCodeInput: {
+    flex: 1,
+    minHeight: 42,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
+    color: palette.label,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "600",
+    letterSpacing: 0.8,
+  },
+  socialRow: {
+    minHeight: 58,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+    paddingVertical: 8,
+  },
+  socialRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.separator,
+  },
+  socialRowMain: {
+    flex: 1,
+  },
+  socialName: {
+    fontSize: 16,
+    lineHeight: 21,
+    fontWeight: "600",
+    color: palette.label,
+  },
+  socialMeta: {
+    marginTop: 1,
+    fontSize: 13,
+    lineHeight: 17,
+    color: palette.secondaryLabel,
+  },
+  socialActions: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+  },
+  smallButton: {
+    minHeight: 34,
+    minWidth: 64,
+    borderRadius: 10,
+    paddingHorizontal: 12,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  smallPrimaryButton: {
+    backgroundColor: palette.tint,
+  },
+  smallPrimaryButtonDisabled: {
+    backgroundColor: palette.tintDisabled,
+  },
+  smallButtonText: {
+    fontSize: 14,
+    lineHeight: 18,
+    fontWeight: "700",
+  },
+  smallPrimaryButtonText: {
+    color: "#FFFFFF",
+  },
+  smallPrimaryButtonTextDisabled: {
+    color: palette.secondaryLabel,
+  },
+  smallSecondaryButton: {
+    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
+  },
+  smallSecondaryButtonText: {
     color: palette.secondaryLabel,
   },
   signOutButton: {

@@ -15,3 +15,7 @@ export function createAiMessageId(): string {
 export function createMfpTraceId(): string {
   return createTimestampedTypeId("mfp_trace");
 }
+
+export function createFriendshipId(): string {
+  return createTimestampedTypeId("friendship");
+}

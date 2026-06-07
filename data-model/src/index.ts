@@ -54,3 +54,64 @@ export const DEFAULT_USER_SETTINGS: UserSettings = {
 };
 
 export const USER_SETTINGS_ROW_ID = "settings";
+
+const NonEmptyString = z.string().min(1);
+const TimestampMs = z.number().int().nonnegative();
+const SocialProfileShape = { userId: NonEmptyString, displayName: NonEmptyString };
+const SocialRequestShape = { id: NonEmptyString, createdAt: TimestampMs };
+
+export const SocialProfileSchema = z
+  .object(SocialProfileShape)
+  .strict();
+export type SocialProfile = z.infer<typeof SocialProfileSchema>;
+
+export const SocialOverviewSchema = z
+  .object({
+    profile: SocialProfileSchema.extend({
+      friendCode: NonEmptyString,
+    }),
+    friends: z.array(
+      SocialProfileSchema.extend({
+        since: TimestampMs,
+      }),
+    ),
+    incomingRequests: z.array(
+      z
+        .object({
+          ...SocialRequestShape,
+          requester: SocialProfileSchema,
+        })
+        .strict(),
+    ),
+    outgoingRequests: z.array(
+      z
+        .object({
+          ...SocialRequestShape,
+          recipient: SocialProfileSchema,
+        })
+        .strict(),
+    ),
+  })
+  .strict();
+export type SocialOverview = z.infer<typeof SocialOverviewSchema>;
+
+export const FriendDailySummarySchema = z
+  .object({
+    ...SocialProfileShape,
+    dateKey: NonEmptyString,
+    calories: z.number(),
+    protein: z.number(),
+    carbs: z.number(),
+    fat: z.number(),
+    calorieGoal: z.number().int().min(100).max(10000).nullable(),
+    lastUpdatedAt: TimestampMs.nullable(),
+  })
+  .strict();
+export type FriendDailySummary = z.infer<typeof FriendDailySummarySchema>;
+
+export const FriendDailySummariesResponseSchema = z
+  .object({
+    summaries: z.array(FriendDailySummarySchema).default([]),
+  })
+  .strict();
+export type FriendDailySummariesResponse = z.infer<typeof FriendDailySummariesResponseSchema>;

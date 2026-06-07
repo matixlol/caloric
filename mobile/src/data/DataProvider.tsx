@@ -3,6 +3,7 @@ import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
 import { useAuth } from "@clerk/expo";
 import { type Meal, type UserSettings } from "@caloric/data-model";
+import { focusManager, onlineManager } from "@tanstack/react-query";
 import {
   localDataStore,
   type FoodEntryRecord,
@@ -68,7 +69,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [isLoaded, isSignedIn, userId]);
+  }, [getTokenForStore, isLoaded, isSignedIn, userId]);
 
   useEffect(() => {
     if (!ready) {
@@ -76,12 +77,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
 
     const appStateSubscription = AppState.addEventListener("change", (nextState) => {
+      focusManager.setFocused(nextState === "active");
       if (nextState === "active") {
         localDataStore.scheduleSync(0);
       }
     });
 
     const netInfoSubscription = NetInfo.addEventListener((state) => {
+      onlineManager.setOnline(Boolean(state.isConnected));
       if (state.isConnected) {
         localDataStore.scheduleSync(0);
       }
@@ -205,6 +208,13 @@ export function useDataStoreActions() {
       ) => store.reorderFoodEntriesForDate(dateKey, orderedEntries),
       upsertUserSettings: (settings: UserSettings) => store.upsertUserSettings(settings),
       triggerSync: () => store.scheduleSync(0),
+      updateSocialProfile: (displayName?: string) => store.updateSocialProfile(displayName),
+      getSocialOverview: () => store.getSocialOverview(),
+      sendFriendRequest: (friendCode: string) => store.sendFriendRequest(friendCode),
+      acceptFriendRequest: (requestId: string) => store.acceptFriendRequest(requestId),
+      ignoreFriendRequest: (requestId: string) => store.ignoreFriendRequest(requestId),
+      removeFriend: (friendUserId: string) => store.removeFriend(friendUserId),
+      getFriendDailySummaries: (dateKey: string) => store.getFriendDailySummaries(dateKey),
     }),
     [store],
   );

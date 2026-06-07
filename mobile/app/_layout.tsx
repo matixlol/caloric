@@ -1,6 +1,7 @@
 import { ClerkProvider } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
 import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "@react-navigation/native";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useMemo } from "react";
 import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
@@ -29,6 +30,9 @@ Sentry.init({
 const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
+const navigationColor = (value: unknown, fallback: string) =>
+  typeof value === "string" ? value : fallback;
+const queryClient = new QueryClient();
 
 function MissingClerkKeyScreen() {
   return (
@@ -65,11 +69,11 @@ export default Sentry.wrap(function RootLayout() {
       colors: {
         ...baseTheme.colors,
         primary: palette.tint,
-        background: palette.background,
-        card: palette.card,
-        text: palette.label,
-        border: palette.separator,
-        notification: palette.error,
+        background: navigationColor(palette.background, baseTheme.colors.background),
+        card: navigationColor(palette.card, baseTheme.colors.card),
+        text: navigationColor(palette.label, baseTheme.colors.text),
+        border: navigationColor(palette.separator, baseTheme.colors.border),
+        notification: navigationColor(palette.error, baseTheme.colors.notification),
       },
     };
   }, [colorScheme, palette]);
@@ -82,12 +86,14 @@ export default Sentry.wrap(function RootLayout() {
     <GestureHandlerRootView style={styles.gestureRoot}>
       <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
         <DataProvider>
-          <ThemeProvider value={navigationTheme}>
-            <ClerkAuthGate>
-              <AutoBackupCoordinator />
-              <AppNavigator />
-            </ClerkAuthGate>
-          </ThemeProvider>
+          <QueryClientProvider client={queryClient}>
+            <ThemeProvider value={navigationTheme}>
+              <ClerkAuthGate>
+                <AutoBackupCoordinator />
+                <AppNavigator />
+              </ClerkAuthGate>
+            </ThemeProvider>
+          </QueryClientProvider>
         </DataProvider>
       </ClerkProvider>
     </GestureHandlerRootView>

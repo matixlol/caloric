@@ -1,3 +1,4 @@
+import { useAuth } from "@clerk/expo";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -11,6 +12,8 @@ import {
   Text,
   View,
 } from "react-native";
+import { useQuery } from "@tanstack/react-query";
+import type { FriendDailySummary } from "@caloric/data-model";
 import DraggableFlatList, { type RenderItemParams } from "react-native-draggable-flatlist";
 import PagerView, { type PagerViewOnPageSelectedEvent } from "react-native-pager-view";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
@@ -23,6 +26,7 @@ import {
 } from "../../src/date";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { formatPortionLabel, sanitizePortion } from "../../src/portion";
+import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
 
 const iosColor = (name: string, fallback: string) =>
@@ -192,11 +196,35 @@ function MealRow({
   );
 }
 
+function FriendSummaryRow({ friend, index }: { friend: FriendDailySummary; index: number }) {
+  const progress = clampPercent((friend.calories / Math.max(friend.calorieGoal ?? DEFAULT_CALORIE_GOAL, 1)) * 100);
+  return (
+    <View style={[styles.friendRow, index > 0 && styles.friendRowDivider]}>
+      <View style={styles.friendAvatar}>
+        <Text style={styles.friendAvatarText}>{friend.displayName.trim().slice(0, 1).toUpperCase() || "C"}</Text>
+      </View>
+      <View style={styles.friendMain}>
+        <View style={styles.friendTopRow}>
+          <Text numberOfLines={1} style={styles.friendName}>{friend.displayName}</Text>
+          <Text style={styles.friendCalories}>{formatCalories(friend.calories)}</Text>
+        </View>
+        <View style={styles.friendProgressTrack}>
+          <View style={[styles.progressFill, { width: `${progress}%` }]} />
+        </View>
+        <Text numberOfLines={1} style={styles.friendMeta}>
+          {friend.lastUpdatedAt ? `Updated ${formatRelativeTimestamp(friend.lastUpdatedAt).toLowerCase()}` : "No logs yet"}
+        </Text>
+      </View>
+    </View>
+  );
+}
+
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
+  const { userId } = useAuth();
   const isDataReady = useDataStoreReady();
-  const { deleteFoodEntry, reorderFoodEntriesForDate } = useDataStoreActions();
+  const { deleteFoodEntry, getFriendDailySummaries, reorderFoodEntriesForDate } = useDataStoreActions();
   const { data: allLogs, isLoading: isLoadingEntries } = useAllFoodEntries();
   const { data: settings, isLoading: isLoadingSettings } = useUserSettings();
 
@@ -256,6 +284,16 @@ export default function HomeScreen() {
 
     return grouped;
   }, [logs]);
+
+  const friendSummariesQuery = useQuery({
+    queryKey: ["friendDailySummaries", userId ?? null, selectedDateKey],
+    queryFn: () => getFriendDailySummaries(selectedDateKey),
+    enabled: isDataReady && Boolean(userId),
+    refetchInterval: 45_000,
+    refetchOnReconnect: true,
+    refetchOnWindowFocus: true,
+  });
+  const friendSummaries = friendSummariesQuery.data ?? [];
 
   const mealListItems = useMemo<MealListItem[]>(() => {
     const items: MealListItem[] = [];
@@ -667,6 +705,23 @@ export default function HomeScreen() {
             </View>
           </View>
         </View>
+
+        <View style={[styles.summaryCard, styles.friendsCard]}>
+          <View style={[styles.friendTopRow, styles.friendsHeader]}>
+            <Text style={styles.friendsTitle}>{dayOffset === 0 ? "Friends Today" : "Friends"}</Text>
+            <Text style={styles.friendsSubtitle}>
+              {friendSummariesQuery.isLoading && friendSummaries.length === 0 ? "Loading..." : `${friendSummaries.length}`}
+            </Text>
+          </View>
+
+          {friendSummariesQuery.isError ? (
+            <Text style={styles.friendsEmptyText}>Could not load friends.</Text>
+          ) : friendSummaries.length === 0 ? (
+            <Text style={styles.friendsEmptyText}>Add friends in Settings.</Text>
+          ) : (
+            friendSummaries.map((friend, index) => <FriendSummaryRow key={friend.userId} friend={friend} index={index} />)
+          )}
+        </View>
       </View>
     </View>
   );
@@ -1059,6 +1114,92 @@ const styles = StyleSheet.create({
     marginBottom: 14,
     height: StyleSheet.hairlineWidth,
     backgroundColor: palette.separator,
+  },
+  friendsCard: {
+    paddingVertical: 12,
+  },
+  friendsHeader: {
+    gap: 12,
+    marginBottom: 4,
+  },
+  friendsTitle: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: palette.label,
+  },
+  friendsSubtitle: {
+    fontSize: 13,
+    lineHeight: 18,
+    fontWeight: "600",
+    color: palette.secondaryLabel,
+    fontVariant: ["tabular-nums"],
+  },
+  friendsEmptyText: {
+    paddingVertical: 10,
+    fontSize: 15,
+    lineHeight: 20,
+    color: palette.secondaryLabel,
+  },
+  friendRow: {
+    minHeight: 68,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+    paddingVertical: 9,
+  },
+  friendRowDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: palette.separator,
+  },
+  friendAvatar: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.background,
+  },
+  friendAvatarText: {
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: palette.tint,
+  },
+  friendMain: {
+    flex: 1,
+    gap: 5,
+  },
+  friendTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: 10,
+  },
+  friendName: {
+    flex: 1,
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "600",
+    color: palette.label,
+  },
+  friendCalories: {
+    fontSize: 16,
+    lineHeight: 20,
+    fontWeight: "700",
+    color: palette.label,
+    fontVariant: ["tabular-nums"],
+  },
+  friendProgressTrack: {
+    height: 5,
+    borderRadius: 3,
+    backgroundColor: palette.tertiaryLabel,
+    overflow: "hidden",
+  },
+  friendMeta: {
+    fontSize: 12,
+    lineHeight: 15,
+    color: palette.secondaryLabel,
   },
   macroColumns: {
     flexDirection: "row",

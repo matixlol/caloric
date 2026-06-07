@@ -17,8 +17,8 @@
     "deploy:ios": "npx eas-cli build --platform ios --profile production --auto-submit --wait --non-interactive"
   },
   "dependencies": {
-    "@caloric/data-model": "workspace:*",
     "@azure/core-asynciterator-polyfill": "^1.0.2",
+    "@caloric/data-model": "workspace:*",
     "@clerk/expo": "^3.3.1",
     "@expo/dom-webview": "^55.0.5",
     "@expo/metro-runtime": "~55.0.9",
@@ -29,6 +29,7 @@
     "@react-navigation/elements": "^2.6.3",
     "@react-navigation/native": "^7.1.8",
     "@sentry/react-native": "^8.7.0",
+    "@tanstack/react-query": "5.101.0",
     "babel-preset-expo": "~55.0.5",
     "expo": "^55.0.11",
     "expo-asset": "~55.0.12",

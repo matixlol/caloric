@@ -8,6 +8,7 @@ import { aiRoutes } from "./routes/ai";
 import { healthRoutes } from "./routes/health";
 import { myFitnessPalRoutes } from "./routes/myfitnesspal";
 import { searchRoutes } from "./routes/search";
+import { socialRoutes } from "./services/social";
 import { syncRoutes } from "./routes/sync";
 
 export const app = new Hono();
@@ -25,6 +26,7 @@ app.route("/", healthRoutes);
 app.route("/ai", aiRoutes);
 app.route("/mfp", myFitnessPalRoutes);
 app.route("/search", searchRoutes);
+app.route("/social", socialRoutes);
 app.route("/sync", syncRoutes);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));

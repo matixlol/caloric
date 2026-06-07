@@ -1,9 +1,13 @@
 import {
   DEFAULT_USER_SETTINGS,
+  FriendDailySummariesResponseSchema,
+  type FriendDailySummary,
   FoodEntrySchema,
   type FoodEntry,
   MealSchema,
   type Meal,
+  SocialOverviewSchema,
+  type SocialOverview,
   USER_SETTINGS_ROW_ID,
   UserSettingsSchema,
   type UserSettings,
@@ -39,6 +43,7 @@ export type SyncStatusRecord = {
 
 type SqlRow = Record<string, Scalar>;
 type TokenProvider = () => Promise<string | null>;
+type BackendRequestOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
 
 function invariant(condition: unknown, message: string): asserts condition {
   if (!condition) {
@@ -91,6 +96,14 @@ async function fetchJson<T>(response: Response): Promise<T | null> {
   } catch {
     return null;
   }
+}
+
+function parseBackendError(payload: unknown, fallback: string): string {
+  if (payload && typeof payload === "object" && "error" in payload && typeof payload.error === "string") {
+    return payload.error;
+  }
+
+  return fallback;
 }
 
 export class LocalDataStore {
@@ -726,9 +739,87 @@ export class LocalDataStore {
     }
   }
 
+  async updateSocialProfile(displayName?: string): Promise<SocialOverview> {
+    return this.postSocialOverview("/social/profile", { displayName });
+  }
+
+  async getSocialOverview(): Promise<SocialOverview> {
+    return this.requestSocialOverview("/social/me");
+  }
+
+  async sendFriendRequest(friendCode: string): Promise<SocialOverview> {
+    return this.postSocialOverview("/social/friend-requests", { friendCode });
+  }
+
+  async acceptFriendRequest(requestId: string): Promise<SocialOverview> {
+    return this.postSocialOverview("/social/friend-requests/accept", { requestId });
+  }
+
+  async ignoreFriendRequest(requestId: string): Promise<SocialOverview> {
+    return this.postSocialOverview("/social/friend-requests/ignore", { requestId });
+  }
+
+  async removeFriend(friendUserId: string): Promise<SocialOverview> {
+    return this.requestSocialOverview(`/social/friends/${encodeURIComponent(friendUserId)}`, {
+      method: "DELETE",
+    });
+  }
+
+  async getFriendDailySummaries(dateKey: string): Promise<FriendDailySummary[]> {
+    return FriendDailySummariesResponseSchema.parse(
+      await this.requestBackend<unknown>(`/social/daily-summaries?dateKey=${encodeURIComponent(dateKey)}`),
+    ).summaries;
+  }
+
   private getDb(): DB {
     invariant(this.db, "Database is not initialized");
     return this.db;
+  }
+
+  private async requestSocialOverview(path: string, options?: BackendRequestOptions): Promise<SocialOverview> {
+    return SocialOverviewSchema.parse(await this.requestBackend<unknown>(path, options));
+  }
+
+  private postSocialOverview(path: string, body: Record<string, unknown>): Promise<SocialOverview> {
+    return this.requestSocialOverview(path, {
+      method: "POST",
+      body: JSON.stringify(body),
+    });
+  }
+
+  private async requestBackend<T>(
+    path: string,
+    options: BackendRequestOptions = {},
+  ): Promise<T> {
+    const token = this.activeUserId && this.tokenProvider ? await this.tokenProvider() : null;
+    if (!token) {
+      throw new Error("Not signed in");
+    }
+
+    const headers: Record<string, string> = {
+      Authorization: `Bearer ${token}`,
+      ...(options.body ? { "Content-Type": "application/json" } : {}),
+      ...options.headers,
+    };
+
+    const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
+      ...options,
+      headers,
+    }).catch(() => {
+      throw new Error("Network request failed");
+    });
+
+    const payload = await fetchJson<T | { error?: string }>(response);
+
+    if (!response.ok) {
+      throw new Error(parseBackendError(payload, "Request failed"));
+    }
+
+    if (!payload) {
+      throw new Error("Invalid backend response");
+    }
+
+    return payload as T;
   }
 
   private async withTransaction(

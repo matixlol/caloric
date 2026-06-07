@@ -198,6 +198,48 @@ export const userSettings = pgTable(
   },
 );
 
+const timestampNow = (name: string) => timestamp(name, { withTimezone: true }).defaultNow().notNull();
+
+export const socialProfiles = pgTable(
+  "social_profiles",
+  {
+    userId: text("user_id").primaryKey(),
+    displayName: text("display_name").notNull(),
+    friendCode: text("friend_code").notNull(),
+    createdAt: timestampNow("created_at"),
+    updatedAt: timestampNow("updated_at"),
+  },
+  (table) => ({
+    friendCodeUnique: uniqueIndex("social_profiles_friend_code_uidx").on(table.friendCode),
+  }),
+);
+
+const socialProfileRef = (name: string) =>
+  text(name)
+    .notNull()
+    .references(() => socialProfiles.userId, { onDelete: "cascade" });
+
+export const friendships = pgTable(
+  "friendships",
+  {
+    id: text("id").primaryKey(),
+    requesterUserId: socialProfileRef("requester_user_id"),
+    recipientUserId: socialProfileRef("recipient_user_id"),
+    userAId: socialProfileRef("user_a_id"),
+    userBId: socialProfileRef("user_b_id"),
+    status: text("status").notNull(),
+    createdAt: timestampNow("created_at"),
+    updatedAt: timestampNow("updated_at"),
+  },
+  (table) => ({
+    pairUnique: uniqueIndex("friendships_pair_uidx").on(table.userAId, table.userBId),
+    requesterIdx: index("friendships_requester_idx").on(table.requesterUserId),
+    recipientIdx: index("friendships_recipient_idx").on(table.recipientUserId),
+    userAStatusIdx: index("friendships_user_a_status_idx").on(table.userAId, table.status),
+    userBStatusIdx: index("friendships_user_b_status_idx").on(table.userBId, table.status),
+  }),
+);
+
 export const aiSessions = pgTable(
   "ai_sessions",
   {
