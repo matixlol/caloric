@@ -21,6 +21,7 @@ import {
   useSyncStatus,
   useUserSettings,
 } from "../../src/data/DataProvider";
+import { ExpoUITextActionRow } from "../../src/components/ExpoUITextActionRow";
 import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
 
@@ -758,33 +759,25 @@ export default function SettingsScreen() {
             <>
               <View style={styles.socialNameRow}>
                 <Text style={styles.formRowLabel}>Name</Text>
-                <View style={styles.socialNameControls}>
-                  <TextInput
-                    key={socialDisplayName}
-                    defaultValue={socialDisplayName}
-                    onChangeText={setSocialNameInput}
-                    autoCapitalize="words"
-                    autoCorrect={false}
-                    accessibilityLabel="Social name"
-                    placeholder="Name"
-                    placeholderTextColor={palette.tertiaryLabel}
-                    maxLength={80}
-                    style={styles.socialNameInput}
-                  />
-                  <SmallButton
-                    label={updateSocialProfileMutation.isPending ? "Saving" : "Save"}
-                    accessibilityLabel="Save social name"
-                    disabled={!socialNameChanged || socialActionPending}
-                    showDisabledState
-                    onPress={() => {
-                      if (!socialNameChanged) {
-                        return;
-                      }
+                <ExpoUITextActionRow
+                  key={socialDisplayName}
+                  defaultValue={socialDisplayName}
+                  onChangeText={setSocialNameInput}
+                  autoCapitalize="words"
+                  autoCorrect={false}
+                  placeholder="Name"
+                  maxLength={80}
+                  actionLabel={updateSocialProfileMutation.isPending ? "Saving" : "Save"}
+                  actionAccessibilityLabel="Save social name"
+                  actionDisabled={!socialNameChanged || socialActionPending}
+                  onActionPress={() => {
+                    if (!socialNameChanged) {
+                      return;
+                    }
 
-                      updateSocialProfileMutation.mutate(trimmedSocialName);
-                    }}
-                  />
-                </View>
+                    updateSocialProfileMutation.mutate(trimmedSocialName);
+                  }}
+                />
               </View>
               <View style={styles.divider} />
             </>
@@ -797,23 +790,18 @@ export default function SettingsScreen() {
           </View>
           <View style={styles.divider} />
           <View style={styles.friendCodeRow}>
-            <TextInput
-              value={friendCodeInput}
-              onChangeText={(next) => setFriendCodeInput(next.toUpperCase())}
+            <ExpoUITextActionRow
+              defaultValue={friendCodeInput}
+              onChangeText={setFriendCodeInput}
+              normalizeText={(next) => next.toUpperCase()}
               autoCapitalize="characters"
               autoCorrect={false}
-              accessibilityLabel="Friend code"
               placeholder="Friend code"
-              placeholderTextColor={palette.tertiaryLabel}
               maxLength={12}
-              style={styles.friendCodeInput}
-            />
-            <SmallButton
-              label="Add"
-              accessibilityLabel="Add friend"
-              disabled={!trimmedFriendCode || socialActionPending}
-              showDisabledState
-              onPress={() => {
+              actionLabel="Add"
+              actionAccessibilityLabel="Add friend"
+              actionDisabled={!trimmedFriendCode || socialActionPending}
+              onActionPress={() => {
                 sendFriendRequestMutation.mutate(trimmedFriendCode);
               }}
             />
@@ -1048,42 +1036,10 @@ const styles = StyleSheet.create({
     justifyContent: "space-between",
     gap: 10,
   },
-  socialNameControls: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    gap: 10,
-  },
-  socialNameInput: {
-    flex: 1,
-    minWidth: 0,
-    minHeight: 42,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
-    color: palette.label,
-    fontSize: 16,
-    lineHeight: 20,
-  },
   friendCodeRow: {
     minHeight: 58,
     flexDirection: "row",
     alignItems: "center",
-    gap: 10,
-  },
-  friendCodeInput: {
-    flex: 1,
-    minHeight: 42,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
-    color: palette.label,
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "600",
-    letterSpacing: 0.8,
   },
   socialRow: {
     minHeight: 58,
