@@ -42,7 +42,9 @@ const palette = {
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
-  tintDisabled: "#D1D5DB",
+  buttonText: "#FFFFFF",
+  buttonDisabledBackground: iosColor("tertiarySystemFill", "#D1D5DB"),
+  buttonDisabledText: iosColor("secondaryLabel", "#6B7280"),
   success: iosColor("systemGreen", "#16A34A"),
   error: iosColor("systemRed", "#DC2626"),
   macroProtein: macroColors.protein.background,
@@ -1127,7 +1129,7 @@ const styles = StyleSheet.create({
     backgroundColor: palette.tint,
   },
   smallPrimaryButtonDisabled: {
-    backgroundColor: palette.tintDisabled,
+    backgroundColor: palette.buttonDisabledBackground,
   },
   smallButtonText: {
     fontSize: 14,
@@ -1135,10 +1137,10 @@ const styles = StyleSheet.create({
     fontWeight: "700",
   },
   smallPrimaryButtonText: {
-    color: "#FFFFFF",
+    color: palette.buttonText,
   },
   smallPrimaryButtonTextDisabled: {
-    color: palette.secondaryLabel,
+    color: palette.buttonDisabledText,
   },
   smallSecondaryButton: {
     backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
