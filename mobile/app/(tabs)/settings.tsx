@@ -1,4 +1,23 @@
 import { useClerk, useUser } from "@clerk/expo";
+import {
+  Button,
+  Column,
+  FieldGroup,
+  Host,
+  RNHostView,
+  Row,
+  Spacer,
+  Text as ExpoText,
+  TextInput as ExpoTextInput,
+  useNativeState,
+} from "@expo/ui";
+import {
+  controlSize,
+  listRowInsets,
+  listSectionMargins,
+  listSectionSpacing,
+  textFieldStyle,
+} from "@expo/ui/swift-ui/modifiers";
 import * as Updates from "expo-updates";
 import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
@@ -6,22 +25,17 @@ import {
   PanResponder,
   Platform,
   PlatformColor,
-  Pressable,
-  ScrollView,
   StyleSheet,
-  Text,
-  TextInput,
+  Text as RNText,
   View,
 } from "react-native";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   useDataStoreActions,
   useDataStoreReady,
   useSyncStatus,
   useUserSettings,
 } from "../../src/data/DataProvider";
-import { ExpoUITextActionRow } from "../../src/components/ExpoUITextActionRow";
 import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
 
@@ -37,23 +51,31 @@ const iosColor = (name: string, fallback: string) =>
 
 const palette = {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
-  card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
-  separator: iosColor("separator", "#E5E7EB"),
   tint: "#2563EB",
-  buttonText: "#FFFFFF",
-  buttonDisabledBackground: iosColor("tertiarySystemFill", "#D1D5DB"),
-  buttonDisabledText: iosColor("secondaryLabel", "#6B7280"),
-  success: iosColor("systemGreen", "#16A34A"),
   error: iosColor("systemRed", "#DC2626"),
   macroProtein: macroColors.protein.background,
   macroCarbs: macroColors.carbs.background,
   macroFat: macroColors.fat.background,
 };
 
+const uiColor = (color: string | ReturnType<typeof PlatformColor>) => color as string;
+
+const uiPalette = {
+  label: uiColor(palette.label),
+  secondaryLabel: uiColor(palette.secondaryLabel),
+  tertiaryLabel: uiColor(palette.tertiaryLabel),
+  tint: uiColor(palette.tint),
+  error: uiColor(palette.error),
+};
+
 const MACRO_DIVISIONS = 10;
+const compactFormModifiers = [listSectionSpacing("compact"), listSectionMargins({ length: 16, edges: "horizontal" })];
+const compactRowModifiers = [listRowInsets({ top: 4, leading: 14, bottom: 4, trailing: 14 })];
+const compactControlModifiers = [controlSize("small")];
+const compactInputModifiers = [controlSize("small"), textFieldStyle("plain")];
 
 function clamp(value: number, min: number, max: number) {
   return Math.min(Math.max(value, min), max);
@@ -134,37 +156,63 @@ function getUpdatesStatusLabel(options: {
   return "Up to date";
 }
 
+function SectionTitle({ children }: { children: string }) {
+  return (
+    <ExpoText
+      textStyle={{
+        fontSize: 13,
+        lineHeight: 18,
+        fontWeight: "600",
+        color: uiPalette.secondaryLabel,
+        letterSpacing: 0.5,
+      }}
+    >
+      {children.toUpperCase()}
+    </ExpoText>
+  );
+}
+
 function FormRow({
   label,
   value,
   onChange,
   suffix,
-  accessibilityLabel,
   maxLength,
 }: {
   label: string;
   value: string;
   onChange: (next: string) => void;
   suffix?: string;
-  accessibilityLabel: string;
   maxLength: number;
 }) {
+  const inputValue = useNativeState(value);
+
+  useEffect(() => {
+    inputValue.value = value;
+  }, [inputValue, value]);
+
   return (
-    <View style={styles.formRow}>
-      <Text style={styles.formRowLabel}>{label}</Text>
-      <View style={styles.formValueWrap}>
-        <TextInput
-          value={value}
-          onChangeText={onChange}
-          keyboardType="number-pad"
-          inputMode="numeric"
-          maxLength={maxLength}
-          accessibilityLabel={accessibilityLabel}
-          style={styles.formInput}
-        />
-        {suffix ? <Text style={styles.formSuffix}>{suffix}</Text> : null}
-      </View>
-    </View>
+    <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 44 }}>
+      <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>{label}</ExpoText>
+      <Spacer flexible />
+      <ExpoTextInput
+        value={inputValue}
+        onChangeText={onChange}
+        keyboardType="number-pad"
+        inputMode="numeric"
+        maxLength={maxLength}
+        modifiers={compactInputModifiers}
+        style={{ width: 74, height: 32 }}
+        textStyle={{ textAlign: "right", fontSize: 17, fontWeight: "600", color: uiPalette.tint }}
+      />
+      {suffix ? (
+        <ExpoText
+          textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.tint, fontWeight: "600" }}
+        >
+          {suffix}
+        </ExpoText>
+      ) : null}
+    </Row>
   );
 }
 
@@ -173,55 +221,237 @@ function errorMessage(error: unknown, fallback: string): string {
 }
 
 type SmallButtonProps = {
-  label: string; accessibilityLabel: string; disabled?: boolean; onPress: () => void; secondary?: boolean; showDisabledState?: boolean;
+  label: string;
+  disabled?: boolean;
+  onPress: () => void;
+  secondary?: boolean;
 };
 
 function SmallButton(props: SmallButtonProps) {
-  const disabledStyle = props.showDisabledState && props.disabled;
   return (
-    <Pressable
-      accessibilityRole="button"
-      accessibilityLabel={props.accessibilityLabel}
+    <Button
+      label={props.label}
       disabled={props.disabled}
       onPress={props.onPress}
-      style={[
-        styles.smallButton,
-        props.secondary ? styles.smallSecondaryButton : styles.smallPrimaryButton,
-        disabledStyle && styles.smallPrimaryButtonDisabled,
-      ]}
-    >
-      <Text
-        style={[
-          styles.smallButtonText,
-          props.secondary ? styles.smallSecondaryButtonText : styles.smallPrimaryButtonText,
-          disabledStyle && styles.smallPrimaryButtonTextDisabled,
-        ]}
-      >
-        {props.label}
-      </Text>
-    </Pressable>
+      variant={props.secondary ? "outlined" : "filled"}
+      style={{ width: 82, height: 32 }}
+      modifiers={compactControlModifiers}
+    />
   );
 }
 
-function SocialRow({ name, meta, index, children }: { name: string; meta: string; index: number; children?: ReactNode }) {
+function SettingsTextActionRow({
+  defaultValue,
+  placeholder,
+  maxLength,
+  autoCapitalize,
+  autoCorrect,
+  keyboardType,
+  normalizeText,
+  onChangeText,
+  actionLabel,
+  actionDisabled,
+  onActionPress,
+  inputWidth = 150,
+}: {
+  defaultValue: string;
+  placeholder: string;
+  maxLength?: number;
+  autoCapitalize?: "none" | "words" | "sentences" | "characters";
+  autoCorrect?: boolean;
+  keyboardType?: "default" | "numeric";
+  normalizeText?: (value: string) => string;
+  onChangeText: (value: string) => void;
+  actionLabel: string;
+  actionDisabled?: boolean;
+  onActionPress: () => void;
+  inputWidth?: number;
+}) {
+  const inputValue = useNativeState(defaultValue);
+
+  useEffect(() => {
+    inputValue.value = defaultValue;
+  }, [defaultValue, inputValue]);
+
   return (
-    <View style={[styles.socialRow, index > 0 && styles.socialRowDivider]}>
-      <View style={styles.socialRowMain}>
-        <Text numberOfLines={1} style={styles.socialName}>{name}</Text>
-        <Text style={styles.socialMeta}>{meta}</Text>
-      </View>
+    <Row alignment="center" spacing={8} modifiers={compactRowModifiers} style={{ height: 44 }}>
+      <ExpoTextInput
+        value={inputValue}
+        onChangeText={(value) => {
+          const normalized = (normalizeText?.(value) ?? value).slice(0, maxLength);
+          if (normalized !== value) {
+            inputValue.value = normalized;
+          }
+          onChangeText(normalized);
+        }}
+        autoCapitalize={autoCapitalize}
+        autoCorrect={autoCorrect}
+        inputMode={keyboardType === "numeric" ? "numeric" : "text"}
+        keyboardType={keyboardType === "numeric" ? "number-pad" : "default"}
+        placeholder={placeholder}
+        maxLength={maxLength}
+        modifiers={compactInputModifiers}
+        style={{ width: inputWidth, height: 32 }}
+        textStyle={{ fontSize: 16 }}
+      />
+      <Button
+        label={actionLabel}
+        disabled={actionDisabled}
+        onPress={onActionPress}
+        variant="outlined"
+        style={{ width: 74, height: 32 }}
+        modifiers={compactControlModifiers}
+      />
+    </Row>
+  );
+}
+
+function SocialRow({ name, meta, children }: { name: string; meta: string; children?: ReactNode }) {
+  return (
+    <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 50 }}>
+      <Column spacing={1}>
+        <ExpoText
+          numberOfLines={1}
+          textStyle={{ fontSize: 16, lineHeight: 21, fontWeight: "600", color: uiPalette.label }}
+        >
+          {name}
+        </ExpoText>
+        <ExpoText textStyle={{ fontSize: 13, lineHeight: 17, color: uiPalette.secondaryLabel }}>
+          {meta}
+        </ExpoText>
+      </Column>
+      <Spacer flexible />
       {children}
-    </View>
+    </Row>
   );
 }
 
 function SocialSection<T>(props: { items: readonly T[] | undefined; renderItem: (item: T, index: number) => ReactNode }) {
   const { items, renderItem } = props;
-  return items?.length ? <><View style={styles.divider} />{items.map(renderItem)}</> : null;
+  return items?.length ? <>{items.map(renderItem)}</> : null;
+}
+
+function MacroRatioEditor({
+  proteinGoal,
+  carbsGoal,
+  fatGoal,
+  proteinPct,
+  carbsPct,
+  fatPct,
+  firstDividerLeft,
+  secondDividerLeft,
+  activeHandle,
+  firstHandleResponder,
+  secondHandleResponder,
+  onTrackLayout,
+}: {
+  proteinGoal: number;
+  carbsGoal: number;
+  fatGoal: number;
+  proteinPct: number;
+  carbsPct: number;
+  fatPct: number;
+  firstDividerLeft: number;
+  secondDividerLeft: number;
+  activeHandle: "first" | "second" | null;
+  firstHandleResponder: ReturnType<typeof PanResponder.create>;
+  secondHandleResponder: ReturnType<typeof PanResponder.create>;
+  onTrackLayout: (width: number) => void;
+}) {
+  return (
+    <View style={styles.macroNativeContent}>
+      <View style={styles.macroLegendRow}>
+        <View style={styles.macroLegendItem}>
+          <View style={[styles.macroLegendDot, { backgroundColor: palette.macroProtein }]} />
+          <RNText style={styles.macroLegendText}>Protein {proteinGoal}g</RNText>
+        </View>
+        <View style={styles.macroLegendItem}>
+          <View style={[styles.macroLegendDot, { backgroundColor: palette.macroCarbs }]} />
+          <RNText style={styles.macroLegendText}>Carbs {carbsGoal}g</RNText>
+        </View>
+        <View style={styles.macroLegendItem}>
+          <View style={[styles.macroLegendDot, { backgroundColor: palette.macroFat }]} />
+          <RNText style={styles.macroLegendText}>Fat {fatGoal}g</RNText>
+        </View>
+      </View>
+
+      <View
+        style={styles.macroSliderWrap}
+        onLayout={(event) => {
+          onTrackLayout(event.nativeEvent.layout.width);
+        }}
+      >
+        <View style={styles.macroSliderTrack}>
+          <View style={[styles.macroSection, styles.macroProteinSection, { width: `${proteinPct}%` }]}>
+            <RNText style={[styles.macroSectionPctText, styles.macroSectionPctTextLight]}>
+              {proteinPct}%
+            </RNText>
+          </View>
+          <View
+            style={[
+              styles.macroSection,
+              styles.macroCarbsSection,
+              { left: `${proteinPct}%`, width: `${carbsPct}%` },
+            ]}
+          >
+            <RNText style={[styles.macroSectionPctText, styles.macroSectionPctTextDark]}>
+              {carbsPct}%
+            </RNText>
+          </View>
+          <View
+            style={[
+              styles.macroSection,
+              styles.macroFatSection,
+              { left: `${proteinPct + carbsPct}%`, width: `${fatPct}%` },
+            ]}
+          >
+            <RNText style={[styles.macroSectionPctText, styles.macroSectionPctTextLight]}>
+              {fatPct}%
+            </RNText>
+          </View>
+
+          <View pointerEvents="none" style={styles.macroDivisionOverlay}>
+            {Array.from({ length: MACRO_DIVISIONS - 1 }).map((_, index) => (
+              <View
+                key={index}
+                style={[
+                  styles.macroDivision,
+                  {
+                    left: `${((index + 1) / MACRO_DIVISIONS) * 100}%`,
+                  },
+                ]}
+              />
+            ))}
+          </View>
+
+          <View style={[styles.macroHandleContainer, { left: firstDividerLeft }]}>
+            <View
+              {...firstHandleResponder.panHandlers}
+              accessibilityLabel="Adjust protein and carbs split"
+              style={[styles.macroHandle, activeHandle === "first" && styles.macroHandleActive]}
+            >
+              <View style={styles.macroHandleGrip} />
+            </View>
+          </View>
+
+          <View style={[styles.macroHandleContainer, { left: secondDividerLeft }]}>
+            <View
+              {...secondHandleResponder.panHandlers}
+              accessibilityLabel="Adjust carbs and fat split"
+              style={[styles.macroHandle, activeHandle === "second" && styles.macroHandleActive]}
+            >
+              <View style={styles.macroHandleGrip} />
+            </View>
+          </View>
+        </View>
+      </View>
+
+      <RNText style={styles.macroHelpText}>Drag the two dividers to resize each macro section.</RNText>
+    </View>
+  );
 }
 
 export default function SettingsScreen() {
-  const insets = useSafeAreaInsets();
   const clerk = useClerk();
   const { user } = useUser();
   const queryClient = useQueryClient();
@@ -512,9 +742,13 @@ export default function SettingsScreen() {
 
   if (!isDataReady || isLoadingSettings || isLoadingSyncStatus || !syncedSettings) {
     return (
-      <View style={styles.loadingContainer}>
-        <Text style={styles.loadingText}>Loading settings…</Text>
-      </View>
+      <Host style={styles.screen}>
+        <Column alignment="center" style={{ height: 640 }}>
+          <Spacer flexible />
+          <ExpoText textStyle={{ fontSize: 16, color: uiPalette.secondaryLabel }}>Loading settings...</ExpoText>
+          <Spacer flexible />
+        </Column>
+      </Host>
     );
   }
 
@@ -598,168 +832,99 @@ export default function SettingsScreen() {
   const secondDividerLeft = (macroTrackWidth * (proteinPct + carbsPct)) / 100;
 
   return (
-    <View style={styles.screen}>
-      <ScrollView
-        keyboardShouldPersistTaps="handled"
-        contentInsetAdjustmentBehavior="automatic"
-        contentContainerStyle={[
-          styles.contentContainer,
-          {
-            paddingTop: insets.top + 4,
-            paddingBottom: insets.bottom + 24,
-          },
-        ]}
-      >
-        <View style={styles.titleRow}>
-          <Text style={styles.largeTitle}>Settings</Text>
-          <View
-            style={[
-              styles.syncBadge,
-              syncStatus.dirty ? styles.syncBadgePending : styles.syncBadgeReady,
-            ]}
-          >
-            <View
-              style={[
-                styles.syncBadgeDot,
-                syncStatus.dirty ? styles.syncBadgeDotPending : styles.syncBadgeDotReady,
-              ]}
-            />
-            <Text style={styles.syncBadgeLabel}>Last synced</Text>
-            <Text style={styles.syncBadgeValue}>{lastSyncedValue}</Text>
-          </View>
-        </View>
+    <Host style={styles.screen} useViewportSizeMeasurement>
+      <FieldGroup modifiers={compactFormModifiers}>
+          <FieldGroup.Section>
+            <FieldGroup.SectionHeader>
+              <Column spacing={12}>
+                <Row alignment="center" spacing={12}>
+                  <ExpoText textStyle={{ fontSize: 34, lineHeight: 41, fontWeight: "700", color: uiPalette.label }}>
+                    Settings
+                  </ExpoText>
+                  <Spacer flexible />
+                  <Row alignment="center" spacing={6}>
+                    <ExpoText textStyle={{ fontSize: 12, lineHeight: 16, color: uiPalette.secondaryLabel }}>
+                      Last synced
+                    </ExpoText>
+                    <ExpoText textStyle={{ fontSize: 12, lineHeight: 16, fontWeight: "700", color: uiPalette.label }}>
+                      {lastSyncedValue}
+                    </ExpoText>
+                  </Row>
+                </Row>
+                <SectionTitle>Goals</SectionTitle>
+              </Column>
+            </FieldGroup.SectionHeader>
+            <FormRow label="Daily Calories" value={goalInput} onChange={setGoalInput} maxLength={5} />
+          </FieldGroup.Section>
+          {saveError ? (
+            <FieldGroup.Section>
+              <ExpoText textStyle={{ fontSize: 13, lineHeight: 18, fontWeight: "600", color: uiPalette.error }}>
+                {saveError}
+              </ExpoText>
+            </FieldGroup.Section>
+          ) : null}
 
-        <Text style={styles.sectionTitle}>Goals</Text>
-        <View style={styles.card}>
-          <FormRow
-            label="Daily Calories"
-            value={goalInput}
-            onChange={setGoalInput}
-            accessibilityLabel="Daily calorie goal"
-            maxLength={5}
-          />
-        </View>
-        {saveError ? <Text style={styles.sectionErrorText}>{saveError}</Text> : null}
+          <FieldGroup.Section title="Macro Ratios" titleUppercase>
+            <Column modifiers={compactRowModifiers} style={{ height: 132 }}>
+              <RNHostView>
+                <MacroRatioEditor
+                  proteinGoal={proteinGoal}
+                  carbsGoal={carbsGoal}
+                  fatGoal={fatGoal}
+                  proteinPct={proteinPct}
+                  carbsPct={carbsPct}
+                  fatPct={fatPct}
+                  firstDividerLeft={firstDividerLeft}
+                  secondDividerLeft={secondDividerLeft}
+                  activeHandle={activeHandle}
+                  firstHandleResponder={firstHandleResponder}
+                  secondHandleResponder={secondHandleResponder}
+                  onTrackLayout={setMacroTrackWidth}
+                />
+              </RNHostView>
+            </Column>
+          </FieldGroup.Section>
 
-        <Text style={styles.sectionTitle}>Macro Ratios</Text>
-        <View style={styles.card}>
-          <View style={styles.macroLegendRow}>
-            <View style={styles.macroLegendItem}>
-              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroProtein }]} />
-              <Text style={styles.macroLegendText}>Protein {proteinGoal}g</Text>
-            </View>
-            <View style={styles.macroLegendItem}>
-              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroCarbs }]} />
-              <Text style={styles.macroLegendText}>Carbs {carbsGoal}g</Text>
-            </View>
-            <View style={styles.macroLegendItem}>
-              <View style={[styles.macroLegendDot, { backgroundColor: palette.macroFat }]} />
-              <Text style={styles.macroLegendText}>Fat {fatGoal}g</Text>
-            </View>
-          </View>
-
-          <View
-            style={styles.macroSliderWrap}
-            onLayout={(event) => {
-              setMacroTrackWidth(event.nativeEvent.layout.width);
-            }}
-          >
-            <View style={styles.macroSliderTrack}>
-              <View style={[styles.macroSection, styles.macroProteinSection, { width: `${proteinPct}%` }]}>
-                <Text style={[styles.macroSectionPctText, styles.macroSectionPctTextLight]}>
-                  {proteinPct}%
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.macroSection,
-                  styles.macroCarbsSection,
-                  { left: `${proteinPct}%`, width: `${carbsPct}%` },
-                ]}
+          <FieldGroup.Section title="Account" titleUppercase>
+            <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>
+                Signed in as
+              </ExpoText>
+              <Spacer flexible />
+              <ExpoText
+                numberOfLines={1}
+                textStyle={{ textAlign: "right", fontSize: 15, lineHeight: 20, color: uiPalette.secondaryLabel }}
               >
-                <Text style={[styles.macroSectionPctText, styles.macroSectionPctTextDark]}>
-                  {carbsPct}%
-                </Text>
-              </View>
-              <View
-                style={[
-                  styles.macroSection,
-                  styles.macroFatSection,
-                  { left: `${proteinPct + carbsPct}%`, width: `${fatPct}%` },
-                ]}
-              >
-                <Text style={[styles.macroSectionPctText, styles.macroSectionPctTextLight]}>
-                  {fatPct}%
-                </Text>
-              </View>
+                {profileEmail}
+              </ExpoText>
+            </Row>
+            <Row alignment="center" modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <Spacer flexible />
+              <Button
+                label={isSigningOut ? "Signing Out..." : "Sign Out"}
+                onPress={confirmSignOut}
+                disabled={isSigningOut}
+                variant="text"
+                style={{ width: 132, height: 32 }}
+                modifiers={compactControlModifiers}
+              />
+              <Spacer flexible />
+            </Row>
+          </FieldGroup.Section>
+          {signOutError ? (
+            <FieldGroup.Section>
+              <ExpoText textStyle={{ fontSize: 13, lineHeight: 18, fontWeight: "600", color: uiPalette.error }}>
+                {signOutError}
+              </ExpoText>
+            </FieldGroup.Section>
+          ) : null}
 
-              <View pointerEvents="none" style={styles.macroDivisionOverlay}>
-                {Array.from({ length: MACRO_DIVISIONS - 1 }).map((_, index) => (
-                  <View
-                    key={index}
-                    style={[
-                      styles.macroDivision,
-                      {
-                        left: `${((index + 1) / MACRO_DIVISIONS) * 100}%`,
-                      },
-                    ]}
-                  />
-                ))}
-              </View>
-
-              <View style={[styles.macroHandleContainer, { left: firstDividerLeft }]}>
-                <View
-                  {...firstHandleResponder.panHandlers}
-                  accessibilityLabel="Adjust protein and carbs split"
-                  style={[styles.macroHandle, activeHandle === "first" && styles.macroHandleActive]}
-                >
-                  <View style={styles.macroHandleGrip} />
-                </View>
-              </View>
-
-              <View style={[styles.macroHandleContainer, { left: secondDividerLeft }]}>
-                <View
-                  {...secondHandleResponder.panHandlers}
-                  accessibilityLabel="Adjust carbs and fat split"
-                  style={[styles.macroHandle, activeHandle === "second" && styles.macroHandleActive]}
-                >
-                  <View style={styles.macroHandleGrip} />
-                </View>
-              </View>
-            </View>
-          </View>
-
-          <Text style={styles.macroHelpText}>Drag the two dividers to resize each macro section.</Text>
-        </View>
-
-        <Text style={styles.sectionTitle}>Account</Text>
-        <View style={styles.card}>
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Signed in as</Text>
-            <Text style={styles.accountValue}>{profileEmail}</Text>
-          </View>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Sign out"
-            onPress={confirmSignOut}
-            disabled={isSigningOut}
-            style={[styles.signOutButton, isSigningOut && styles.signOutButtonDisabled]}
-          >
-            <Text style={[styles.signOutButtonText, isSigningOut && styles.signOutButtonTextDisabled]}>
-              {isSigningOut ? "Signing Out..." : "Sign Out"}
-            </Text>
-          </Pressable>
-        </View>
-        {signOutError ? <Text style={styles.sectionErrorText}>{signOutError}</Text> : null}
-
-        <Text style={styles.sectionTitle}>Friends</Text>
-        <View style={styles.card}>
-          {socialDisplayName ? (
-            <>
-              <View style={styles.socialNameRow}>
-                <Text style={styles.formRowLabel}>Name</Text>
-                <ExpoUITextActionRow
+          <FieldGroup.Section title="Friends" titleUppercase>
+            {socialDisplayName ? (
+              <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 50 }}>
+                <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>Name</ExpoText>
+                <Spacer flexible />
+                <SettingsTextActionRow
                   key={socialDisplayName}
                   defaultValue={socialDisplayName}
                   onChangeText={setSocialNameInput}
@@ -768,7 +933,6 @@ export default function SettingsScreen() {
                   placeholder="Name"
                   maxLength={80}
                   actionLabel={updateSocialProfileMutation.isPending ? "Saving" : "Save"}
-                  actionAccessibilityLabel="Save social name"
                   actionDisabled={!socialNameChanged || socialActionPending}
                   onActionPress={() => {
                     if (!socialNameChanged) {
@@ -778,135 +942,142 @@ export default function SettingsScreen() {
                     updateSocialProfileMutation.mutate(trimmedSocialName);
                   }}
                 />
-              </View>
-              <View style={styles.divider} />
-            </>
-          ) : null}
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Your Code</Text>
-            <Text selectable style={styles.friendCodeValue}>
-              {socialOverview?.profile.friendCode ?? (socialOverviewQuery.isLoading ? "Loading..." : "Unavailable")}
-            </Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.friendCodeRow}>
-            <ExpoUITextActionRow
-              defaultValue={friendCodeInput}
-              onChangeText={setFriendCodeInput}
-              normalizeText={(next) => next.toUpperCase()}
-              autoCapitalize="characters"
-              autoCorrect={false}
-              placeholder="Friend code"
-              maxLength={12}
-              actionLabel="Add"
-              actionAccessibilityLabel="Add friend"
-              actionDisabled={!trimmedFriendCode || socialActionPending}
-              onActionPress={() => {
-                sendFriendRequestMutation.mutate(trimmedFriendCode);
-              }}
-            />
-          </View>
-
-          <SocialSection
-            items={socialOverview?.incomingRequests}
-            renderItem={(request, index) => (
-              <SocialRow key={request.id} name={request.requester.displayName} meta="Request" index={index}>
-                <View style={styles.socialActions}>
-                  <SmallButton
-                    label="Ignore"
-                    secondary
-                    accessibilityLabel={`Ignore ${request.requester.displayName}`}
-                    disabled={socialActionPending}
-                    onPress={() => ignoreFriendRequestMutation.mutate(request.id)}
-                  />
-                  <SmallButton
-                    label="Accept"
-                    accessibilityLabel={`Accept ${request.requester.displayName}`}
-                    disabled={socialActionPending}
-                    onPress={() => acceptFriendRequestMutation.mutate(request.id)}
-                  />
-                </View>
-              </SocialRow>
-            )}
-          />
-
-          <SocialSection
-            items={socialOverview?.friends}
-            renderItem={(friend, index) => (
-              <SocialRow key={friend.userId} name={friend.displayName} meta="Friend" index={index}>
-                <SmallButton
-                  label="Remove"
-                  secondary
-                  accessibilityLabel={`Remove ${friend.displayName}`}
-                  disabled={socialActionPending}
-                  onPress={() => confirmRemoveFriend(friend.userId, friend.displayName)}
-                />
-              </SocialRow>
-            )}
-          />
-
-          <SocialSection
-            items={socialOverview?.outgoingRequests}
-            renderItem={(request, index) => (
-              <SocialRow key={request.id} name={request.recipient.displayName} meta="Pending" index={index} />
-            )}
-          />
-
-          {!socialOverviewQuery.isLoading && socialOverview ? null : (
-            <>
-              <View style={styles.divider} />
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Refresh friends"
-                onPress={() => {
-                  void socialOverviewQuery.refetch();
-                }}
-                style={styles.updatesButton}
+              </Row>
+            ) : null}
+            <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>Your Code</ExpoText>
+              <Spacer flexible />
+              <ExpoText
+                textStyle={{ textAlign: "right", fontSize: 17, lineHeight: 22, fontWeight: "700", color: uiPalette.tint, letterSpacing: 1.2 }}
               >
-                <Text style={styles.updatesButtonText}>Refresh</Text>
-              </Pressable>
-            </>
-          )}
-        </View>
-        {socialActionError ? (
-          <Text style={styles.sectionErrorText}>
-            {errorMessage(socialActionError, "Could not update friends.")}
-          </Text>
-        ) : null}
+                {socialOverview?.profile.friendCode ?? (socialOverviewQuery.isLoading ? "Loading..." : "Unavailable")}
+              </ExpoText>
+            </Row>
+            <Row alignment="center" modifiers={compactRowModifiers} style={{ height: 50 }}>
+              <Spacer flexible />
+              <SettingsTextActionRow
+                defaultValue={friendCodeInput}
+                onChangeText={setFriendCodeInput}
+                normalizeText={(next) => next.toUpperCase()}
+                autoCapitalize="characters"
+                autoCorrect={false}
+                placeholder="Friend code"
+                maxLength={12}
+                actionLabel="Add"
+                actionDisabled={!trimmedFriendCode || socialActionPending}
+                inputWidth={160}
+                onActionPress={() => {
+                  sendFriendRequestMutation.mutate(trimmedFriendCode);
+                }}
+              />
+              <Spacer flexible />
+            </Row>
 
-        <Text style={styles.sectionTitle}>Updates</Text>
-        <View style={styles.card}>
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Status</Text>
-            <Text style={styles.accountValue}>{updatesStatusLabel}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Last checked</Text>
-            <Text style={styles.accountValue}>{lastCheckedLabel}</Text>
-          </View>
-          <View style={styles.divider} />
-          <View style={styles.formRow}>
-            <Text style={styles.formRowLabel}>Current update</Text>
-            <Text style={styles.accountValue}>{currentUpdateCreatedAtLabel}</Text>
-          </View>
-          <View style={styles.divider} />
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={updateButtonLabel}
-            onPress={() => {
-              void handleCheckForUpdates();
-            }}
-            disabled={!canCheckForUpdates}
-            style={[styles.updatesButton, !canCheckForUpdates && styles.updatesButtonDisabled]}
-          >
-            <Text style={[styles.updatesButtonText, !canCheckForUpdates && styles.updatesButtonTextDisabled]}>
-              {updateButtonLabel}
-            </Text>
-          </Pressable>
-        </View>
-      </ScrollView>
-    </View>
+            <SocialSection
+              items={socialOverview?.incomingRequests}
+              renderItem={(request) => (
+                <SocialRow key={request.id} name={request.requester.displayName} meta="Request">
+                  <Row alignment="center" spacing={8}>
+                    <SmallButton
+                      label="Ignore"
+                      secondary
+                      disabled={socialActionPending}
+                      onPress={() => ignoreFriendRequestMutation.mutate(request.id)}
+                    />
+                    <SmallButton
+                      label="Accept"
+                      disabled={socialActionPending}
+                      onPress={() => acceptFriendRequestMutation.mutate(request.id)}
+                    />
+                  </Row>
+                </SocialRow>
+              )}
+            />
+
+            <SocialSection
+              items={socialOverview?.friends}
+              renderItem={(friend) => (
+                <SocialRow key={friend.userId} name={friend.displayName} meta="Friend">
+                  <SmallButton
+                    label="Remove"
+                    secondary
+                    disabled={socialActionPending}
+                    onPress={() => confirmRemoveFriend(friend.userId, friend.displayName)}
+                  />
+                </SocialRow>
+              )}
+            />
+
+            <SocialSection
+              items={socialOverview?.outgoingRequests}
+              renderItem={(request) => (
+                <SocialRow key={request.id} name={request.recipient.displayName} meta="Pending" />
+              )}
+            />
+
+            {!socialOverviewQuery.isLoading && socialOverview ? null : (
+              <Row alignment="center" modifiers={compactRowModifiers} style={{ height: 44 }}>
+                <Spacer flexible />
+                <Button
+                  label="Refresh"
+                  onPress={() => {
+                    void socialOverviewQuery.refetch();
+                  }}
+                  variant="text"
+                  style={{ width: 132, height: 32 }}
+                  modifiers={compactControlModifiers}
+                />
+                <Spacer flexible />
+              </Row>
+            )}
+          </FieldGroup.Section>
+          {socialActionError ? (
+            <FieldGroup.Section>
+              <ExpoText textStyle={{ fontSize: 13, lineHeight: 18, fontWeight: "600", color: uiPalette.error }}>
+                {errorMessage(socialActionError, "Could not update friends.")}
+              </ExpoText>
+            </FieldGroup.Section>
+          ) : null}
+
+          <FieldGroup.Section title="Updates" titleUppercase>
+            <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>Status</ExpoText>
+              <Spacer flexible />
+              <ExpoText textStyle={{ textAlign: "right", fontSize: 15, lineHeight: 20, color: uiPalette.secondaryLabel }}>
+                {updatesStatusLabel}
+              </ExpoText>
+            </Row>
+            <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>Last checked</ExpoText>
+              <Spacer flexible />
+              <ExpoText textStyle={{ textAlign: "right", fontSize: 15, lineHeight: 20, color: uiPalette.secondaryLabel }}>
+                {lastCheckedLabel}
+              </ExpoText>
+            </Row>
+            <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <ExpoText textStyle={{ fontSize: 17, lineHeight: 22, color: uiPalette.label }}>Current update</ExpoText>
+              <Spacer flexible />
+              <ExpoText textStyle={{ textAlign: "right", fontSize: 15, lineHeight: 20, color: uiPalette.secondaryLabel }}>
+                {currentUpdateCreatedAtLabel}
+              </ExpoText>
+            </Row>
+            <Row alignment="center" modifiers={compactRowModifiers} style={{ height: 44 }}>
+              <Spacer flexible />
+              <Button
+                label={updateButtonLabel}
+                onPress={() => {
+                  void handleCheckForUpdates();
+                }}
+                disabled={!canCheckForUpdates}
+                variant="text"
+                style={{ width: 150, height: 32 }}
+                modifiers={compactControlModifiers}
+              />
+              <Spacer flexible />
+            </Row>
+          </FieldGroup.Section>
+      </FieldGroup>
+    </Host>
   );
 }
 
@@ -915,254 +1086,8 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: palette.background,
   },
-  contentContainer: {
-    paddingHorizontal: 16,
-    gap: 12,
-  },
-  loadingContainer: {
+  macroNativeContent: {
     flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: palette.background,
-  },
-  loadingText: {
-    fontSize: 16,
-    color: palette.secondaryLabel,
-  },
-  titleRow: {
-    paddingHorizontal: 4,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 12,
-  },
-  largeTitle: {
-    fontSize: 34,
-    lineHeight: 41,
-    fontWeight: "700",
-    color: palette.label,
-  },
-  syncBadge: {
-    minHeight: 34,
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 12,
-    borderWidth: 1,
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    flexShrink: 1,
-  },
-  syncBadgeReady: {
-    backgroundColor: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
-    borderColor: iosColor("separator", "#E5E7EB"),
-  },
-  syncBadgePending: {
-    backgroundColor: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
-    borderColor: iosColor("systemOrangeColor", "#F59E0B"),
-  },
-  syncBadgeDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 999,
-    flexShrink: 0,
-  },
-  syncBadgeDotReady: {
-    backgroundColor: palette.success,
-  },
-  syncBadgeDotPending: {
-    backgroundColor: iosColor("systemOrangeColor", "#F59E0B"),
-  },
-  syncBadgeLabel: {
-    fontSize: 12,
-    lineHeight: 16,
-    color: palette.secondaryLabel,
-  },
-  syncBadgeValue: {
-    fontSize: 12,
-    lineHeight: 16,
-    fontWeight: "700",
-    color: palette.label,
-    fontVariant: ["tabular-nums"],
-  },
-  sectionTitle: {
-    marginTop: 8,
-    paddingHorizontal: 4,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: palette.secondaryLabel,
-    textTransform: "uppercase",
-    letterSpacing: 0.5,
-  },
-  card: {
-    backgroundColor: palette.card,
-    borderRadius: 14,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-  },
-  formRow: {
-    minHeight: 52,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  formRowLabel: {
-    fontSize: 17,
-    lineHeight: 22,
-    color: palette.label,
-  },
-  accountValue: {
-    flex: 1,
-    textAlign: "right",
-    fontSize: 15,
-    lineHeight: 20,
-    color: palette.secondaryLabel,
-  },
-  friendCodeValue: {
-    flex: 1,
-    textAlign: "right",
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "700",
-    color: palette.tint,
-    letterSpacing: 1.2,
-  },
-  socialNameRow: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-  },
-  friendCodeRow: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  socialRow: {
-    minHeight: 58,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 10,
-    paddingVertical: 8,
-  },
-  socialRowDivider: {
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderTopColor: palette.separator,
-  },
-  socialRowMain: {
-    flex: 1,
-  },
-  socialName: {
-    fontSize: 16,
-    lineHeight: 21,
-    fontWeight: "600",
-    color: palette.label,
-  },
-  socialMeta: {
-    marginTop: 1,
-    fontSize: 13,
-    lineHeight: 17,
-    color: palette.secondaryLabel,
-  },
-  socialActions: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 8,
-  },
-  smallButton: {
-    minHeight: 34,
-    minWidth: 64,
-    borderRadius: 10,
-    paddingHorizontal: 12,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  smallPrimaryButton: {
-    backgroundColor: palette.tint,
-  },
-  smallPrimaryButtonDisabled: {
-    backgroundColor: palette.buttonDisabledBackground,
-  },
-  smallButtonText: {
-    fontSize: 14,
-    lineHeight: 18,
-    fontWeight: "700",
-  },
-  smallPrimaryButtonText: {
-    color: palette.buttonText,
-  },
-  smallPrimaryButtonTextDisabled: {
-    color: palette.buttonDisabledText,
-  },
-  smallSecondaryButton: {
-    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
-  },
-  smallSecondaryButtonText: {
-    color: palette.secondaryLabel,
-  },
-  signOutButton: {
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  signOutButtonDisabled: {
-    opacity: 0.5,
-  },
-  signOutButtonText: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    color: palette.error,
-  },
-  signOutButtonTextDisabled: {
-    color: palette.secondaryLabel,
-  },
-  updatesButton: {
-    minHeight: 52,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  updatesButtonDisabled: {
-    opacity: 0.5,
-  },
-  updatesButtonText: {
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    color: palette.tint,
-  },
-  updatesButtonTextDisabled: {
-    color: palette.secondaryLabel,
-  },
-  formValueWrap: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "flex-end",
-    minWidth: 92,
-  },
-  formInput: {
-    minWidth: 52,
-    textAlign: "right",
-    fontSize: 17,
-    lineHeight: 22,
-    fontWeight: "600",
-    color: palette.tint,
-    fontVariant: ["tabular-nums"],
-  },
-  formSuffix: {
-    marginLeft: 2,
-    fontSize: 17,
-    lineHeight: 22,
-    color: palette.tint,
-    fontWeight: "600",
-  },
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: palette.separator,
   },
   macroLegendRow: {
     flexDirection: "row",
@@ -1184,7 +1109,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
     lineHeight: 18,
     fontWeight: "600",
-    color: palette.secondaryLabel,
+    color: uiPalette.secondaryLabel,
     fontVariant: ["tabular-nums"],
   },
   macroSliderWrap: {
@@ -1232,7 +1157,7 @@ const styles = StyleSheet.create({
     color: "rgba(17,24,39,0.9)",
   },
   macroDivisionOverlay: {
-    ...StyleSheet.absoluteFillObject,
+    ...StyleSheet.absoluteFill,
   },
   macroDivision: {
     position: "absolute",
@@ -1261,7 +1186,7 @@ const styles = StyleSheet.create({
     justifyContent: "center",
   },
   macroHandleActive: {
-    borderColor: palette.tint,
+    borderColor: uiPalette.tint,
   },
   macroHandleGrip: {
     width: 3,
@@ -1273,14 +1198,6 @@ const styles = StyleSheet.create({
     marginTop: 8,
     fontSize: 13,
     lineHeight: 18,
-    color: palette.tertiaryLabel,
-  },
-  sectionErrorText: {
-    paddingHorizontal: 4,
-    marginTop: -4,
-    fontSize: 13,
-    lineHeight: 18,
-    fontWeight: "600",
-    color: palette.error,
+    color: uiPalette.tertiaryLabel,
   },
 });

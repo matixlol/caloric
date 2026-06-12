@@ -1,6 +1,6 @@
 import { ClerkProvider } from "@clerk/expo";
 import { tokenCache } from "@clerk/expo/token-cache";
-import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "@react-navigation/native";
+import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "expo-router/react-navigation";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useMemo } from "react";
@@ -30,8 +30,8 @@ Sentry.init({
 const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
-const navigationColor = (value: unknown, fallback: string) =>
-  typeof value === "string" ? value : fallback;
+const navigationColor = (value: unknown, fallback: unknown) =>
+  typeof value === "string" ? value : typeof fallback === "string" ? fallback : "#000000";
 const queryClient = new QueryClient();
 
 function MissingClerkKeyScreen() {

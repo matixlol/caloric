@@ -878,7 +878,7 @@ export default function LogFoodScreen() {
           <GlassView
             glassEffectStyle="regular"
             tintColor="rgba(255,255,255,0.2)"
-            style={StyleSheet.absoluteFillObject}
+            style={StyleSheet.absoluteFill}
           />
         ) : null}
         {isQuickAddPickerActive ? (
@@ -1356,6 +1356,7 @@ const styles = StyleSheet.create({
   },
   actionButtonRow: {
     flexDirection: "row",
+    alignItems: "center",
     gap: 10,
   },
   quickAddButton: {

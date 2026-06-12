@@ -10,7 +10,7 @@ export default function TabsLayout() {
       blurEffect={isDark ? "systemChromeMaterialDark" : "systemChromeMaterialLight"}
       backgroundColor={palette.background}
       disableTransparentOnScrollEdge
-      minimizeBehavior="onScrollDown"
+      minimizeBehavior="never"
       tintColor={palette.label}
       iconColor={{
         default: palette.secondaryLabel,
