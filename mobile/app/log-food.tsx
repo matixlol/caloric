@@ -51,6 +51,7 @@ const palette = {
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MAX_ITEMS = 20;
 const RECENT_ITEMS_LIMIT = 50;
+const QUICK_ADD_FOOD_NAME = "Quick add";
 const QUICK_ADD_DEFAULT_CALORIES = 250;
 const QUICK_ADD_MIN_CALORIES = 50;
 const QUICK_ADD_SLIDER_MAX_CALORIES = 600;
@@ -187,6 +188,10 @@ function normalizeSearchText(value: string | undefined): string {
     .toLowerCase()
     .trim()
     .replace(/\s+/g, " ");
+}
+
+function isQuickAddEntry(entry: FoodEntryRecord): boolean {
+  return entry.foodName === QUICK_ADD_FOOD_NAME;
 }
 
 function buildRecentEntryKey(entry: FoodEntryRecord): string {
@@ -386,7 +391,7 @@ export default function LogFoodScreen() {
 
       void createFoodEntry({
         meal: selectedMeal,
-        foodName: "Quick add",
+        foodName: QUICK_ADD_FOOD_NAME,
         serving: "Manual entry",
         portion: 1,
         nutrition,
@@ -651,7 +656,10 @@ export default function LogFoodScreen() {
 
   const trimmedQuery = query.trim();
   const canShowResults = trimmedQuery.length >= 2;
-  const recentEntries = allFoodEntries.slice(-RECENT_ITEMS_LIMIT).reverse();
+  const recentEntries = allFoodEntries
+    .filter((entry) => !isQuickAddEntry(entry))
+    .slice(-RECENT_ITEMS_LIMIT)
+    .reverse();
   const recentSearchMatches = canShowResults
     ? getRecentSearchMatches(recentEntries, trimmedQuery)
     : recentEntries;
