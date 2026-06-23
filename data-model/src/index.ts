@@ -115,3 +115,18 @@ export const FriendDailySummariesResponseSchema = z
   })
   .strict();
 export type FriendDailySummariesResponse = z.infer<typeof FriendDailySummariesResponseSchema>;
+
+export const FriendDailyFoodEntrySchema = FoodEntrySchema.extend({
+  id: NonEmptyString,
+  updatedAt: TimestampMs,
+}).strict();
+export type FriendDailyFoodEntry = z.infer<typeof FriendDailyFoodEntrySchema>;
+
+export const FriendDailyDayResponseSchema = z
+  .object({
+    summary: FriendDailySummarySchema,
+    entries: z.array(FriendDailyFoodEntrySchema).default([]),
+    settings: UserSettingsSchema.nullable(),
+  })
+  .strict();
+export type FriendDailyDayResponse = z.infer<typeof FriendDailyDayResponseSchema>;

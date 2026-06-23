@@ -55,6 +55,26 @@ function AppNavigator() {
           presentation: "pageSheet",
         }}
       />
+      <Stack.Screen
+        name="friend-day"
+        dangerouslySingular={(_name, params) => {
+          const sheetInstance = params.sheetInstance;
+          return typeof sheetInstance === "string" ? sheetInstance : undefined;
+        }}
+        options={{
+          presentation: "formSheet",
+          headerShown: false,
+          freezeOnBlur: false,
+          contentStyle: {
+            backgroundColor: iosColor("systemGroupedBackground", "#F3F4F6"),
+          },
+          sheetAllowedDetents: [0.9],
+          sheetInitialDetentIndex: 0,
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 18,
+          sheetExpandsWhenScrolledToEdge: false,
+        }}
+      />
     </Stack>
   );
 }
