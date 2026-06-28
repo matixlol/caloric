@@ -25,9 +25,18 @@ const EMPTY_SYNC_STATUS: SyncStatusRecord = {
 const DataContext = createContext<DataContextValue | null>(null);
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const { isLoaded, isSignedIn, userId, getToken } = useAuth();
+  const { isLoaded, isSignedIn, userId, getToken } = useAuth({ treatPendingAsSignedOut: false });
   const [ready, setReady] = useState(false);
-  const getTokenForStore = useEffectEvent(async () => getToken());
+  const getTokenForStore = useEffectEvent(async () => {
+    try {
+      return await getToken();
+    } catch {
+      // Clerk rejects token requests once the session ends (e.g. it expired
+      // while the app was backgrounded). Treat that as "no token" so background
+      // sync backs off instead of surfacing an unhandled promise rejection.
+      return null;
+    }
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -56,20 +65,29 @@ export function DataProvider({ children }: { children: ReactNode }) {
     let cancelled = false;
 
     void (async () => {
-      await localDataStore.activateUser(userId, async () => getTokenForStore());
-      if (cancelled) {
-        return;
-      }
+      try {
+        await localDataStore.activateUser(userId, async () => getTokenForStore());
+        if (cancelled) {
+          return;
+        }
 
-      void localDataStore.bootstrapFromBackend().finally(() => {
-        localDataStore.scheduleSync(0);
-      });
+        await localDataStore.bootstrapFromBackend();
+      } catch {
+        // Activation and bootstrap are best-effort; a failure here (offline,
+        // ended session, transient backend error) must not escape as an
+        // unhandled rejection. Dirty rows are still flushed by the sync below.
+      } finally {
+        if (!cancelled) {
+          localDataStore.scheduleSync(0);
+        }
+      }
     })();
 
     return () => {
       cancelled = true;
     };
-  }, [getTokenForStore, isLoaded, isSignedIn, userId]);
+    // getTokenForStore is a stable useEffectEvent and must not be a dependency.
+  }, [isLoaded, isSignedIn, userId]);
 
   useEffect(() => {
     if (!ready) {
