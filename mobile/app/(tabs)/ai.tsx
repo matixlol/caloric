@@ -11,6 +11,7 @@ import {
 } from "expo-audio";
 import { File as ExpoFile } from "expo-file-system";
 import {
+  AppState,
   type ColorValue,
   type GestureResponderEvent,
   Keyboard,
@@ -142,10 +143,19 @@ type AudioUpload = {
   fileName: string;
 };
 
-type StreamingTurnResult = {
-  status: ChatStatus;
-  events: AgentEvent[];
+type TurnStreamOutcome = {
+  // "ready"/"error" mean the server finished the turn; null means the stream ended
+  // without a terminal message (e.g. the request was cancelled / app backgrounded)
+  // and the turn is still running server-side, ready to be resumed.
+  terminal: ChatStatus | "error" | null;
+  errorMessage?: string;
   resolvedUserMessage?: string;
+};
+
+type ActiveTurn = {
+  turnId: string;
+  // Highest durable event sequence number applied so far; the resume cursor.
+  appliedSeq: number;
 };
 
 type RecentLogHintPayload = {
@@ -174,6 +184,8 @@ type StreamingPayload = {
   resolvedUserMessage?: unknown;
   error?: unknown;
   message?: unknown;
+  turnId?: unknown;
+  seq?: unknown;
 };
 
 const recentLogWindowMs = 3 * 24 * 60 * 60 * 1000;
@@ -353,52 +365,6 @@ function parseSseEventsFromChunk(chunk: string): StreamingPayload[] {
   }
 
   return payloads;
-}
-
-function buildStreamingResult(payloads: StreamingPayload[]): StreamingTurnResult {
-  let status: ChatStatus = "ready";
-  let resolvedUserMessage: string | undefined;
-  const events: AgentEvent[] = [];
-
-  for (const payload of payloads) {
-    if (payload.type === "status") {
-      if (payload.status === "ready") {
-        status = payload.status;
-      }
-      continue;
-    }
-
-    if (payload.type === "resolved-user-message") {
-      if (typeof payload.resolvedUserMessage === "string") {
-        resolvedUserMessage = payload.resolvedUserMessage;
-      }
-      continue;
-    }
-
-    if (payload.type === "event") {
-      const event = normalizeStreamingPayloadEvent(payload.event);
-      if (event) {
-        events.push(event);
-      }
-      continue;
-    }
-
-    if (payload.type === "error") {
-      const backendMessage =
-        typeof payload.message === "string"
-          ? payload.message
-          : typeof payload.error === "string"
-            ? payload.error
-            : "Unknown error.";
-      throw new UIError(backendMessage);
-    }
-  }
-
-  return {
-    status,
-    events,
-    resolvedUserMessage,
-  };
 }
 
 function buildErrorDetails(options: {
@@ -824,6 +790,17 @@ export default function AILogScreen() {
   const sessionIdRef = useRef<string | null>(null);
   const pendingApprovalsRef = useRef(new Map<string, ResolvedApprovalSuggestion[]>());
   const loopRunningRef = useRef(false);
+  // The turn currently running server-side, kept while it streams and across any
+  // interruption (e.g. backgrounding) so it can be resumed.
+  const activeTurnRef = useRef<ActiveTurn | null>(null);
+  const resumingRef = useRef(false);
+  // True while a stream reader is actively being consumed, so we never run two
+  // overlapping consumers for the same turn.
+  const streamConsumerActiveRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  // Always points at the latest resume function so the AppState listener (set up
+  // once) never calls a stale closure.
+  const resumeRef = useRef<() => void>(() => {});
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingLockedRef = useRef(false);
   const recordingCancelledRef = useRef(false);
@@ -1030,21 +1007,20 @@ export default function AILogScreen() {
     return sessionId;
   };
 
-  const requestTurn = async (
+  // Starts a turn on the server and returns the streaming response. The turn keeps
+  // running server-side even if we stop reading this response.
+  const startTurnRequest = async (
     action: AgentAction,
-    options?: {
-      audio?: AudioUpload;
-      onEvent?: (event: AgentEvent) => void;
-    },
+    options: { audio?: AudioUpload; signal?: AbortSignal },
     retry = true,
-  ): Promise<StreamingTurnResult> => {
+  ): Promise<Response> => {
     const sessionId = await ensureSessionId();
     const token = await getToken();
     if (!token) {
       throw new UIError("Missing authentication token. Sign in again and retry.");
     }
 
-    const usingAudio = Boolean(options?.audio && action.type === "user-message");
+    const usingAudio = Boolean(options.audio && action.type === "user-message");
     const userMessage = action.type === "user-message" ? action.message?.trim() : undefined;
 
     const body = usingAudio
@@ -1056,7 +1032,7 @@ export default function AILogScreen() {
             formData.append("message", userMessage);
           }
 
-          const audio = options?.audio;
+          const audio = options.audio;
           if (audio) {
             formData.append("audio", createAudioUploadPart(audio));
           }
@@ -1083,6 +1059,7 @@ export default function AILogScreen() {
               }),
         },
         body,
+        signal: options.signal,
       });
     } catch (networkError) {
       console.error("AI turn request failed", {
@@ -1111,7 +1088,7 @@ export default function AILogScreen() {
 
       if (response.status === 403 && retry) {
         sessionIdRef.current = null;
-        return requestTurn(action, options, false);
+        return startTurnRequest(action, options, false);
       }
 
       const backendMessage =
@@ -1131,21 +1108,78 @@ export default function AILogScreen() {
       );
     }
 
+    return response;
+  };
+
+  // Reads an SSE turn stream (from the initial POST or a resume GET), applying
+  // events live. Resolves with how the stream ended: a terminal status means the
+  // server finished the turn; null means the stream was cut before completion.
+  const consumeTurnStream = async (
+    response: Response,
+    handlers: {
+      onTurnId?: (turnId: string) => void;
+      onSeq?: (seq: number) => void;
+      onEvent?: (event: AgentEvent) => void;
+    },
+  ): Promise<TurnStreamOutcome> => {
     const reader = response.body?.getReader();
     if (!reader) {
-      throw new UIError(
-        "Backend AI response was not streamable.",
-        buildErrorDetails({
-          method: "POST",
-          url: turnUrl,
-          status: response.status,
-        }),
-      );
+      throw new UIError("Backend AI response was not streamable.");
     }
+
+    let terminal: TurnStreamOutcome["terminal"] = null;
+    let errorMessage: string | undefined;
+    let resolvedUserMessage: string | undefined;
+
+    const handlePayload = (payload: StreamingPayload) => {
+      if (payload.type === "turn") {
+        if (typeof payload.turnId === "string" && payload.turnId) {
+          handlers.onTurnId?.(payload.turnId);
+        }
+        return;
+      }
+
+      if (payload.type === "status") {
+        if (payload.status === "ready") {
+          terminal = "ready";
+        }
+        return;
+      }
+
+      if (payload.type === "error") {
+        terminal = "error";
+        errorMessage =
+          typeof payload.message === "string"
+            ? payload.message
+            : typeof payload.error === "string"
+              ? payload.error
+              : "Unknown error.";
+        return;
+      }
+
+      if (payload.type === "resolved-user-message") {
+        if (typeof payload.resolvedUserMessage === "string") {
+          resolvedUserMessage = payload.resolvedUserMessage;
+        }
+        if (typeof payload.seq === "number") {
+          handlers.onSeq?.(payload.seq);
+        }
+        return;
+      }
+
+      if (payload.type === "event") {
+        if (typeof payload.seq === "number") {
+          handlers.onSeq?.(payload.seq);
+        }
+        const event = normalizeStreamingPayloadEvent(payload.event);
+        if (event) {
+          handlers.onEvent?.(event);
+        }
+      }
+    };
 
     const decoder = new TextDecoder();
     let pending = "";
-    const payloads: StreamingPayload[] = [];
 
     while (true) {
       const { done, value } = await reader.read();
@@ -1158,33 +1192,19 @@ export default function AILogScreen() {
       pending = chunks.pop() ?? "";
 
       for (const chunk of chunks) {
-        const nextPayloads = parseSseEventsFromChunk(`${chunk}\n\n`);
-        for (const payload of nextPayloads) {
-          payloads.push(payload);
-          if (payload.type === "event") {
-            const event = normalizeStreamingPayloadEvent(payload.event);
-            if (event) {
-              options?.onEvent?.(event);
-            }
-          }
+        for (const payload of parseSseEventsFromChunk(`${chunk}\n\n`)) {
+          handlePayload(payload);
         }
       }
     }
 
     if (pending.trim()) {
-      const finalPayloads = parseSseEventsFromChunk(pending);
-      for (const payload of finalPayloads) {
-        payloads.push(payload);
-        if (payload.type === "event") {
-          const event = normalizeStreamingPayloadEvent(payload.event);
-          if (event) {
-            options?.onEvent?.(event);
-          }
-        }
+      for (const payload of parseSseEventsFromChunk(pending)) {
+        handlePayload(payload);
       }
     }
 
-    return buildStreamingResult(payloads);
+    return { terminal, errorMessage, resolvedUserMessage };
   };
 
   const applyAgentEvents = (events: AgentEvent[]) => {
@@ -1266,6 +1286,159 @@ export default function AILogScreen() {
     });
   };
 
+  // The turn reached a terminal state (completed or hard error): release the lock
+  // and let the user start a new turn.
+  const finishTurn = (errorMessage?: string) => {
+    activeTurnRef.current = null;
+    loopRunningRef.current = false;
+    streamConsumerActiveRef.current = false;
+    abortControllerRef.current = null;
+    setStatus("ready");
+    if (errorMessage) {
+      showError(new UIError(errorMessage));
+    }
+  };
+
+  // The stream was cut but the turn is still running server-side. Keep the lock and
+  // the "streaming" status, then try to re-attach (immediately if we're still in the
+  // foreground; otherwise the AppState listener will resume us on the next foreground).
+  const handleInterruptedTurn = () => {
+    abortControllerRef.current = null;
+    if (AppState.currentState === "active") {
+      setTimeout(() => {
+        void resumeActiveTurn();
+      }, 800);
+    }
+  };
+
+  // Drives a single SSE response to completion, routing events into the UI and
+  // tracking the resume cursor. Decides whether the turn finished or was interrupted.
+  const driveTurnStream = async (response: Response, appendResolvedUserMessage: boolean) => {
+    streamConsumerActiveRef.current = true;
+
+    let outcome: TurnStreamOutcome;
+    try {
+      outcome = await consumeTurnStream(response, {
+        onTurnId: (turnId) => {
+          const previous = activeTurnRef.current;
+          activeTurnRef.current = {
+            turnId,
+            appliedSeq: previous?.turnId === turnId ? previous.appliedSeq : -1,
+          };
+        },
+        onSeq: (seq) => {
+          const active = activeTurnRef.current;
+          if (active && seq > active.appliedSeq) {
+            active.appliedSeq = seq;
+          }
+        },
+        onEvent: (event) => {
+          applyAgentEvents([event]);
+        },
+      });
+    } catch (streamError) {
+      streamConsumerActiveRef.current = false;
+      // If the turn already started, a read failure just means the connection
+      // dropped; keep it resumable. Otherwise there's nothing to resume.
+      if (activeTurnRef.current) {
+        handleInterruptedTurn();
+        return;
+      }
+      throw streamError;
+    }
+
+    streamConsumerActiveRef.current = false;
+
+    const resolvedUserMessage = outcome.resolvedUserMessage?.trim();
+    if (appendResolvedUserMessage && resolvedUserMessage) {
+      setMessages((current) => [
+        ...current,
+        {
+          id: createMessageId(),
+          kind: "text",
+          role: "user",
+          text: resolvedUserMessage,
+        },
+      ]);
+    }
+
+    if (outcome.terminal === "error") {
+      finishTurn(outcome.errorMessage ?? "Unknown error.");
+      return;
+    }
+
+    if (outcome.terminal) {
+      finishTurn();
+      return;
+    }
+
+    handleInterruptedTurn();
+  };
+
+  // Re-attaches to a turn that is still running server-side after an interruption,
+  // replaying anything missed since `appliedSeq`.
+  const resumeActiveTurn = async () => {
+    const active = activeTurnRef.current;
+    if (!active || resumingRef.current) {
+      return;
+    }
+
+    if (streamConsumerActiveRef.current) {
+      // A previous consumer is still settling (e.g. a frozen read after returning
+      // to the foreground). Nudge it to fail fast; its interrupt path will retry.
+      abortControllerRef.current?.abort();
+      return;
+    }
+
+    if (AppState.currentState !== "active") {
+      return;
+    }
+
+    resumingRef.current = true;
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
+
+    try {
+      const token = await getToken();
+      if (!token) {
+        throw new UIError("Missing authentication token. Sign in again and retry.");
+      }
+
+      const resumeUrl = `${BACKEND_BASE_URL}/ai/turn/${encodeURIComponent(active.turnId)}/stream?cursor=${active.appliedSeq}`;
+      const response = await expoFetch(resumeUrl, {
+        method: "GET",
+        headers: {
+          Accept: "text/event-stream",
+          Authorization: `Bearer ${token}`,
+        },
+        signal: controller.signal,
+      });
+
+      if (response.status === 404) {
+        // The turn finished and aged out of server memory; treat as complete.
+        finishTurn();
+        return;
+      }
+
+      if (!response.ok) {
+        finishTurn("AI turn could not be resumed.");
+        return;
+      }
+
+      await driveTurnStream(response, false);
+    } catch {
+      // Network failure while resuming; retry shortly if still foregrounded,
+      // otherwise the AppState listener resumes us on the next foreground.
+      if (activeTurnRef.current && AppState.currentState === "active") {
+        setTimeout(() => {
+          void resumeActiveTurn();
+        }, 2000);
+      }
+    } finally {
+      resumingRef.current = false;
+    }
+  };
+
   const runAssistantAction = async (
     action: AgentAction,
     options?: {
@@ -1284,43 +1457,44 @@ export default function AILogScreen() {
     }
 
     loopRunningRef.current = true;
-    let nextStatus: ChatStatus = "ready";
+    activeTurnRef.current = null;
+    setStatus("streaming");
+
+    const controller = new AbortController();
+    abortControllerRef.current = controller;
 
     try {
-      setStatus("streaming");
-      const streamedEventsJson = new Set<string>();
-      const result = await requestTurn(action, {
-        ...options,
-        onEvent: (event) => {
-          streamedEventsJson.add(JSON.stringify(event));
-          applyAgentEvents([event]);
-        },
+      const response = await startTurnRequest(action, {
+        audio: options?.audio,
+        signal: controller.signal,
       });
-      const resolvedUserMessage = result.resolvedUserMessage?.trim();
-
-      if (options?.appendResolvedUserMessage && resolvedUserMessage) {
-        setMessages((current) => [
-          ...current,
-          {
-            id: createMessageId(),
-            kind: "text",
-            role: "user",
-            text: resolvedUserMessage,
-          },
-        ]);
-      }
-
-      const remainingEvents = result.events.filter((event) => !streamedEventsJson.has(JSON.stringify(event)));
-      applyAgentEvents(remainingEvents);
-      nextStatus = result.status;
+      await driveTurnStream(response, Boolean(options?.appendResolvedUserMessage));
     } catch (loopError) {
       showError(loopError);
-      nextStatus = "ready";
-    } finally {
-      loopRunningRef.current = false;
-      setStatus(nextStatus);
+      finishTurn();
     }
   };
+
+  // Keep the AppState listener pointed at the latest resume closure.
+  resumeRef.current = () => {
+    void resumeActiveTurn();
+  };
+
+  useEffect(() => {
+    const subscription = AppState.addEventListener("change", (state) => {
+      if (state === "active") {
+        resumeRef.current();
+      } else if (state === "background") {
+        // Cut the in-flight stream deterministically so its read settles; the turn
+        // keeps running server-side and we re-attach when we return to foreground.
+        abortControllerRef.current?.abort();
+      }
+    });
+
+    return () => {
+      subscription.remove();
+    };
+  }, []);
 
   const submitMessage = async () => {
     const trimmed = input.trim();

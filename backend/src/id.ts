@@ -12,6 +12,10 @@ export function createAiMessageId(): string {
   return createTimestampedTypeId("ai_message");
 }
 
+export function createAiTurnId(): string {
+  return createTimestampedTypeId("ai_turn");
+}
+
 export function createMfpTraceId(): string {
   return createTimestampedTypeId("mfp_trace");
 }
