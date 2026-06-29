@@ -47,7 +47,6 @@ type Subscriber = (message: TurnOutbound) => void;
 type TurnRecord = {
   id: string;
   userId: string;
-  sessionId: string;
   status: "running" | "done" | "error";
   errorCode?: string;
   errorMessage?: string;
@@ -57,7 +56,6 @@ type TurnRecord = {
   // Text of the assistant message currently being streamed but not yet committed.
   assistantBuffer: string;
   subscribers: Set<Subscriber>;
-  finishedAt?: number;
   cleanupTimer?: ReturnType<typeof setTimeout>;
 };
 
@@ -70,6 +68,12 @@ export type TurnEmitter = {
 // shortly after completion can still receive the events it missed. This is an
 // in-memory registry, so turns do not survive a server restart by design.
 const finishedTurnTtlMs = 5 * 60 * 1000;
+
+// Hard ceiling on how long the detached run may take before it is aborted and
+// finalized as an error. The run is intentionally decoupled from the client
+// request, so without this a hung LLM call would keep the turn "running" forever
+// and leak its record (the cleanup timer is only armed once a turn finalizes).
+const turnDeadlineMs = 3 * 60 * 1000;
 
 const turns = new Map<string, TurnRecord>();
 
@@ -111,7 +115,6 @@ function finalizeTurn(
   record.errorCode = errorCode;
   record.errorMessage = errorMessage;
   record.assistantBuffer = "";
-  record.finishedAt = Date.now();
 
   broadcast(record, terminalMessage(record));
   broadcast(record, { type: "done" });
@@ -126,14 +129,12 @@ function finalizeTurn(
 export function startResumableTurn(params: {
   turnId: string;
   userId: string;
-  sessionId: string;
-  run: (emit: TurnEmitter) => Promise<void>;
+  run: (emit: TurnEmitter, signal: AbortSignal) => Promise<void>;
   onError: (error: unknown) => { code: string; message: string };
 }): TurnRecord {
   const record: TurnRecord = {
     id: params.turnId,
     userId: params.userId,
-    sessionId: params.sessionId,
     status: "running",
     seqCounter: 0,
     durable: [],
@@ -176,13 +177,21 @@ export function startResumableTurn(params: {
     },
   };
 
+  const abortController = new AbortController();
+  const deadlineTimer = setTimeout(() => {
+    abortController.abort(new Error("AI turn timed out."));
+  }, turnDeadlineMs);
+  deadlineTimer.unref?.();
+
   void (async () => {
     try {
-      await params.run(emitter);
+      await params.run(emitter, abortController.signal);
       finalizeTurn(record, "done");
     } catch (error) {
       const { code, message } = params.onError(error);
       finalizeTurn(record, "error", code, message);
+    } finally {
+      clearTimeout(deadlineTimer);
     }
   })();
 

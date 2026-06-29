@@ -26,7 +26,6 @@ import {
   getResumableTurn,
   startResumableTurn,
   type AgentEvent,
-  type AgentStatus,
 } from "./ai-turns";
 import { searchUnifiedFoods, type SearchResultFood } from "./search";
 
@@ -341,6 +340,7 @@ async function requestAiSdkTurn(
   session: AiSessionState,
   options?: {
     onAssistantDelta?: (text: string) => void;
+    signal?: AbortSignal;
   },
 ): Promise<{
   assistantText: string;
@@ -351,6 +351,7 @@ async function requestAiSdkTurn(
     model: createGeminiModel(),
     messages: session.conversation,
     tools: aiSdkTools,
+    abortSignal: options?.signal,
     experimental_telemetry: {
       isEnabled: true,
       functionId: "backend.ai.turn",
@@ -529,17 +530,16 @@ async function runAssistantLoop(
   session: AiSessionState,
   options?: {
     onEvent?: (event: AgentEvent) => void;
+    signal?: AbortSignal;
   },
-): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
-  const events: AgentEvent[] = [];
-
+): Promise<void> {
   const emit = (event: AgentEvent) => {
-    events.push(event);
     options?.onEvent?.(event);
   };
 
   for (let step = 0; step < 8; step += 1) {
     const turn = await requestAiSdkTurn(session, {
+      signal: options?.signal,
       onAssistantDelta: (text) => {
         if (!text) {
           return;
@@ -562,10 +562,7 @@ async function runAssistantLoop(
     session.conversation.push(...turn.responseMessages);
 
     if (turn.toolCalls.length === 0) {
-      return {
-        status: "ready",
-        events,
-      };
+      return;
     }
 
     for (const toolCall of turn.toolCalls) {
@@ -577,18 +574,10 @@ async function runAssistantLoop(
       session.conversation.push(createToolResultMessage(toolCall, toolResult.output ?? null));
 
       if (toolResult.stopAfterTool) {
-        return {
-          status: "ready",
-          events,
-        };
+        return;
       }
     }
   }
-
-  return {
-    status: "ready",
-    events,
-  };
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -828,18 +817,18 @@ async function handleUserMessageAction(
   const record = startResumableTurn({
     turnId: createAiTurnId(),
     userId: session.userId,
-    sessionId: session.id,
     onError: (error) => {
       captureUnknownError("ai_turn_failed", error);
       return { code: "ai_turn_failed", message: "Unknown error." };
     },
-    run: async (emit) => {
+    run: async (emit, signal) => {
       if (message) {
         emit.resolvedUserMessage(message);
       }
 
       await runAssistantLoop(session, {
         onEvent: emit.event,
+        signal,
       });
 
       await saveAiSession(session);

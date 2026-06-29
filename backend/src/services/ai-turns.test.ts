@@ -69,7 +69,6 @@ describe("ai-turns resumable runner", () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_full",
       userId: "user-1",
-      sessionId: "sess-1",
       onError: noopOnError,
       run: async (emit: TurnEmitter) => {
         // These run synchronously, before the response below subscribes.
@@ -108,7 +107,6 @@ describe("ai-turns resumable runner", () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_resume",
       userId: "user-1",
-      sessionId: "sess-1",
       onError: noopOnError,
       run: async (emit: TurnEmitter) => {
         emit.event({ kind: "assistant", text: "part one" }); // seq 1
@@ -150,7 +148,6 @@ describe("ai-turns resumable runner", () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_partial",
       userId: "user-1",
-      sessionId: "sess-1",
       onError: noopOnError,
       run: async (emit: TurnEmitter) => {
         emit.event({ kind: "assistant-delta", text: "strea" });
@@ -177,7 +174,6 @@ describe("ai-turns resumable runner", () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_error",
       userId: "user-1",
-      sessionId: "sess-1",
       onError: () => ({ code: "ai_turn_failed", message: "boom" }),
       run: async () => {
         throw new Error("kaboom");
@@ -194,7 +190,6 @@ describe("ai-turns resumable runner", () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_owner",
       userId: "owner",
-      sessionId: "sess-1",
       onError: noopOnError,
       run: async () => {
         // Finishes immediately.

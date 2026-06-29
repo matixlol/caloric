@@ -207,10 +207,6 @@ function reportUnknownError(code: string, error: unknown): Response {
   );
 }
 
-function encodeSseChunk(payload: Record<string, unknown>): string {
-  return `data: ${JSON.stringify(payload)}\n\n`;
-}
-
 function parseInteger(value: string | null, fallback: number): number {
   if (value === null || value.trim() === "") {
     return fallback;

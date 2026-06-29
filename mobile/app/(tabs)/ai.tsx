@@ -149,13 +149,15 @@ type TurnStreamOutcome = {
   // and the turn is still running server-side, ready to be resumed.
   terminal: ChatStatus | "error" | null;
   errorMessage?: string;
-  resolvedUserMessage?: string;
 };
 
 type ActiveTurn = {
   turnId: string;
   // Highest durable event sequence number applied so far; the resume cursor.
   appliedSeq: number;
+  // Whether the server-resolved user message (e.g. an audio transcription) should
+  // be rendered. False for typed messages, which are shown optimistically already.
+  appendResolvedUserMessage: boolean;
 };
 
 type RecentLogHintPayload = {
@@ -190,6 +192,12 @@ type StreamingPayload = {
 
 const recentLogWindowMs = 3 * 24 * 60 * 60 * 1000;
 const maxRecentLogHints = 80;
+// How long to wait before re-attaching to a turn whose stream was interrupted,
+// and after a failed resume attempt, plus how many consecutive failures to
+// tolerate before giving up on the turn.
+const interruptResumeDelayMs = 800;
+const resumeRetryDelayMs = 2000;
+const maxResumeRetries = 5;
 const recordingLockDistance = 54;
 const recordingCancelDistance = 82;
 const recordingWaveHeights = [10, 18, 12, 24, 15, 28, 12, 22, 16, 26, 13, 19, 11, 21];
@@ -797,7 +805,17 @@ export default function AILogScreen() {
   // True while a stream reader is actively being consumed, so we never run two
   // overlapping consumers for the same turn.
   const streamConsumerActiveRef = useRef(false);
+  // Id of the assistant bubble currently being streamed (built from deltas, or the
+  // buffered partial replayed on resume) but not yet committed. Lets us update that
+  // exact bubble instead of "the last assistant message", so a committed message is
+  // never overwritten by a later one when no event separates them.
+  const openAssistantIdRef = useRef<string | null>(null);
   const abortControllerRef = useRef<AbortController | null>(null);
+  // Consecutive failed resume attempts; once this exceeds the cap we give up and
+  // finish the turn instead of retrying forever (which would wedge the chat).
+  const resumeRetriesRef = useRef(0);
+  // Pending scheduled resume, tracked so it can be cancelled on unmount.
+  const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Always points at the latest resume function so the AppState listener (set up
   // once) never calls a stale closure.
   const resumeRef = useRef<() => void>(() => {});
@@ -1119,7 +1137,10 @@ export default function AILogScreen() {
     handlers: {
       onTurnId?: (turnId: string) => void;
       onSeq?: (seq: number) => void;
-      onEvent?: (event: AgentEvent) => void;
+      onResolvedUserMessage?: (message: string) => void;
+      // `committed` is true for durable events (they carry a seq); false for the
+      // seqless partial assistant snapshot replayed on resume.
+      onEvent?: (event: AgentEvent, committed: boolean) => void;
     },
   ): Promise<TurnStreamOutcome> => {
     const reader = response.body?.getReader();
@@ -1129,7 +1150,6 @@ export default function AILogScreen() {
 
     let terminal: TurnStreamOutcome["terminal"] = null;
     let errorMessage: string | undefined;
-    let resolvedUserMessage: string | undefined;
 
     const handlePayload = (payload: StreamingPayload) => {
       if (payload.type === "turn") {
@@ -1158,22 +1178,25 @@ export default function AILogScreen() {
       }
 
       if (payload.type === "resolved-user-message") {
-        if (typeof payload.resolvedUserMessage === "string") {
-          resolvedUserMessage = payload.resolvedUserMessage;
-        }
+        // Apply the seq before surfacing the message so the resume cursor only
+        // advances past it once it has actually been handled.
         if (typeof payload.seq === "number") {
           handlers.onSeq?.(payload.seq);
+        }
+        if (typeof payload.resolvedUserMessage === "string") {
+          handlers.onResolvedUserMessage?.(payload.resolvedUserMessage);
         }
         return;
       }
 
       if (payload.type === "event") {
-        if (typeof payload.seq === "number") {
+        const committed = typeof payload.seq === "number";
+        if (committed && typeof payload.seq === "number") {
           handlers.onSeq?.(payload.seq);
         }
         const event = normalizeStreamingPayloadEvent(payload.event);
         if (event) {
-          handlers.onEvent?.(event);
+          handlers.onEvent?.(event, committed);
         }
       }
     };
@@ -1207,83 +1230,96 @@ export default function AILogScreen() {
     return { terminal, errorMessage, resolvedUserMessage };
   };
 
-  const applyAgentEvents = (events: AgentEvent[]) => {
-    if (events.length === 0) {
+  // Updates the assistant bubble with `id` (appending or replacing its text), or
+  // pushes it if it is not present yet.
+  const upsertAssistantText = (
+    current: UIMessage[],
+    id: string,
+    text: string,
+    mode: "append" | "set",
+  ): UIMessage[] => {
+    let found = false;
+    const next = current.map((message) => {
+      if (message.id === id && message.kind === "text" && message.role === "assistant") {
+        found = true;
+        return { ...message, text: mode === "append" ? message.text + text : text };
+      }
+      return message;
+    });
+
+    if (!found) {
+      next.push({ id, kind: "text", role: "assistant", text });
+    }
+
+    return next;
+  };
+
+  // Applies a single streamed agent event. `committed` is true for durable events
+  // (which carry a seq); the seqless partial assistant snapshot replayed on resume
+  // is not committed, so it keeps the streaming bubble open for the real commit.
+  const applyAgentEvent = (event: AgentEvent, committed: boolean) => {
+    if (event.kind === "assistant-delta") {
+      if (!event.text) {
+        return;
+      }
+
+      const openId = openAssistantIdRef.current;
+      if (openId) {
+        setMessages((current) => upsertAssistantText(current, openId, event.text, "append"));
+      } else {
+        const id = createMessageId();
+        openAssistantIdRef.current = id;
+        setMessages((current) => upsertAssistantText(current, id, event.text, "append"));
+      }
       return;
     }
 
-    for (const event of events) {
-      if (event.kind === "approval") {
-        pendingApprovalsRef.current.set(event.toolCallId, event.suggestions);
+    if (event.kind === "assistant") {
+      const text = event.text;
+      if (!text.trim()) {
+        // A committed (but empty) message still ends the streaming bubble.
+        if (committed) {
+          openAssistantIdRef.current = null;
+        }
+        return;
       }
+
+      const openId = openAssistantIdRef.current;
+      const id = openId ?? createMessageId();
+      // A committed snapshot is final and closes the bubble; a partial snapshot
+      // (replayed buffer) stays open so the eventual commit updates it in place.
+      openAssistantIdRef.current = committed ? null : id;
+      setMessages((current) => upsertAssistantText(current, id, text, "set"));
+      return;
     }
 
-    setMessages((current) => {
-      const next = [...current];
-
-      for (const event of events) {
-        if (event.kind === "assistant-delta") {
-          if (!event.text) {
-            continue;
-          }
-
-          const lastMessage = next[next.length - 1];
-          if (lastMessage?.kind === "text" && lastMessage.role === "assistant") {
-            lastMessage.text += event.text;
-          } else {
-            next.push({
-              id: createMessageId(),
-              kind: "text",
-              role: "assistant",
-              text: event.text,
-            });
-          }
-          continue;
-        }
-
-        if (event.kind === "assistant") {
-          if (!event.text.trim()) {
-            continue;
-          }
-
-          const lastMessage = next[next.length - 1];
-          if (lastMessage?.kind === "text" && lastMessage.role === "assistant") {
-            lastMessage.text = event.text;
-          } else {
-            next.push({
-              id: createMessageId(),
-              kind: "text",
-              role: "assistant",
-              text: event.text,
-            });
-          }
-          continue;
-        }
-
-        if (event.kind === "search") {
-          if (event.foods.length === 0) {
-            continue;
-          }
-
-          next.push({
-            id: createMessageId(),
-            kind: "search",
-            query: event.query,
-            foods: event.foods,
-          });
-          continue;
-        }
-
-        next.push({
-          id: createMessageId(),
-          kind: "approval",
-          toolCallId: event.toolCallId,
-          suggestions: event.suggestions,
-        });
+    if (event.kind === "search") {
+      if (event.foods.length === 0) {
+        return;
       }
 
-      return next;
-    });
+      setMessages((current) => [
+        ...current,
+        {
+          id: createMessageId(),
+          kind: "search",
+          query: event.query,
+          foods: event.foods,
+        },
+      ]);
+      return;
+    }
+
+    pendingApprovalsRef.current.set(event.toolCallId, event.suggestions);
+    setMessages((current) => [
+      ...current,
+      {
+        id: createMessageId(),
+        kind: "approval",
+        toolCallId: event.toolCallId,
+        suggestions: event.suggestions,
+      },
+    ]);
   };
 
   // The turn reached a terminal state (completed or hard error): release the lock
@@ -1293,10 +1329,27 @@ export default function AILogScreen() {
     loopRunningRef.current = false;
     streamConsumerActiveRef.current = false;
     abortControllerRef.current = null;
+    resumeRetriesRef.current = 0;
+    if (resumeTimerRef.current) {
+      clearTimeout(resumeTimerRef.current);
+      resumeTimerRef.current = null;
+    }
     setStatus("ready");
     if (errorMessage) {
       showError(new UIError(errorMessage));
     }
+  };
+
+  // Schedules a single resume attempt, replacing any already-pending one. Tracked in
+  // a ref so it can be cancelled when the screen unmounts.
+  const scheduleResume = (delayMs: number) => {
+    if (resumeTimerRef.current) {
+      clearTimeout(resumeTimerRef.current);
+    }
+    resumeTimerRef.current = setTimeout(() => {
+      resumeTimerRef.current = null;
+      void resumeActiveTurn();
+    }, delayMs);
   };
 
   // The stream was cut but the turn is still running server-side. Keep the lock and
@@ -1305,9 +1358,7 @@ export default function AILogScreen() {
   const handleInterruptedTurn = () => {
     abortControllerRef.current = null;
     if (AppState.currentState === "active") {
-      setTimeout(() => {
-        void resumeActiveTurn();
-      }, 800);
+      scheduleResume(interruptResumeDelayMs);
     }
   };
 
@@ -1324,6 +1375,7 @@ export default function AILogScreen() {
           activeTurnRef.current = {
             turnId,
             appliedSeq: previous?.turnId === turnId ? previous.appliedSeq : -1,
+            appendResolvedUserMessage,
           };
         },
         onSeq: (seq) => {
@@ -1332,8 +1384,30 @@ export default function AILogScreen() {
             active.appliedSeq = seq;
           }
         },
-        onEvent: (event) => {
-          applyAgentEvents([event]);
+        // Append the resolved user message (e.g. an audio transcription) the moment
+        // it arrives rather than at stream end, so it survives an interruption. The
+        // resume cursor only advances past it once handled, so it is never lost nor
+        // duplicated. Typed messages pass appendResolvedUserMessage=false because
+        // they were already shown optimistically.
+        onResolvedUserMessage: appendResolvedUserMessage
+          ? (message) => {
+              const trimmed = message.trim();
+              if (!trimmed) {
+                return;
+              }
+              setMessages((current) => [
+                ...current,
+                {
+                  id: createMessageId(),
+                  kind: "text",
+                  role: "user",
+                  text: trimmed,
+                },
+              ]);
+            }
+          : undefined,
+        onEvent: (event, committed) => {
+          applyAgentEvent(event, committed);
         },
       });
     } catch (streamError) {
@@ -1348,19 +1422,6 @@ export default function AILogScreen() {
     }
 
     streamConsumerActiveRef.current = false;
-
-    const resolvedUserMessage = outcome.resolvedUserMessage?.trim();
-    if (appendResolvedUserMessage && resolvedUserMessage) {
-      setMessages((current) => [
-        ...current,
-        {
-          id: createMessageId(),
-          kind: "text",
-          role: "user",
-          text: resolvedUserMessage,
-        },
-      ]);
-    }
 
     if (outcome.terminal === "error") {
       finishTurn(outcome.errorMessage ?? "Unknown error.");
@@ -1415,8 +1476,10 @@ export default function AILogScreen() {
       });
 
       if (response.status === 404) {
-        // The turn finished and aged out of server memory; treat as complete.
-        finishTurn();
+        // The turn finished and aged out of server memory before we could re-attach,
+        // so its remaining output is unrecoverable. Tell the user instead of silently
+        // dropping the reply.
+        finishTurn("The AI response expired before it could be restored. Please try again.");
         return;
       }
 
@@ -1425,14 +1488,19 @@ export default function AILogScreen() {
         return;
       }
 
-      await driveTurnStream(response, false);
+      // Reaching the server counts as progress; reset the failure budget.
+      resumeRetriesRef.current = 0;
+      await driveTurnStream(response, active.appendResolvedUserMessage);
     } catch {
-      // Network failure while resuming; retry shortly if still foregrounded,
-      // otherwise the AppState listener resumes us on the next foreground.
+      // Network failure while resuming. Retry with a bounded budget so a persistent
+      // failure ends the turn instead of wedging the chat in "streaming" forever.
+      resumeRetriesRef.current += 1;
+      if (resumeRetriesRef.current > maxResumeRetries) {
+        finishTurn("AI turn could not be resumed.");
+        return;
+      }
       if (activeTurnRef.current && AppState.currentState === "active") {
-        setTimeout(() => {
-          void resumeActiveTurn();
-        }, 2000);
+        scheduleResume(resumeRetryDelayMs);
       }
     } finally {
       resumingRef.current = false;
@@ -1458,6 +1526,7 @@ export default function AILogScreen() {
 
     loopRunningRef.current = true;
     activeTurnRef.current = null;
+    openAssistantIdRef.current = null;
     setStatus("streaming");
 
     const controller = new AbortController();
@@ -1487,12 +1556,21 @@ export default function AILogScreen() {
       } else if (state === "background") {
         // Cut the in-flight stream deterministically so its read settles; the turn
         // keeps running server-side and we re-attach when we return to foreground.
-        abortControllerRef.current?.abort();
+        // Only abort once we know the turn id: aborting before the initial POST has
+        // returned it would orphan a turn that already started server-side and
+        // surface a spurious network error.
+        if (activeTurnRef.current) {
+          abortControllerRef.current?.abort();
+        }
       }
     });
 
     return () => {
       subscription.remove();
+      if (resumeTimerRef.current) {
+        clearTimeout(resumeTimerRef.current);
+        resumeTimerRef.current = null;
+      }
     };
   }, []);
 
