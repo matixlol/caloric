@@ -1,7 +1,18 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { Platform, PlatformColor, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { useState } from "react";
+import {
+  Platform,
+  PlatformColor,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import type { FoodEntryRecord } from "../src/data/store";
 import { useDataStoreActions, useDataStoreReady, useFoodEntry } from "../src/data/DataProvider";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 import {
@@ -10,6 +21,11 @@ import {
   formatPortionLabel,
   sanitizePortion,
 } from "../src/portion";
+import {
+  isQuickAddEntry,
+  parseCalorieInput,
+  parseOptionalMacroInput,
+} from "../src/quickAdd";
 import { macroColors } from "../src/theme/macroColors";
 
 const iosColor = (name: string, fallback: string) =>
@@ -87,6 +103,140 @@ function buildMacroSectionShares(calories: number[]) {
   return adjustedShares;
 }
 
+function formatCaloriesInput(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "";
+  }
+  return String(Math.round(value));
+}
+
+function formatMacroInput(value: number | undefined): string {
+  if (value === undefined || !Number.isFinite(value)) {
+    return "";
+  }
+  const rounded = Math.round(value * 10) / 10;
+  return Number.isInteger(rounded) ? String(rounded) : rounded.toFixed(1);
+}
+
+type QuickAddEditorProps = {
+  entry: FoodEntryRecord;
+  onUpdateNutrition: (apply: (nutrition: Record<string, number>) => void) => void;
+};
+
+function QuickAddEditor({ entry, onUpdateNutrition }: QuickAddEditorProps) {
+  const [caloriesText, setCaloriesText] = useState(() =>
+    formatCaloriesInput(entry.nutrition?.calories),
+  );
+  const [proteinText, setProteinText] = useState(() =>
+    formatMacroInput(entry.nutrition?.protein),
+  );
+  const [carbsText, setCarbsText] = useState(() => formatMacroInput(entry.nutrition?.carbs));
+  const [fatText, setFatText] = useState(() => formatMacroInput(entry.nutrition?.fat));
+
+  const commitCalories = () => {
+    const parsed = parseCalorieInput(caloriesText);
+    if (parsed === null) {
+      setCaloriesText(formatCaloriesInput(entry.nutrition?.calories));
+      return;
+    }
+    setCaloriesText(String(parsed));
+    onUpdateNutrition((nutrition) => {
+      nutrition.calories = parsed;
+    });
+  };
+
+  const commitMacro = (
+    key: "protein" | "carbs" | "fat",
+    text: string,
+    setText: (value: string) => void,
+  ) => {
+    const parsed = parseOptionalMacroInput(text);
+    if (parsed === null) {
+      setText(formatMacroInput(entry.nutrition?.[key]));
+      return;
+    }
+    if (parsed === undefined) {
+      setText("");
+      onUpdateNutrition((nutrition) => {
+        delete nutrition[key];
+      });
+      return;
+    }
+    setText(formatMacroInput(parsed));
+    onUpdateNutrition((nutrition) => {
+      nutrition[key] = parsed;
+    });
+  };
+
+  return (
+    <View style={styles.quickAddCard}>
+      <View style={styles.quickAddCaloriesField}>
+        <Text style={styles.quickAddFieldLabel}>Calories</Text>
+        <TextInput
+          accessibilityLabel="Calories"
+          value={caloriesText}
+          onChangeText={setCaloriesText}
+          onEndEditing={commitCalories}
+          onBlur={commitCalories}
+          keyboardType="number-pad"
+          placeholder="250"
+          placeholderTextColor={palette.tertiaryLabel}
+          selectTextOnFocus
+          returnKeyType="done"
+          style={styles.quickAddCaloriesInput}
+        />
+      </View>
+      <View style={styles.quickAddMacroRow}>
+        <View style={styles.quickAddMacroField}>
+          <Text style={styles.quickAddFieldLabel}>Protein</Text>
+          <TextInput
+            accessibilityLabel="Protein grams"
+            value={proteinText}
+            onChangeText={setProteinText}
+            onEndEditing={() => commitMacro("protein", proteinText, setProteinText)}
+            onBlur={() => commitMacro("protein", proteinText, setProteinText)}
+            keyboardType="decimal-pad"
+            placeholder="g"
+            placeholderTextColor={palette.tertiaryLabel}
+            selectTextOnFocus
+            style={styles.quickAddMacroInput}
+          />
+        </View>
+        <View style={styles.quickAddMacroField}>
+          <Text style={styles.quickAddFieldLabel}>Carbs</Text>
+          <TextInput
+            accessibilityLabel="Carbs grams"
+            value={carbsText}
+            onChangeText={setCarbsText}
+            onEndEditing={() => commitMacro("carbs", carbsText, setCarbsText)}
+            onBlur={() => commitMacro("carbs", carbsText, setCarbsText)}
+            keyboardType="decimal-pad"
+            placeholder="g"
+            placeholderTextColor={palette.tertiaryLabel}
+            selectTextOnFocus
+            style={styles.quickAddMacroInput}
+          />
+        </View>
+        <View style={styles.quickAddMacroField}>
+          <Text style={styles.quickAddFieldLabel}>Fat</Text>
+          <TextInput
+            accessibilityLabel="Fat grams"
+            value={fatText}
+            onChangeText={setFatText}
+            onEndEditing={() => commitMacro("fat", fatText, setFatText)}
+            onBlur={() => commitMacro("fat", fatText, setFatText)}
+            keyboardType="decimal-pad"
+            placeholder="g"
+            placeholderTextColor={palette.tertiaryLabel}
+            selectTextOnFocus
+            style={styles.quickAddMacroInput}
+          />
+        </View>
+      </View>
+    </View>
+  );
+}
+
 export default function EntryDetailsScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
@@ -124,7 +274,6 @@ export default function EntryDetailsScreen() {
   }
 
   const portion = sanitizePortion(entry.portion);
-  const calories = (entry.nutrition?.calories ?? 0) * portion;
   const protein = (entry.nutrition?.protein ?? 0) * portion;
   const carbs = (entry.nutrition?.carbs ?? 0) * portion;
   const fat = (entry.nutrition?.fat ?? 0) * portion;
@@ -134,7 +283,27 @@ export default function EntryDetailsScreen() {
   const macroSectionShares = buildMacroSectionShares([proteinCalories, carbsCalories, fatCalories]);
   const meal = normalizeMeal(entry.meal);
   const mealLabel = meal ? mealLabelFor(meal) : entry.meal;
-  const meta = [mealLabel, entry.brand, entry.serving].filter(Boolean).join(" • ");
+  const isQuickAdd = isQuickAddEntry(entry);
+  const metaParts = isQuickAdd ? [mealLabel] : [mealLabel, entry.brand, entry.serving];
+  const meta = metaParts.filter(Boolean).join(" • ");
+
+  const handleUpdateNutrition = (apply: (nutrition: Record<string, number>) => void) => {
+    void updateFoodEntry(entry.id, (current) => {
+      const nutrition = { ...current.nutrition } as Record<string, number>;
+      apply(nutrition);
+      return {
+        meal: current.meal,
+        foodName: current.foodName,
+        brand: current.brand,
+        serving: current.serving,
+        portion: current.portion,
+        nutrition,
+        createdAt: current.createdAt,
+        dateKey: current.dateKey,
+        sortIndex: current.sortIndex,
+      };
+    });
+  };
 
   const handleAdjustPortion = (delta: number) => {
     const nextPortion = sanitizePortion(portion + delta);
@@ -181,6 +350,9 @@ export default function EntryDetailsScreen() {
 
         {meta ? <Text style={styles.metaText}>{meta}</Text> : null}
 
+        {isQuickAdd ? (
+          <QuickAddEditor entry={entry} onUpdateNutrition={handleUpdateNutrition} />
+        ) : (
         <View style={styles.portionCard}>
           <Text style={styles.portionLabel}>Portion</Text>
           <Text style={styles.portionValue}>{formatPortionLabel(portion)}</Text>
@@ -210,12 +382,9 @@ export default function EntryDetailsScreen() {
             })}
           </View>
         </View>
+        )}
 
-        <View style={styles.nutritionCard}>
-          <View style={styles.nutritionRow}>
-            <Text style={styles.nutritionKey}>Calories</Text>
-            <Text style={styles.nutritionValue}>{`${formatCalories(calories)} kcal`}</Text>
-          </View>
+        {!isQuickAdd&&<View style={styles.nutritionCard}>
           <View style={styles.macroLegendRow}>
             <View style={styles.macroLegendItem}>
               <View style={[styles.macroLegendDot, { backgroundColor: palette.macroProtein }]} />
@@ -276,7 +445,7 @@ export default function EntryDetailsScreen() {
               </Text>
             </View>
           </View>
-        </View>
+        </View>}
 
         <Pressable
           accessibilityRole="button"
@@ -341,6 +510,52 @@ const styles = StyleSheet.create({
     backgroundColor: palette.card,
     paddingHorizontal: 12,
     paddingVertical: 12,
+  },
+  quickAddCard: {
+    borderRadius: 14,
+    backgroundColor: palette.card,
+    paddingHorizontal: 12,
+    paddingVertical: 12,
+    gap: 10,
+  },
+  quickAddCaloriesField: {
+    gap: 6,
+  },
+  quickAddFieldLabel: {
+    fontSize: 12,
+    lineHeight: 15,
+    fontWeight: "700",
+    color: palette.secondaryLabel,
+  },
+  quickAddCaloriesInput: {
+    minHeight: 48,
+    borderRadius: 10,
+    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
+    color: palette.label,
+    paddingHorizontal: 12,
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: "700",
+    fontVariant: ["tabular-nums"],
+  },
+  quickAddMacroRow: {
+    flexDirection: "row",
+    gap: 8,
+  },
+  quickAddMacroField: {
+    flex: 1,
+    minWidth: 0,
+    gap: 6,
+  },
+  quickAddMacroInput: {
+    minHeight: 42,
+    borderRadius: 10,
+    backgroundColor: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
+    color: palette.label,
+    paddingHorizontal: 10,
+    fontSize: 16,
+    lineHeight: 20,
+    fontVariant: ["tabular-nums"],
   },
   portionLabel: {
     fontSize: 13,
@@ -421,24 +636,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     fontWeight: "600",
     color: palette.secondaryLabel,
-  },
-  nutritionRow: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    gap: 8,
-  },
-  nutritionKey: {
-    fontSize: 15,
-    lineHeight: 20,
-    color: palette.secondaryLabel,
-  },
-  nutritionValue: {
-    fontSize: 16,
-    lineHeight: 20,
-    fontWeight: "600",
-    color: palette.label,
-    fontVariant: ["tabular-nums"],
   },
   macroSectionTrack: {
     minHeight: 102,
