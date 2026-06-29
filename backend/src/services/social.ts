@@ -1,4 +1,5 @@
 import {
+  FriendDailyDayResponseSchema,
   FriendDailySummariesResponseSchema,
   type FoodEntry,
   type SocialOverview,
@@ -24,6 +25,7 @@ const SUMMARY_KEYS = ["calories", "protein", "carbs", "fat"] as const;
 const profilePayloadSchema = z.object({ displayName: z.string().trim().min(1).max(80).optional() }).strict();
 const friendCodePayloadSchema = z.object({ friendCode: z.string().trim().min(1).max(32) }).strict();
 const requestIdPayloadSchema = z.object({ requestId: z.string().min(1) }).strict();
+const DATE_KEY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 
 async function parseJson<T extends z.ZodType>(c: Context, schema: T): Promise<z.infer<T>> {
   return schema.parse(await c.req.json().catch(() => null));
@@ -206,6 +208,23 @@ async function getAcceptedFriendIds(userId: string): Promise<string[]> {
   return rows.map((row) => (row.userAId === userId ? row.userBId : row.userAId));
 }
 
+async function isAcceptedFriend(userId: string, friendUserId: string): Promise<boolean> {
+  const { userAId, userBId } = sortUserPair(userId, friendUserId);
+  const row = (await db
+    .select({ id: friendships.id })
+    .from(friendships)
+    .where(
+      and(
+        eq(friendships.userAId, userAId),
+        eq(friendships.userBId, userBId),
+        eq(friendships.status, FRIENDSHIP_STATUS_ACCEPTED),
+      ),
+    )
+    .limit(1))[0];
+
+  return Boolean(row);
+}
+
 function addFoodEntryToSummary(summary: {
   calories: number;
   protein: number;
@@ -377,7 +396,7 @@ socialRoutes.get(
   authedRoute(async (userId, c) => {
     const dateKey = new URL(c.req.raw.url).searchParams.get("dateKey")?.trim();
 
-    if (!dateKey || !/^\d{4}-\d{2}-\d{2}$/.test(dateKey)) {
+    if (!dateKey || !DATE_KEY_PATTERN.test(dateKey)) {
       return jsonResponse({ error: "Invalid dateKey" }, 400);
     }
 
@@ -443,4 +462,89 @@ socialRoutes.get(
         .sort((a, b) => b.calories - a.calories || a.displayName.localeCompare(b.displayName)),
     }));
   }, "social_daily_summaries_failed"),
+);
+
+socialRoutes.get(
+  "/friends/:friendUserId/day",
+  authedRoute(async (userId, c) => {
+    const friendUserId = c.req.param("friendUserId")?.trim();
+    const dateKey = new URL(c.req.raw.url).searchParams.get("dateKey")?.trim();
+
+    if (!friendUserId) {
+      return jsonResponse({ error: "Invalid friend id" }, 400);
+    }
+
+    if (!dateKey || !DATE_KEY_PATTERN.test(dateKey)) {
+      return jsonResponse({ error: "Invalid dateKey" }, 400);
+    }
+
+    if (!(await isAcceptedFriend(userId, friendUserId))) {
+      return jsonResponse({ error: "Friend not found" }, 404);
+    }
+
+    const [profileRows, entryRows, settingsRows] = await Promise.all([
+      db
+        .select()
+        .from(socialProfiles)
+        .where(eq(socialProfiles.userId, friendUserId))
+        .limit(1),
+      db
+        .select()
+        .from(userFoodEntries)
+        .where(
+          and(
+            eq(userFoodEntries.userId, friendUserId),
+            isNull(userFoodEntries.deletedAt),
+            sql`${userFoodEntries.data}->>'dateKey' = ${dateKey}`,
+          ),
+        ),
+      db
+        .select()
+        .from(userSettings)
+        .where(eq(userSettings.userId, friendUserId))
+        .limit(1),
+    ]);
+
+    const settings = settingsRows[0]?.data ?? null;
+    const summary = {
+      userId: friendUserId,
+      displayName: profileRows[0]?.displayName ?? DEFAULT_DISPLAY_NAME,
+      dateKey,
+      calories: 0,
+      protein: 0,
+      carbs: 0,
+      fat: 0,
+      calorieGoal: settings?.calorieGoal ?? null,
+      lastUpdatedAt: null as number | null,
+    };
+
+    for (const row of entryRows) {
+      addFoodEntryToSummary(summary, row.data);
+      summary.lastUpdatedAt = Math.max(summary.lastUpdatedAt ?? 0, row.updatedAt.getTime());
+    }
+
+    for (const key of SUMMARY_KEYS) {
+      summary[key] = Math.round(summary[key]);
+    }
+
+    return jsonResponse(FriendDailyDayResponseSchema.parse({
+      summary,
+      settings,
+      entries: entryRows
+        .map((row) => ({
+          id: row.id,
+          updatedAt: row.updatedAt.getTime(),
+          ...row.data,
+        }))
+        .sort((a, b) => {
+          const mealOrder = { breakfast: 0, lunch: 1, dinner: 2, snacks: 3 };
+          return (
+            mealOrder[a.meal] - mealOrder[b.meal] ||
+            a.sortIndex - b.sortIndex ||
+            a.createdAt - b.createdAt ||
+            a.id.localeCompare(b.id)
+          );
+        }),
+    }));
+  }, "social_friend_day_failed"),
 );

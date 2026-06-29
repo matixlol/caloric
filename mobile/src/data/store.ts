@@ -1,4 +1,6 @@
 import {
+  FriendDailyDayResponseSchema,
+  type FriendDailyDayResponse,
   DEFAULT_USER_SETTINGS,
   FriendDailySummariesResponseSchema,
   type FriendDailySummary,
@@ -769,6 +771,14 @@ export class LocalDataStore {
     return FriendDailySummariesResponseSchema.parse(
       await this.requestBackend<unknown>(`/social/daily-summaries?dateKey=${encodeURIComponent(dateKey)}`),
     ).summaries;
+  }
+
+  async getFriendDailyDay(friendUserId: string, dateKey: string): Promise<FriendDailyDayResponse> {
+    return FriendDailyDayResponseSchema.parse(
+      await this.requestBackend<unknown>(
+        `/social/friends/${encodeURIComponent(friendUserId)}/day?dateKey=${encodeURIComponent(dateKey)}`,
+      ),
+    );
   }
 
   private getDb(): DB {

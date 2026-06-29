@@ -233,6 +233,7 @@ export function useDataStoreActions() {
       ignoreFriendRequest: (requestId: string) => store.ignoreFriendRequest(requestId),
       removeFriend: (friendUserId: string) => store.removeFriend(friendUserId),
       getFriendDailySummaries: (dateKey: string) => store.getFriendDailySummaries(dateKey),
+      getFriendDailyDay: (friendUserId: string, dateKey: string) => store.getFriendDailyDay(friendUserId, dateKey),
     }),
     [store],
   );
