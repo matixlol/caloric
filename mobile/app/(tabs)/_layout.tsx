@@ -1,56 +1,29 @@
-import { NativeTabs } from "expo-router/unstable-native-tabs";
+import { Stack } from "expo-router";
+import { Platform, PlatformColor } from "react-native";
 import { useAppTheme } from "../../src/theme/useAppTheme";
 
-export default function TabsLayout() {
-  const { isDark, palette } = useAppTheme();
-  const contentStyle = { backgroundColor: palette.background };
+const iosColor = (name: string, fallback: string) =>
+  Platform.OS === "ios" ? PlatformColor(name) : fallback;
+
+export default function HomeLayout() {
+  const { palette } = useAppTheme();
 
   return (
-    <NativeTabs
-      blurEffect={isDark ? "systemChromeMaterialDark" : "systemChromeMaterialLight"}
-      backgroundColor={palette.background}
-      disableTransparentOnScrollEdge
-      minimizeBehavior="never"
-      tintColor={palette.label}
-      iconColor={{
-        default: palette.secondaryLabel,
-        selected: palette.label,
-      }}
-      labelStyle={{
-        default: { color: palette.secondaryLabel },
-        selected: { color: palette.label },
-      }}
-      shadowColor={palette.separator}
-    >
-      <NativeTabs.Trigger
-        name="index"
-        contentStyle={contentStyle}
-        disableTransparentOnScrollEdge
-      >
-        <NativeTabs.Trigger.Icon sf={{ default: "house", selected: "house.fill" }} md="home" />
-        <NativeTabs.Trigger.Label>Today</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger
-        name="ai"
-        contentStyle={contentStyle}
-        disableTransparentOnScrollEdge
-      >
-        <NativeTabs.Trigger.Icon
-          sf={{ default: "sparkles", selected: "sparkles" }}
-          md="auto_awesome"
-        />
-        <NativeTabs.Trigger.Label>AI Log</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-
-      <NativeTabs.Trigger
+    <Stack screenOptions={{ headerShown: false, contentStyle: { backgroundColor: palette.background } }}>
+      <Stack.Screen name="index" />
+      {/* Settings is reached from the gear in the Today header, presented as a
+          sheet (same mechanism as the add-food view) rather than a tab. */}
+      <Stack.Screen
         name="settings"
-        contentStyle={contentStyle}
-        disableTransparentOnScrollEdge
-      >
-        <NativeTabs.Trigger.Icon sf={{ default: "gearshape", selected: "gearshape.fill" }} md="settings" />
-        <NativeTabs.Trigger.Label>Settings</NativeTabs.Trigger.Label>
-      </NativeTabs.Trigger>
-    </NativeTabs>
+        options={{
+          presentation: "pageSheet",
+          sheetGrabberVisible: true,
+          sheetCornerRadius: 18,
+          contentStyle: {
+            backgroundColor: iosColor("systemGroupedBackground", "#F3F4F6"),
+          },
+        }}
+      />
+    </Stack>
   );
 }

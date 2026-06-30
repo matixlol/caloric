@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
+import { AIChatProvider } from "../src/ai/AIChatProvider";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
 import { WidgetSyncCoordinator } from "../src/widget/WidgetSyncCoordinator";
@@ -112,7 +113,9 @@ export default Sentry.wrap(function RootLayout() {
               <ClerkAuthGate>
                 <AutoBackupCoordinator />
                 <WidgetSyncCoordinator />
-                <AppNavigator />
+                <AIChatProvider>
+                  <AppNavigator />
+                </AIChatProvider>
               </ClerkAuthGate>
             </ThemeProvider>
           </QueryClientProvider>

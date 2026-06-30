@@ -27,6 +27,8 @@ import {
   type DayMealEntry,
   type DayViewData,
 } from "../../src/components/DayReadOnlyView";
+import { AIConversationPanel } from "../../src/ai/AIConversationPanel";
+import { COMPOSER_BAR_HEIGHT, FloatingComposer } from "../../src/ai/FloatingComposer";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady, useUserSettings } from "../../src/data/DataProvider";
 import {
   getTodayLocalDateKey,
@@ -581,6 +583,15 @@ export default function HomeScreen() {
             <Text style={styles.largeTitle}>{dayTitle}</Text>
             <Text style={styles.daySubtitle}>{daySubtitle}</Text>
           </View>
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Settings"
+            onPress={() => router.push("/settings")}
+            hitSlop={8}
+            style={styles.settingsButton}
+          >
+            <Ionicons name="settings-outline" size={20} color={palette.secondaryLabel} />
+          </Pressable>
         </View>
 
         {dayOffset !== 0 ? (
@@ -716,7 +727,7 @@ export default function HomeScreen() {
           <ReadOnlyDayView
             view={olderPreview}
             topInset={insets.top}
-            bottomInset={insets.bottom + 24}
+            bottomInset={insets.bottom + 24 + COMPOSER_BAR_HEIGHT}
           />
         </View>
 
@@ -729,7 +740,7 @@ export default function HomeScreen() {
               styles.contentContainer,
               {
                 paddingTop: insets.top,
-                paddingBottom: insets.bottom + 24,
+                paddingBottom: insets.bottom + 24 + COMPOSER_BAR_HEIGHT,
               },
             ]}
           >
@@ -756,10 +767,13 @@ export default function HomeScreen() {
           <ReadOnlyDayView
             view={newerPreview}
             topInset={insets.top}
-            bottomInset={insets.bottom + 24}
+            bottomInset={insets.bottom + 24 + COMPOSER_BAR_HEIGHT}
           />
         </View>
       </PagerView>
+
+      <AIConversationPanel />
+      <FloatingComposer />
     </View>
   );
 }
@@ -803,10 +817,23 @@ const styles = StyleSheet.create({
   },
   dayTitleRow: {
     minHeight: 52,
-    justifyContent: "center",
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
   },
   dayTitleMain: {
+    flex: 1,
     alignItems: "flex-start",
+  },
+  settingsButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: palette.card,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: palette.separator,
   },
   loadingContainer: {
     flex: 1,
