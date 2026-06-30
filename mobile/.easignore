@@ -9,17 +9,15 @@ expo-env.d.ts
 # --- heavy generated output (regenerated on the build server) ---
 node_modules/
 
-# iOS native build artifacts / CocoaPods
-ios/Pods/
-ios/build/
-ios/DerivedData/
-ios/*.xcworkspace/xcuserdata/
-ios/*.xcodeproj/xcuserdata/
+# Native projects are generated output (CNG). Exclude them entirely so EAS runs
+# a clean `expo prebuild` in the cloud instead of building our locally-generated
+# ios/ (which leaks machine-specific paths like NODE_BINARY/hermesc into the
+# build and breaks the JS bundle step).
+/ios
+/android
 
-# Machine-local Xcode env overrides (e.g. NODE_BINARY pointing at a local node
-# install). Must NOT be uploaded or the cloud builder resolves a bogus
-# hermesc path and the JS bundle step fails.
-**/.xcode.env.local
+# Local Expo precompiled-framework cache (large, regenerated on the server).
+packages/precompile/.build/
 
 # Android build artifacts
 android/build/
