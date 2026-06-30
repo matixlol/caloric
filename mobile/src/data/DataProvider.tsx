@@ -174,6 +174,17 @@ export function useDataStoreReady(): boolean {
   return useDataContext().ready;
 }
 
+// The id of the user who was signed in last time the app ran, read synchronously
+// from local SQLite. Lets the auth gate render cached data offline before Clerk's
+// network-dependent `isLoaded` resolves. Null until the store finishes init or if
+// no user has ever signed in on this device.
+export function useLastKnownUserId(): string | null {
+  const { store, ready } = useDataContext();
+  // Re-render when the store revision bumps (e.g. activateUser updates the id).
+  useStoreRevision();
+  return ready ? store.getLastKnownUserId() : null;
+}
+
 export function useFoodEntriesByDate(dateKey: string) {
   const { store } = useDataContext();
   const query = useCallback(() => store.listFoodEntriesByDate(dateKey), [dateKey, store]);

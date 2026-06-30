@@ -115,6 +115,7 @@ export class LocalDataStore {
   private revision = 0;
   private listeners = new Set<() => void>();
   private activeUserId: string | null = null;
+  private lastKnownUserId: string | null = null;
   private tokenProvider: TokenProvider | null = null;
   private syncTimer: ReturnType<typeof setTimeout> | null = null;
   private syncInFlight = false;
@@ -129,6 +130,8 @@ export class LocalDataStore {
   };
 
   getRevision = () => this.revision;
+
+  getLastKnownUserId = () => this.lastKnownUserId;
 
   async initialize(): Promise<void> {
     if (this.db) {
@@ -175,6 +178,15 @@ export class LocalDataStore {
           CREATE INDEX IF NOT EXISTS user_settings_dirty_idx
           ON user_settings (dirty, updated_at)
         `);
+
+        // Cache the last signed-in user synchronously so the auth gate can
+        // render cached data offline before Clerk's network handshake resolves.
+        const currentUserRow = this.db.executeSync(
+          "SELECT value FROM meta WHERE key = ? LIMIT 1",
+          [CURRENT_USER_META_KEY],
+        );
+        const currentUserValue = currentUserRow.rows[0]?.value;
+        this.lastKnownUserId = typeof currentUserValue === "string" ? currentUserValue : null;
       })().finally(() => {
         this.initializePromise = null;
       });
@@ -187,6 +199,7 @@ export class LocalDataStore {
     await this.initialize();
     this.bootstrapPromise = null;
     this.activeUserId = userId;
+    this.lastKnownUserId = userId;
     this.tokenProvider = tokenProvider;
 
     const currentUserId = await this.getMeta(CURRENT_USER_META_KEY);

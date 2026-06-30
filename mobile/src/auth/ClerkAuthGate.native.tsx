@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from "react-native";
+import { useLastKnownUserId } from "../data/DataProvider";
 
 type ClerkAuthGateProps = {
   children: ReactNode;
@@ -19,12 +20,22 @@ const iosColor = (name: string, fallback: string) =>
 
 export function ClerkAuthGate({ children }: ClerkAuthGateProps) {
   const { isLoaded, isSignedIn } = useAuth({ treatPendingAsSignedOut: false });
+  const lastKnownUserId = useLastKnownUserId();
 
   useEffect(() => {
     // Native Clerk views synchronize the session asynchronously with the JS SDK.
   }, [isSignedIn]);
 
+  // Offline-first: until Clerk finishes its network-dependent load, optimistically
+  // render the app for whoever was signed in last time so the cached UI opens
+  // instantly (and works with no connectivity). Clerk corrects this once it loads:
+  // a resolved signed-out state below falls through to the sign-in view.
   if (!isLoaded) {
+    if (lastKnownUserId) {
+      return <>{children}</>;
+    }
+
+    // Genuine cold start with no cached session — wait for Clerk.
     return (
       <View style={styles.loadingContainer}>
         <ActivityIndicator size="large" color={iosColor("systemBlue", "#2563EB")} />
