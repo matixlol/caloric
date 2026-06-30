@@ -14,7 +14,8 @@ import {
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import type { FriendDailySummary } from "@caloric/data-model";
-import DraggableFlatList, { type RenderItemParams } from "react-native-draggable-flatlist";
+import Animated, { useAnimatedRef } from "react-native-reanimated";
+import Sortable from "react-native-sortables";
 import PagerView, { type PagerViewOnPageSelectedEvent } from "react-native-pager-view";
 import Swipeable from "react-native-gesture-handler/ReanimatedSwipeable";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -129,20 +130,16 @@ function MealRow({
   meta,
   calories,
   isLast,
-  isActive,
   onDelete,
   onPress,
-  onDrag,
 }: {
   id: string;
   name: string;
   meta?: string;
   calories: number;
   isLast: boolean;
-  isActive: boolean;
   onDelete: (id: string) => void;
   onPress: (id: string) => void;
-  onDrag: () => void;
 }) {
   return (
     <Swipeable
@@ -167,9 +164,6 @@ function MealRow({
       <Pressable
         accessibilityRole="button"
         accessibilityLabel={`Edit ${name}`}
-        delayLongPress={170}
-        disabled={isActive}
-        onLongPress={onDrag}
         onPress={() => onPress(id)}
         style={[styles.rowPressable, !isLast && styles.rowWithDivider]}
       >
@@ -400,6 +394,7 @@ export default function HomeScreen() {
   }, []);
 
   const pagerRef = useRef<PagerView>(null);
+  const scrollableRef = useAnimatedRef<Animated.ScrollView>();
 
   const handlePagerPageSelected = useCallback(
     (event: PagerViewOnPageSelectedEvent) => {
@@ -628,8 +623,12 @@ export default function HomeScreen() {
     </View>
   );
 
-  const renderItem = ({ item, drag, isActive }: RenderItemParams<MealListItem>) => {
+  const renderItem = ({ item }: { item: MealListItem }) => {
     if (item.type === "header") {
+      // Headers can't be grabbed. The first header is fixed-order so it acts as
+      // a hard top boundary (entries can't be dragged above it); the rest are
+      // non-draggable so they still reorder and entries can cross them into the
+      // next meal (fixed-order headers would block crossing).
       return (
         <View onLayout={(event) => recordItemHeight(item.key, event)} style={styles.mealRow}>
           <View
@@ -641,7 +640,10 @@ export default function HomeScreen() {
             </Text>
           </View>
 
-          <View style={[styles.mealHeaderCard, !item.isFirst && styles.mealHeaderCardSpaced]}>
+          <Sortable.Handle
+            mode={item.isFirst ? "fixed-order" : "non-draggable"}
+            style={[styles.mealHeaderCard, !item.isFirst && styles.mealHeaderCardSpaced]}
+          >
             <View style={styles.mealHeader}>
               <View style={styles.mealCaloriesRow}>
                 <Text style={styles.mealCalories}>{formatCalories(item.calories)}</Text>
@@ -662,7 +664,7 @@ export default function HomeScreen() {
                 <Text style={styles.addIconButtonText}>+</Text>
               </Pressable>
             </View>
-          </View>
+          </Sortable.Handle>
         </View>
       );
     }
@@ -673,7 +675,9 @@ export default function HomeScreen() {
           onLayout={(event) => recordItemHeight(item.key, event)}
           style={[styles.mealBodyCard, styles.mealBodyCardLast]}
         >
-          <Text style={styles.emptyText}>{item.copy}</Text>
+          <Sortable.Handle mode="non-draggable">
+            <Text style={styles.emptyText}>{item.copy}</Text>
+          </Sortable.Handle>
         </View>
       );
     }
@@ -685,17 +689,17 @@ export default function HomeScreen() {
         onLayout={(event) => recordItemHeight(item.key, event)}
         style={[styles.mealBodyCard, isLast && styles.mealBodyCardLast]}
       >
-        <MealRow
-          id={item.entry.id}
-          name={item.entry.name}
-          meta={item.entry.meta}
-          calories={item.entry.calories}
-          isLast={isLast}
-          isActive={isActive}
-          onDelete={handleDeleteEntry}
-          onPress={handleOpenEntry}
-          onDrag={drag}
-        />
+        <Sortable.Handle>
+          <MealRow
+            id={item.entry.id}
+            name={item.entry.name}
+            meta={item.entry.meta}
+            calories={item.entry.calories}
+            isLast={isLast}
+            onDelete={handleDeleteEntry}
+            onPress={handleOpenEntry}
+          />
+        </Sortable.Handle>
       </View>
     );
   };
@@ -717,12 +721,10 @@ export default function HomeScreen() {
         </View>
 
         <View key="current" style={styles.pagerPage}>
-          <DraggableFlatList
-            activationDistance={8}
-            autoscrollSpeed={120}
-            autoscrollThreshold={80}
-            containerStyle={styles.listContainer}
+          <Animated.ScrollView
+            ref={scrollableRef}
             contentInsetAdjustmentBehavior="automatic"
+            style={styles.listContainer}
             contentContainerStyle={[
               styles.contentContainer,
               {
@@ -730,15 +732,24 @@ export default function HomeScreen() {
                 paddingBottom: insets.bottom + 24,
               },
             ]}
-            data={dragItems}
-            keyExtractor={(item) => item.key}
-            ListHeaderComponent={listHeader}
-            onDragEnd={({ data }) => {
-              setDragItems(data);
-              persistDraggedOrder(data);
-            }}
-            renderItem={renderItem}
-          />
+          >
+            {listHeader}
+
+            <Sortable.Grid
+              customHandle
+              columns={1}
+              rowGap={0}
+              data={dragItems}
+              keyExtractor={(item) => item.key}
+              renderItem={renderItem}
+              dragActivationDelay={170}
+              scrollableRef={scrollableRef}
+              onDragEnd={({ data }) => {
+                setDragItems(data);
+                persistDraggedOrder(data);
+              }}
+            />
+          </Animated.ScrollView>
         </View>
 
         <View key="newer" style={styles.pagerPage}>

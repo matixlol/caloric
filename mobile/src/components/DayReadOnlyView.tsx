@@ -83,7 +83,12 @@ function buildLogsByMeal(entries: FoodEntryWithId[]): Record<MealKey, DayMealEnt
     snacks: [],
   };
 
-  entries.forEach((entry) => {
+  // Honor the persisted per-meal sortIndex. The store reads entries back in
+  // createdAt order, so without this a drag-reorder is written but never
+  // reflected on the next revision and rows appear to snap back.
+  const ordered = [...entries].sort((a, b) => a.sortIndex - b.sortIndex);
+
+  ordered.forEach((entry) => {
     const meal = normalizeMeal(entry.meal);
     if (!meal) return;
 
