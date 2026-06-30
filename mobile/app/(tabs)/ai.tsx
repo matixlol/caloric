@@ -1227,7 +1227,7 @@ export default function AILogScreen() {
       }
     }
 
-    return { terminal, errorMessage, resolvedUserMessage };
+    return { terminal, errorMessage };
   };
 
   // Updates the assistant bubble with `id` (appending or replacing its text), or
