@@ -207,10 +207,6 @@ function reportUnknownError(code: string, error: unknown): Response {
   );
 }
 
-function encodeSseChunk(payload: Record<string, unknown>): string {
-  return `data: ${JSON.stringify(payload)}\n\n`;
-}
-
 function parseInteger(value: string | null, fallback: number): number {
   if (value === null || value.trim() === "") {
     return fallback;
@@ -1430,8 +1426,35 @@ function interleaveFoodResults(sources: FoodSearchResult[][], limit: number): Fo
   return merged;
 }
 
-export async function searchUnifiedFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
-  return Sentry.startSpan(
+function abortError(): Error {
+  const error = new Error("Aborted");
+  error.name = "AbortError";
+  return error;
+}
+
+async function rejectOnAbort<T>(promise: Promise<T>, signal?: AbortSignal): Promise<T> {
+  if (!signal) {
+    return promise;
+  }
+
+  if (signal.aborted) {
+    throw abortError();
+  }
+
+  return Promise.race([
+    promise,
+    new Promise<never>((_, reject) => {
+      signal.addEventListener("abort", () => reject(abortError()), { once: true });
+    }),
+  ]);
+}
+
+export async function searchUnifiedFoods(
+  query: string,
+  limit: number,
+  signal?: AbortSignal,
+): Promise<FoodSearchResult[]> {
+  return rejectOnAbort(Sentry.startSpan(
     {
       name: "food_search.unified",
       op: "food.search",
@@ -1506,7 +1529,7 @@ export async function searchUnifiedFoods(query: string, limit: number): Promise<
       span.setAttribute("app.search.open_food_facts_count", openFoodFactsFoods.length);
       return mergedResults;
     },
-  );
+  ));
 }
 
 async function searchFoodsBySource(

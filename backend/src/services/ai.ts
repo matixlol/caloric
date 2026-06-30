@@ -9,7 +9,7 @@ import { z } from "zod";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "../ai-log-context";
 import { config } from "../config";
 import { isObjectRecord, jsonResponse, requireAuthenticatedUser } from "../http";
-import { createAiMessageId, createAiSessionId } from "../id";
+import { createAiMessageId, createAiSessionId, createAiTurnId } from "../id";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
 import {
@@ -21,6 +21,13 @@ import {
   type Meal,
   type ResolvedApprovalSuggestion,
 } from "./ai-store";
+import {
+  createTurnSseResponse,
+  getResumableTurn,
+  isResumableTurnPresent,
+  startResumableTurn,
+  type AgentEvent,
+} from "./ai-turns";
 import { searchUnifiedFoods, type SearchResultFood } from "./search";
 
 const MealSchema = z.enum(mealValues);
@@ -29,28 +36,6 @@ type SessionToolCall = {
   toolName: keyof typeof aiSdkTools;
   input: unknown;
 };
-
-type AgentEvent =
-  | {
-      kind: "assistant";
-      text: string;
-    }
-  | {
-      kind: "assistant-delta";
-      text: string;
-    }
-  | {
-      kind: "search";
-      query: string;
-      foods: SearchResultFood[];
-    }
-  | {
-      kind: "approval";
-      toolCallId: string;
-      suggestions: ResolvedApprovalSuggestion[];
-    };
-
-type AgentStatus = "ready";
 
 const SearchFoodsToolArgsSchema = z.object({
   query: z.string().trim().min(2),
@@ -123,12 +108,6 @@ const systemPrompt = [
   "If the user sends audio, understand it directly from the audio input instead of talking about transcription.",
   "When you answer, keep the wording concise and practical.",
 ].join(" ");
-
-const sseHeaders = {
-  "Content-Type": "text/event-stream; charset=utf-8",
-  "Cache-Control": "no-cache, no-transform",
-  Connection: "keep-alive",
-} as const;
 
 const googleAiStudio = createGoogleGenerativeAI({
   apiKey: config.googleAiStudioApiKey,
@@ -262,13 +241,6 @@ async function fetchWithGeminiSentryLogging(input: RequestInfo | URL, init?: Req
   }
 }
 
-type SseWriter = {
-  writeEvent: (event: AgentEvent) => void;
-  writeResolvedUserMessage: (message: string) => void;
-  writeStatus: (status: AgentStatus) => void;
-  writeError: (code: string, message: string) => void;
-};
-
 function stringifyUnknownError(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
     return error.message;
@@ -319,79 +291,6 @@ function reportUnknownError(code: string, error: unknown): Response {
     },
     502,
   );
-}
-
-function encodeSseChunk(payload: Record<string, unknown>): string {
-  return `data: ${JSON.stringify(payload)}\n\n`;
-}
-
-function createSseResponse(run: (writer: SseWriter) => Promise<void>, errorCode: string): Response {
-  const encoder = new TextEncoder();
-
-  const stream = new ReadableStream<Uint8Array>({
-    async start(controller) {
-      let closed = false;
-
-      const writeChunk = (chunk: string) => {
-        if (closed) {
-          return;
-        }
-
-        controller.enqueue(encoder.encode(chunk));
-      };
-
-      const writer: SseWriter = {
-        writeEvent(event) {
-          writeChunk(
-            encodeSseChunk({
-              type: "event",
-              event,
-            }),
-          );
-        },
-        writeResolvedUserMessage(message) {
-          writeChunk(
-            encodeSseChunk({
-              type: "resolved-user-message",
-              resolvedUserMessage: message,
-            }),
-          );
-        },
-        writeStatus(status) {
-          writeChunk(
-            encodeSseChunk({
-              type: "status",
-              status,
-            }),
-          );
-        },
-        writeError(code, message) {
-          writeChunk(
-            encodeSseChunk({
-              type: "error",
-              error: code,
-              message,
-            }),
-          );
-        },
-      };
-
-      try {
-        await run(writer);
-      } catch (error) {
-        captureUnknownError(errorCode, error);
-        writer.writeError(errorCode, "Unknown error.");
-      } finally {
-        if (!closed) {
-          writeChunk("data: [DONE]\n\n");
-          closed = true;
-          controller.close();
-        }
-      }
-    },
-  });
-
-  return new Response(stream, { headers: sseHeaders });
 }
 
 function createMessageId(): string {
@@ -500,6 +399,7 @@ async function requestAiSdkTurn(
 async function runToolCall(
   session: AiSessionState,
   toolCall: SessionToolCall,
+  signal?: AbortSignal,
 ): Promise<{ stopAfterTool: boolean; output: unknown; events: AgentEvent[] }> {
   if (toolCall.toolName === "searchFoods") {
     const parsedArgs = SearchFoodsToolArgsSchema.safeParse(toolCall.input);
@@ -514,7 +414,7 @@ async function runToolCall(
     }
 
     const limit = parsedArgs.data.limit ?? 6;
-    const topFoods = await searchUnifiedFoods(parsedArgs.data.query, limit);
+    const topFoods = await searchUnifiedFoods(parsedArgs.data.query, limit, signal);
     const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
       const resultId = `r${session.searchResultCounter}`;
       session.searchResultCounter += 1;
@@ -634,11 +534,8 @@ async function runAssistantLoop(
     onEvent?: (event: AgentEvent) => void;
     signal?: AbortSignal;
   },
-): Promise<{ status: AgentStatus; events: AgentEvent[] }> {
-  const events: AgentEvent[] = [];
-
+): Promise<void> {
   const emit = (event: AgentEvent) => {
-    events.push(event);
     options?.onEvent?.(event);
   };
 
@@ -667,14 +564,11 @@ async function runAssistantLoop(
     session.conversation.push(...turn.responseMessages);
 
     if (turn.toolCalls.length === 0) {
-      return {
-        status: "ready",
-        events,
-      };
+      return;
     }
 
     for (const toolCall of turn.toolCalls) {
-      const toolResult = await runToolCall(session, toolCall);
+      const toolResult = await runToolCall(session, toolCall, options?.signal);
       for (const event of toolResult.events) {
         emit(event);
       }
@@ -682,18 +576,10 @@ async function runAssistantLoop(
       session.conversation.push(createToolResultMessage(toolCall, toolResult.output ?? null));
 
       if (toolResult.stopAfterTool) {
-        return {
-          status: "ready",
-          events,
-        };
+        return;
       }
     }
   }
-
-  return {
-    status: "ready",
-    events,
-  };
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -928,19 +814,70 @@ async function handleUserMessageAction(
   session.pendingApprovals = {};
   await saveAiSession(session);
 
-  return createSseResponse(async (writer) => {
-    if (message) {
-      writer.writeResolvedUserMessage(message);
+  // Run the turn detached from this request so it keeps going (and stays
+  // resumable) even if the client disconnects, e.g. when the app is backgrounded.
+  const record = startResumableTurn({
+    turnId: createAiTurnId(),
+    userId: session.userId,
+    signal: request.signal,
+    onError: (error) => {
+      captureUnknownError("ai_turn_failed", error);
+      return { code: "ai_turn_failed", message: "Unknown error." };
+    },
+    run: async (emit, signal) => {
+      if (message) {
+        emit.resolvedUserMessage(message);
+      }
+
+      await runAssistantLoop(session, {
+        onEvent: emit.event,
+        signal,
+      });
+
+      await saveAiSession(session);
+    },
+  });
+
+  Sentry.getActiveSpan()?.setAttributes({
+    "app.ai.turn_id": record.id,
+  });
+
+  return createTurnSseResponse(record, -1, request.signal);
+}
+
+export async function handleAiTurnStreamRequest(request: Request, turnIdParam: string | undefined): Promise<Response> {
+  const auth = await requireAuthenticatedUser(request);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const turnId = turnIdParam?.trim() ?? "";
+  if (!turnId) {
+    return jsonResponse({ error: "turnId is required" }, 400);
+  }
+
+  const record = getResumableTurn(turnId, auth.userId);
+  if (!record) {
+    if (isResumableTurnPresent(turnId)) {
+      // The turn exists but belongs to a different user.
+      return jsonResponse({ error: "turn_unauthorized" }, 404);
     }
 
-    const loopResult = await runAssistantLoop(session, {
-      onEvent: writer.writeEvent,
-      signal: request.signal,
-    });
+    // The turn finished and aged out of memory, or never existed.
+    return jsonResponse({ error: "turn_not_found" }, 404);
+  }
 
-    await saveAiSession(session);
-    writer.writeStatus(loopResult.status);
-  }, "ai_turn_failed");
+  const cursorParam = new URL(request.url).searchParams.get("cursor");
+  const parsedCursor = cursorParam === null ? Number.NaN : Number(cursorParam);
+  const cursor = Number.isFinite(parsedCursor) ? parsedCursor : -1;
+
+  Sentry.getActiveSpan()?.setAttributes({
+    "app.ai.endpoint": "/ai/turn/:turnId/stream",
+    "app.ai.turn_id": turnId,
+    "app.ai.resume_cursor": cursor,
+  });
+
+  return createTurnSseResponse(record, cursor, request.signal);
 }
 
 async function handleApprovalAction(request: Request, session: AiSessionState, action: ApprovalAction): Promise<Response> {
