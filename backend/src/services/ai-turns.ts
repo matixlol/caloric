@@ -212,6 +212,10 @@ export function getResumableTurn(turnId: string, userId: string): TurnRecord | n
   return record;
 }
 
+export function isResumableTurnPresent(turnId: string): boolean {
+  return turns.has(turnId);
+}
+
 // Replays durable events after `cursor`, then either streams live events until the
 // turn finishes or, if the turn is already finished, sends the terminal message.
 // Returns an unsubscribe function.

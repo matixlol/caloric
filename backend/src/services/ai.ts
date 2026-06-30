@@ -24,6 +24,7 @@ import {
 import {
   createTurnSseResponse,
   getResumableTurn,
+  isResumableTurnPresent,
   startResumableTurn,
   type AgentEvent,
 } from "./ai-turns";
@@ -857,7 +858,12 @@ export async function handleAiTurnStreamRequest(request: Request, turnIdParam: s
 
   const record = getResumableTurn(turnId, auth.userId);
   if (!record) {
-    // The turn finished and aged out of memory, or never existed for this user.
+    if (isResumableTurnPresent(turnId)) {
+      // The turn exists but belongs to a different user.
+      return jsonResponse({ error: "turn_unauthorized" }, 404);
+    }
+
+    // The turn finished and aged out of memory, or never existed.
     return jsonResponse({ error: "turn_not_found" }, 404);
   }
 

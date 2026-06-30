@@ -1482,10 +1482,12 @@ export default function AILogScreen() {
       });
 
       if (response.status === 404) {
-        // The turn finished and aged out of server memory before we could re-attach,
-        // so its remaining output is unrecoverable. Tell the user instead of silently
-        // dropping the reply.
-        finishTurn("The AI response expired before it could be restored. Please try again.");
+        const payload = (await response.json().catch(() => null)) as { error?: unknown } | null;
+        const message =
+          payload?.error === "turn_unauthorized"
+            ? "This AI turn is not available."
+            : "The AI response expired before it could be restored. Please try again.";
+        finishTurn(message);
         return;
       }
 
