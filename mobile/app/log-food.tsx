@@ -85,9 +85,31 @@ const QUICK_ADD_REVERSED_CALORIE_VALUES = [...QUICK_ADD_CALORIE_VALUES].reverse(
 
 const PORTION_DRAG_STEP_PX = 25;
 const PORTION_FIRST_STEP_OFFSET_PX = 54;
+// Whole-number rows render 2x taller in the rail, so they cost 2x the drag to
+// cross — keeps the highlight tracking the rail you actually see.
+const PORTION_WHOLE_STEP_WEIGHT = 2;
 // 1/4 through 3 portions in quarter steps: [0.25, 0.5, ..., 3]
 const PORTION_SLIDER_VALUES = Array.from({ length: 12 }, (_, index) => (index + 1) * 0.25);
 const PORTION_REVERSED_SLIDER_VALUES = [...PORTION_SLIDER_VALUES].reverse();
+// Cumulative drag distance (after the dead zone) at which each value is centered,
+// weighting whole-number steps so they match their taller rows.
+const PORTION_SLIDER_DRAG_OFFSETS = PORTION_SLIDER_VALUES.reduce<number[]>(
+  (offsets, value, index) => {
+    if (index === 0) {
+      offsets.push(0);
+      return offsets;
+    }
+
+    const prevWeight = Number.isInteger(PORTION_SLIDER_VALUES[index - 1])
+      ? PORTION_WHOLE_STEP_WEIGHT
+      : 1;
+    const currentWeight = Number.isInteger(value) ? PORTION_WHOLE_STEP_WEIGHT : 1;
+    const stepPx = (PORTION_DRAG_STEP_PX * (prevWeight + currentWeight)) / 2;
+    offsets.push(offsets[index - 1] + stepPx);
+    return offsets;
+  },
+  [],
+);
 
 function createEmptyFoodsBySource(): SearchFoodsBySource {
   return {
@@ -132,13 +154,17 @@ function getPortionFromDragDelta(deltaY: number): number | null {
     return null;
   }
 
-  const deltaSteps = Math.round(sliderDrag / PORTION_DRAG_STEP_PX);
-  const nextIndex = Math.min(
-    PORTION_SLIDER_VALUES.length - 1,
-    Math.max(0, deltaSteps),
-  );
+  let nearestIndex = 0;
+  let nearestDistance = Infinity;
+  for (let index = 0; index < PORTION_SLIDER_DRAG_OFFSETS.length; index += 1) {
+    const distance = Math.abs(sliderDrag - PORTION_SLIDER_DRAG_OFFSETS[index]);
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index;
+    }
+  }
 
-  return PORTION_SLIDER_VALUES[nextIndex];
+  return PORTION_SLIDER_VALUES[nearestIndex];
 }
 
 function logQuickAddGesture(event: string, details?: Record<string, unknown>) {
