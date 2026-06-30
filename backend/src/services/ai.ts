@@ -398,6 +398,7 @@ async function requestAiSdkTurn(
 async function runToolCall(
   session: AiSessionState,
   toolCall: SessionToolCall,
+  signal?: AbortSignal,
 ): Promise<{ stopAfterTool: boolean; output: unknown; events: AgentEvent[] }> {
   if (toolCall.toolName === "searchFoods") {
     const parsedArgs = SearchFoodsToolArgsSchema.safeParse(toolCall.input);
@@ -412,7 +413,7 @@ async function runToolCall(
     }
 
     const limit = parsedArgs.data.limit ?? 6;
-    const topFoods = await searchUnifiedFoods(parsedArgs.data.query, limit);
+    const topFoods = await searchUnifiedFoods(parsedArgs.data.query, limit, signal);
     const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
       const resultId = `r${session.searchResultCounter}`;
       session.searchResultCounter += 1;
@@ -566,7 +567,7 @@ async function runAssistantLoop(
     }
 
     for (const toolCall of turn.toolCalls) {
-      const toolResult = await runToolCall(session, toolCall);
+      const toolResult = await runToolCall(session, toolCall, options?.signal);
       for (const event of toolResult.events) {
         emit(event);
       }
