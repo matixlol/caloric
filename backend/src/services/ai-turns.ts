@@ -129,6 +129,7 @@ function finalizeTurn(
 export function startResumableTurn(params: {
   turnId: string;
   userId: string;
+  signal?: AbortSignal;
   run: (emit: TurnEmitter, signal: AbortSignal) => Promise<void>;
   onError: (error: unknown) => { code: string; message: string };
 }): TurnRecord {
@@ -177,15 +178,19 @@ export function startResumableTurn(params: {
     },
   };
 
-  const abortController = new AbortController();
+  const deadlineController = new AbortController();
   const deadlineTimer = setTimeout(() => {
-    abortController.abort(new Error("AI turn timed out."));
+    deadlineController.abort(new Error("AI turn timed out."));
   }, turnDeadlineMs);
   deadlineTimer.unref?.();
 
+  const signal = params.signal
+    ? AbortSignal.any([deadlineController.signal, params.signal])
+    : deadlineController.signal;
+
   void (async () => {
     try {
-      await params.run(emitter, abortController.signal);
+      await params.run(emitter, signal);
       finalizeTurn(record, "done");
     } catch (error) {
       const { code, message } = params.onError(error);

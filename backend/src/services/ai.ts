@@ -817,6 +817,7 @@ async function handleUserMessageAction(
   const record = startResumableTurn({
     turnId: createAiTurnId(),
     userId: session.userId,
+    signal: request.signal,
     onError: (error) => {
       captureUnknownError("ai_turn_failed", error);
       return { code: "ai_turn_failed", message: "Unknown error." };
