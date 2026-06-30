@@ -16,6 +16,11 @@ ios/DerivedData/
 ios/*.xcworkspace/xcuserdata/
 ios/*.xcodeproj/xcuserdata/
 
+# Machine-local Xcode env overrides (e.g. NODE_BINARY pointing at a local node
+# install). Must NOT be uploaded or the cloud builder resolves a bogus
+# hermesc path and the JS bundle step fails.
+**/.xcode.env.local
+
 # Android build artifacts
 android/build/
 android/app/build/
