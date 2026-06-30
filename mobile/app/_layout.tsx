@@ -6,7 +6,6 @@ import { Stack } from "expo-router";
 import { useMemo } from "react";
 import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
-import "../global.css";
 import { AIChatProvider } from "../src/ai/AIChatProvider";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
