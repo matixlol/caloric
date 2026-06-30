@@ -816,9 +816,6 @@ export default function AILogScreen() {
   const resumeRetriesRef = useRef(0);
   // Pending scheduled resume, tracked so it can be cancelled on unmount.
   const resumeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  // Always points at the latest resume function so the AppState listener (set up
-  // once) never calls a stale closure.
-  const resumeRef = useRef<() => void>(() => {});
   const recordingStartedAtRef = useRef<number | null>(null);
   const recordingLockedRef = useRef(false);
   const recordingCancelledRef = useRef(false);
@@ -1552,15 +1549,10 @@ export default function AILogScreen() {
     }
   };
 
-  // Keep the AppState listener pointed at the latest resume closure.
-  resumeRef.current = () => {
-    void resumeActiveTurn();
-  };
-
   useEffect(() => {
     const subscription = AppState.addEventListener("change", (state) => {
       if (state === "active") {
-        resumeRef.current();
+        void resumeActiveTurn();
       } else if (state === "background") {
         // Cut the in-flight stream deterministically so its read settles; the turn
         // keeps running server-side and we re-attach when we return to foreground.
