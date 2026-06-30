@@ -17,7 +17,10 @@
     "production": {
       "channel": "production",
       "environment": "production",
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "SENTRY_ALLOW_FAILURE": "true"
+      }
     },
     "development-simulator": {
       "developmentClient": true,
