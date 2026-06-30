@@ -27,6 +27,13 @@ import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../sr
 import type { FoodEntryRecord } from "../src/data/store";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
 import { formatPortionLabel, sanitizePortion } from "../src/portion";
+import {
+  QUICK_ADD_FOOD_NAME,
+  QUICK_ADD_MANUAL_SERVING,
+  isQuickAddEntry,
+  parseCalorieInput,
+  parseOptionalMacroInput,
+} from "../src/quickAdd";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -51,7 +58,6 @@ const palette = {
 const SEARCH_DEBOUNCE_MS = 350;
 const SEARCH_MAX_ITEMS = 20;
 const RECENT_ITEMS_LIMIT = 50;
-const QUICK_ADD_FOOD_NAME = "Quick add";
 const QUICK_ADD_DEFAULT_CALORIES = 250;
 const QUICK_ADD_MIN_CALORIES = 50;
 const QUICK_ADD_SLIDER_MAX_CALORIES = 600;
@@ -59,8 +65,6 @@ const QUICK_ADD_CALORIE_STEP = 50;
 const QUICK_ADD_DRAG_STEP_PX = 25;
 const QUICK_ADD_FIRST_STEP_OFFSET_PX = 54;
 const QUICK_ADD_LONG_PRESS_MS = 260;
-const QUICK_ADD_MAX_TYPED_CALORIES = 10000;
-const QUICK_ADD_MAX_TYPED_MACRO_GRAMS = 1000;
 type SearchProviderFilter = "all" | SearchFoodSource;
 
 const PROVIDER_FILTERS: { key: SearchProviderFilter; label: string }[] = [
@@ -97,42 +101,6 @@ function getErrorMessage(error: unknown): string {
 
 function formatCalories(value: number): string {
   return Math.round(value).toLocaleString();
-}
-
-function parseCalorieInput(value: string): number | null {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) {
-    return null;
-  }
-
-  const parsedValue = Number(trimmedValue);
-  if (
-    !Number.isFinite(parsedValue) ||
-    parsedValue <= 0 ||
-    parsedValue > QUICK_ADD_MAX_TYPED_CALORIES
-  ) {
-    return null;
-  }
-
-  return Math.round(parsedValue);
-}
-
-function parseOptionalMacroInput(value: string): number | null | undefined {
-  const trimmedValue = value.trim();
-  if (!trimmedValue) {
-    return undefined;
-  }
-
-  const parsedValue = Number(trimmedValue);
-  if (
-    !Number.isFinite(parsedValue) ||
-    parsedValue < 0 ||
-    parsedValue > QUICK_ADD_MAX_TYPED_MACRO_GRAMS
-  ) {
-    return null;
-  }
-
-  return Math.round(parsedValue * 10) / 10;
 }
 
 function getCaloriesFromDragDelta(deltaY: number): number | null {
@@ -188,10 +156,6 @@ function normalizeSearchText(value: string | undefined): string {
     .toLowerCase()
     .trim()
     .replace(/\s+/g, " ");
-}
-
-function isQuickAddEntry(entry: FoodEntryRecord): boolean {
-  return entry.foodName === QUICK_ADD_FOOD_NAME;
 }
 
 function buildRecentEntryKey(entry: FoodEntryRecord): string {
@@ -392,7 +356,7 @@ export default function LogFoodScreen() {
       void createFoodEntry({
         meal: selectedMeal,
         foodName: QUICK_ADD_FOOD_NAME,
-        serving: "Manual entry",
+        serving: QUICK_ADD_MANUAL_SERVING,
         portion: 1,
         nutrition,
         createdAt: Date.now(),
