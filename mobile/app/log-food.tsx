@@ -4,6 +4,8 @@ import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Keyboard,
+  type NativeScrollEvent,
+  type NativeSyntheticEvent,
   Platform,
   PlatformColor,
   Pressable,
@@ -17,10 +19,17 @@ import { Gesture, GestureDetector } from "react-native-gesture-handler";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { normalizeLocalDateKey } from "../src/date";
 import {
+  type DisplayedFoodSource,
+  DISPLAYED_SOURCE_ORDER,
   type SearchFood,
   type SearchFoodsBySource,
-  type SearchFoodSource,
-  searchFoods,
+  SEARCH_MAX_PAGES,
+  SEARCH_PAGE_SIZE,
+  appendUniqueFoods,
+  createEmptyFoodsBySource,
+  fetchFoodSourcePage,
+  interleaveFoods,
+  queueAnmatQuery,
 } from "../src/food-search";
 import { MacroBadges } from "../src/components/MacroBadges";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
@@ -56,8 +65,10 @@ const palette = {
 };
 
 const SEARCH_DEBOUNCE_MS = 350;
-const SEARCH_MAX_ITEMS = 20;
 const RECENT_ITEMS_LIMIT = 50;
+// Trigger loading the next page once the user scrolls within this many points
+// of the bottom of the list.
+const INFINITE_SCROLL_THRESHOLD_PX = 360;
 const QUICK_ADD_DEFAULT_CALORIES = 250;
 const QUICK_ADD_MIN_CALORIES = 50;
 const QUICK_ADD_SLIDER_MAX_CALORIES = 600;
@@ -65,14 +76,20 @@ const QUICK_ADD_CALORIE_STEP = 50;
 const QUICK_ADD_DRAG_STEP_PX = 25;
 const QUICK_ADD_FIRST_STEP_OFFSET_PX = 54;
 const QUICK_ADD_LONG_PRESS_MS = 260;
-type SearchProviderFilter = "all" | SearchFoodSource;
+type SearchProviderFilter = "all" | DisplayedFoodSource;
 
 const PROVIDER_FILTERS: { key: SearchProviderFilter; label: string }[] = [
   { key: "all", label: "All" },
   { key: "mfp", label: "MFP" },
   { key: "openfoodfacts", label: "OFF" },
-  { key: "anmat", label: "ANMAT" },
 ];
+
+function createEmptyHasMore(): Record<DisplayedFoodSource, boolean> {
+  return {
+    openfoodfacts: false,
+    mfp: false,
+  };
+}
 
 const QUICK_ADD_CALORIE_VALUES = Array.from(
   {
@@ -110,14 +127,6 @@ const PORTION_SLIDER_DRAG_OFFSETS = PORTION_SLIDER_VALUES.reduce<number[]>(
   },
   [],
 );
-
-function createEmptyFoodsBySource(): SearchFoodsBySource {
-  return {
-    anmat: [],
-    openfoodfacts: [],
-    mfp: [],
-  };
-}
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.name === "AbortError") {
@@ -314,9 +323,15 @@ export default function LogFoodScreen() {
   const { createFoodEntry } = useDataStoreActions();
   const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
-  const [foods, setFoods] = useState<SearchFood[]>([]);
   const [foodsBySource, setFoodsBySource] = useState<SearchFoodsBySource>(createEmptyFoodsBySource);
+  // Append-only interleaved list for the "All" tab. Each loaded page is
+  // interleaved once into a block and appended, so earlier results never shift.
+  const [mergedFoods, setMergedFoods] = useState<SearchFood[]>([]);
+  const [hasMoreBySource, setHasMoreBySource] =
+    useState<Record<DisplayedFoodSource, boolean>>(createEmptyHasMore);
+  const [loadedPage, setLoadedPage] = useState(0);
   const [isSearching, setIsSearching] = useState(false);
+  const [isLoadingMore, setIsLoadingMore] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedFoodId, setSelectedFoodId] = useState<string | null>(null);
   const [selectedRecentEntryId, setSelectedRecentEntryId] = useState<string | null>(null);
@@ -343,6 +358,23 @@ export default function LogFoodScreen() {
   const portionLongPressStartDeltaYRef = useRef(0);
   const canAddToLogRef = useRef(false);
   const addToLogRef = useRef<(portionOverride?: number) => void>(() => {});
+  // Aborts the in-flight search (and any in-flight load-more) when the query
+  // changes or the screen unmounts.
+  const searchControllerRef = useRef<AbortController | null>(null);
+  // Guards against re-entrant load-more requests fired by rapid scroll events.
+  const loadingMoreRef = useRef(false);
+  // canonicalKeys already placed in mergedFoods, so appended pages skip
+  // duplicates without re-deriving (and reordering) the whole list.
+  const mergedKeysRef = useRef<Set<string>>(new Set());
+  // Snapshot of the state load-more needs, refreshed every render to avoid
+  // stale closures inside the scroll handler.
+  const loadMoreStateRef = useRef({
+    hasMoreBySource,
+    loadedPage,
+    activeProviderFilter,
+    activeQuery: "",
+    isSearching,
+  });
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
   const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
@@ -359,6 +391,16 @@ export default function LogFoodScreen() {
     parsedQuickAddProtein !== null &&
     parsedQuickAddCarbs !== null &&
     parsedQuickAddFat !== null;
+  const activeQuery = debouncedQuery.trim();
+  const foods = mergedFoods;
+
+  loadMoreStateRef.current = {
+    hasMoreBySource,
+    loadedPage,
+    activeProviderFilter,
+    activeQuery,
+    isSearching,
+  };
 
   isQuickAddExpandedRef.current = isQuickAddExpanded;
   isQuickAddPickerActiveRef.current = isQuickAddPickerActive;
@@ -702,6 +744,75 @@ export default function LogFoodScreen() {
     };
   }, [query]);
 
+  // Interleaves one page's per-source results into a single block and appends it
+  // to the "All" list. The shared mergedKeysRef drops anything already shown, so
+  // the merge only ever grows at the end — earlier rows never move.
+  const appendMergedBlock = useCallback(
+    (pageFoodsBySource: Partial<Record<DisplayedFoodSource, SearchFood[]>>) => {
+      const block = interleaveFoods(
+        DISPLAYED_SOURCE_ORDER.map((source) => pageFoodsBySource[source] ?? []),
+        mergedKeysRef.current,
+      );
+      if (block.length > 0) {
+        setMergedFoods((prev) => [...prev, ...block]);
+      }
+    },
+    [],
+  );
+
+  // Fetches `page` from each of `sources` in parallel, accumulates per-source
+  // results progressively (for the per-source tabs), then appends one
+  // interleaved block to the "All" list. Returns whether any source succeeded.
+  const loadPage = useCallback(
+    async (
+      searchQuery: string,
+      page: number,
+      sources: DisplayedFoodSource[],
+      controller: AbortController,
+    ): Promise<{ succeeded: boolean; firstError: unknown }> => {
+      const settled = await Promise.allSettled(
+        sources.map(async (source) => {
+          const { foods: pageFoods, hasMore } = await fetchFoodSourcePage(searchQuery, source, page, {
+            signal: controller.signal,
+            pageSize: SEARCH_PAGE_SIZE,
+          });
+          if (controller.signal.aborted) {
+            return { source, foods: [] as SearchFood[], hasMore: false, applied: false };
+          }
+          setFoodsBySource((prev) => ({
+            ...prev,
+            [source]: appendUniqueFoods(prev[source], pageFoods),
+          }));
+          setHasMoreBySource((prev) => ({ ...prev, [source]: hasMore }));
+          return { source, foods: pageFoods, hasMore, applied: true };
+        }),
+      );
+
+      if (controller.signal.aborted) {
+        return { succeeded: false, firstError: undefined };
+      }
+
+      const pageFoodsBySource: Partial<Record<DisplayedFoodSource, SearchFood[]>> = {};
+      let appliedCount = 0;
+      for (const result of settled) {
+        if (result.status === "fulfilled" && result.value.applied) {
+          pageFoodsBySource[result.value.source] = result.value.foods;
+          appliedCount += 1;
+        }
+      }
+
+      if (appliedCount > 0) {
+        appendMergedBlock(pageFoodsBySource);
+      }
+
+      const firstRejected = settled.find(
+        (result): result is PromiseRejectedResult => result.status === "rejected",
+      );
+      return { succeeded: appliedCount > 0, firstError: firstRejected?.reason };
+    },
+    [appendMergedBlock],
+  );
+
   useEffect(() => {
     if (!isDataReady) {
       return;
@@ -710,52 +821,132 @@ export default function LogFoodScreen() {
     const normalizedQuery = debouncedQuery.trim();
 
     if (normalizedQuery.length < 2) {
-      setFoods([]);
+      searchControllerRef.current?.abort();
+      searchControllerRef.current = null;
+      loadingMoreRef.current = false;
+      mergedKeysRef.current = new Set();
       setFoodsBySource(createEmptyFoodsBySource());
+      setMergedFoods([]);
+      setHasMoreBySource(createEmptyHasMore());
+      setLoadedPage(0);
       setSelectedFoodId(null);
       setSearchError(null);
       setIsSearching(false);
+      setIsLoadingMore(false);
       return;
     }
 
     const controller = new AbortController();
+    searchControllerRef.current = controller;
+    loadingMoreRef.current = false;
+    mergedKeysRef.current = new Set();
+
     void (async () => {
-      setFoods([]);
       setFoodsBySource(createEmptyFoodsBySource());
+      setMergedFoods([]);
+      setHasMoreBySource(createEmptyHasMore());
+      setLoadedPage(0);
       setSelectedFoodId(null);
       setIsSearching(true);
+      setIsLoadingMore(false);
       setSearchError(null);
 
-      try {
-        const nextFoods = await searchFoods(normalizedQuery, {
-          signal: controller.signal,
-          maxItems: SEARCH_MAX_ITEMS,
-          onProgress: (progress) => {
-            setFoods(progress.foods);
-            setFoodsBySource(progress.foodsBySource);
-          },
-        });
-        setFoods(nextFoods);
-      } catch (error) {
-        if (error instanceof Error && error.name === "AbortError") {
-          return;
-        }
+      // Keep recording the query so ANMAT results can be seeded from it later.
+      void queueAnmatQuery(normalizedQuery, {
+        signal: controller.signal,
+        pageSize: SEARCH_PAGE_SIZE,
+      }).catch(() => {});
 
-        setFoods([]);
-        setFoodsBySource(createEmptyFoodsBySource());
-        setSelectedFoodId(null);
-        setSearchError(getErrorMessage(error));
-      } finally {
-        if (!controller.signal.aborted) {
-          setIsSearching(false);
-        }
+      const { succeeded, firstError } = await loadPage(
+        normalizedQuery,
+        1,
+        DISPLAYED_SOURCE_ORDER,
+        controller,
+      );
+
+      if (controller.signal.aborted) {
+        return;
       }
+
+      if (succeeded) {
+        setLoadedPage(1);
+      } else {
+        setSearchError(getErrorMessage(firstError));
+      }
+
+      setIsSearching(false);
     })();
 
     return () => {
       controller.abort();
     };
-  }, [debouncedQuery, isDataReady]);
+  }, [debouncedQuery, isDataReady, loadPage]);
+
+  const loadMoreFoods = useCallback(() => {
+    if (loadingMoreRef.current) {
+      return;
+    }
+
+    const {
+      hasMoreBySource: currentHasMore,
+      loadedPage: currentPage,
+      activeProviderFilter: filter,
+      activeQuery: searchQuery,
+      isSearching: searching,
+    } = loadMoreStateRef.current;
+
+    if (searching || searchQuery.length < 2 || currentPage < 1 || currentPage >= SEARCH_MAX_PAGES) {
+      return;
+    }
+
+    // Only page in if the currently visible tab can still grow.
+    const viewHasMore =
+      filter === "all"
+        ? DISPLAYED_SOURCE_ORDER.some((source) => currentHasMore[source])
+        : currentHasMore[filter];
+    if (!viewHasMore) {
+      return;
+    }
+
+    // Advance every source that still has more, so the "All" list stays
+    // complete regardless of which tab triggered the load.
+    const sources = DISPLAYED_SOURCE_ORDER.filter((source) => currentHasMore[source]);
+    if (sources.length === 0) {
+      return;
+    }
+
+    const controller = searchControllerRef.current;
+    if (!controller || controller.signal.aborted) {
+      return;
+    }
+
+    const nextPage = currentPage + 1;
+    loadingMoreRef.current = true;
+    setIsLoadingMore(true);
+
+    void (async () => {
+      const { succeeded } = await loadPage(searchQuery, nextPage, sources, controller);
+      if (succeeded && !controller.signal.aborted) {
+        setLoadedPage(nextPage);
+      }
+
+      loadingMoreRef.current = false;
+      if (!controller.signal.aborted) {
+        setIsLoadingMore(false);
+      }
+    })();
+  }, [loadPage]);
+
+  const handleSearchScroll = useCallback(
+    (event: NativeSyntheticEvent<NativeScrollEvent>) => {
+      const { layoutMeasurement, contentOffset, contentSize } = event.nativeEvent;
+      const distanceToBottom = contentSize.height - (contentOffset.y + layoutMeasurement.height);
+      if (distanceToBottom <= INFINITE_SCROLL_THRESHOLD_PX) {
+        loadMoreFoods();
+      }
+    },
+    [loadMoreFoods],
+  );
 
   if (!isDataReady) {
     return (
@@ -774,17 +965,12 @@ export default function LogFoodScreen() {
   const recentSearchMatches = canShowResults
     ? getRecentSearchMatches(recentEntries, trimmedQuery)
     : recentEntries;
-  const allFetchedFoods = [
-    ...foodsBySource.anmat,
-    ...foodsBySource.openfoodfacts,
-    ...foodsBySource.mfp,
-  ];
+  const allFetchedFoods = [...foodsBySource.openfoodfacts, ...foodsBySource.mfp];
   const selectedFood =
     canShowResults ? allFetchedFoods.find((food) => food.id === selectedFoodId) || null : null;
   const selectedRecentEntry =
     recentSearchMatches.find((entry) => entry.id === selectedRecentEntryId) || null;
-  const providerCounts: Record<SearchFoodSource, number> = {
-    anmat: foodsBySource.anmat.length,
+  const providerCounts: Record<DisplayedFoodSource, number> = {
     openfoodfacts: foodsBySource.openfoodfacts.length,
     mfp: foodsBySource.mfp.length,
   };
@@ -842,6 +1028,8 @@ export default function LogFoodScreen() {
     <View style={styles.screen}>
       <ScrollView
         contentInsetAdjustmentBehavior="automatic"
+        onScroll={handleSearchScroll}
+        scrollEventThrottle={16}
         contentContainerStyle={[
           styles.contentContainer,
           {
@@ -951,7 +1139,7 @@ export default function LogFoodScreen() {
         ) : null}
         {canShowResults && isSearching ? (
           <Text style={styles.helperText}>
-            Searching MFP, OpenFoodFacts, and ANMAT. Results appear as each source returns.
+            Searching MFP and OpenFoodFacts. Results appear as each source returns.
           </Text>
         ) : null}
         {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
@@ -984,6 +1172,9 @@ export default function LogFoodScreen() {
               );
             })}
           </View>
+        ) : null}
+        {canShowResults && isLoadingMore ? (
+          <Text style={styles.helperText}>Loading more…</Text>
         ) : null}
       </ScrollView>
 
