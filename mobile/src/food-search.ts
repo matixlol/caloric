@@ -1,10 +1,20 @@
-const SEARCH_MAX_ITEMS_DEFAULT = 20;
-const SEARCH_SOURCE_ORDER: SearchFoodSource[] = ["anmat", "openfoodfacts", "mfp"];
+// One page worth of results requested from each source.
+export const SEARCH_PAGE_SIZE = 20;
+// How many pages of infinite scroll we allow per source.
+export const SEARCH_MAX_PAGES = 10;
+
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
   "https://backend.caloric.mati.lol";
 
 export type SearchFoodSource = "mfp" | "anmat" | "openfoodfacts";
+
+// Sources whose results are shown to the user. ANMAT is intentionally excluded:
+// we still record ANMAT search queries (see queueAnmatQuery) so they can seed
+// ANMAT results later, but we don't display ANMAT foods yet.
+export type DisplayedFoodSource = "openfoodfacts" | "mfp";
+
+export const DISPLAYED_SOURCE_ORDER: DisplayedFoodSource[] = ["openfoodfacts", "mfp"];
 
 export type SearchFood = {
   id: string;
@@ -29,22 +39,22 @@ export type SearchFood = {
 type SearchResponsePayload = {
   query?: unknown;
   provider?: unknown;
+  page?: unknown;
+  hasMore?: unknown;
   foods?: SearchFood[] | null;
   error?: unknown;
   message?: unknown;
 };
 
-export type SearchFoodsBySource = Record<SearchFoodSource, SearchFood[]>;
+export type SearchFoodsBySource = Record<DisplayedFoodSource, SearchFood[]>;
 
-export type SearchFoodsProgress = {
+export type FoodSourcePage = {
   foods: SearchFood[];
-  foodsBySource: SearchFoodsBySource;
-  completedSource: SearchFoodSource;
+  hasMore: boolean;
 };
 
-function createEmptyFoodsBySource(): SearchFoodsBySource {
+export function createEmptyFoodsBySource(): SearchFoodsBySource {
   return {
-    anmat: [],
     openfoodfacts: [],
     mfp: [],
   };
@@ -183,22 +193,27 @@ function getPayloadErrorMessage(payload: SearchResponsePayload | null): string |
   return undefined;
 }
 
-async function fetchBaseSearch(
+// Fetches a single page of results for one displayed source. `page` is
+// 1-indexed; `hasMore` reflects whether the source likely has another page.
+export async function fetchFoodSourcePage(
   query: string,
-  signal: AbortSignal | undefined,
-  maxItems: number,
-  source?: SearchFoodSource,
-): Promise<SearchFood[]> {
+  source: DisplayedFoodSource,
+  page: number,
+  options: {
+    signal?: AbortSignal;
+    pageSize?: number;
+  } = {},
+): Promise<FoodSourcePage> {
+  const pageSize = options.pageSize ?? SEARCH_PAGE_SIZE;
   const url = new URL("/search", `${BACKEND_BASE_URL}/`);
   url.searchParams.set("query", query);
-  url.searchParams.set("maxItems", String(maxItems));
-  if (source) {
-    url.searchParams.set("provider", source);
-  }
+  url.searchParams.set("maxItems", String(pageSize));
+  url.searchParams.set("page", String(page));
+  url.searchParams.set("provider", source);
 
   const response = await fetch(url.toString(), {
     method: "GET",
-    signal,
+    signal: options.signal,
   });
 
   let payload: SearchResponsePayload | null = null;
@@ -212,17 +227,26 @@ async function fetchBaseSearch(
     throw new Error(getPayloadErrorMessage(payload) ?? `Search request failed with ${response.status}`);
   }
 
-  return mapFoods(payload);
+  return {
+    foods: mapFoods(payload),
+    hasMore: payload?.hasMore === true,
+  };
 }
 
-async function queueLiveAnmatSearch(
+// Records the search query so ANMAT results can be seeded from it later. We
+// intentionally do not surface the (empty) response — this only enqueues the
+// query on the backend.
+export async function queueAnmatQuery(
   query: string,
-  signal: AbortSignal | undefined,
-  maxItems: number,
+  options: {
+    signal?: AbortSignal;
+    pageSize?: number;
+  } = {},
 ): Promise<void> {
+  const maxItems = options.pageSize ?? SEARCH_PAGE_SIZE;
   const response = await fetch(new URL("/search/anmat-live", `${BACKEND_BASE_URL}/`).toString(), {
     method: "POST",
-    signal,
+    signal: options.signal,
     headers: {
       "Content-Type": "application/json",
     },
@@ -244,21 +268,24 @@ async function queueLiveAnmatSearch(
   }
 }
 
-function interleaveFoodResults(foodsBySource: SearchFoodsBySource, maxItems: number): SearchFood[] {
+// Round-robins one page's per-source results into a single block, deduping on
+// canonicalKey. Pass a shared `seen` set to also drop items already merged from
+// earlier pages — this keeps the combined "All" list append-only and stable
+// (a new page only ever adds items to the end, never reorders earlier ones).
+export function interleaveFoods(sources: SearchFood[][], seen: Set<string> = new Set()): SearchFood[] {
   const merged: SearchFood[] = [];
-  const seen = new Set<string>();
-  const cursors = new Map<SearchFoodSource, number>(SEARCH_SOURCE_ORDER.map((source) => [source, 0]));
+  const cursors = sources.map(() => 0);
 
-  while (merged.length < maxItems) {
-    let advanced = false;
+  let advanced = true;
+  while (advanced) {
+    advanced = false;
 
-    for (const source of SEARCH_SOURCE_ORDER) {
-      const foods = foodsBySource[source];
-      let cursor = cursors.get(source) ?? 0;
+    for (let index = 0; index < sources.length; index += 1) {
+      const foods = sources[index];
 
-      while (cursor < foods.length) {
-        const candidate = foods[cursor];
-        cursor += 1;
+      while (cursors[index] < foods.length) {
+        const candidate = foods[cursors[index]];
+        cursors[index] += 1;
 
         if (seen.has(candidate.canonicalKey)) {
           continue;
@@ -269,75 +296,25 @@ function interleaveFoodResults(foodsBySource: SearchFoodsBySource, maxItems: num
         advanced = true;
         break;
       }
-
-      cursors.set(source, cursor);
-
-      if (merged.length >= maxItems) {
-        break;
-      }
-    }
-
-    if (!advanced) {
-      break;
     }
   }
 
   return merged;
 }
 
-function snapshotFoodsBySource(foodsBySource: SearchFoodsBySource): SearchFoodsBySource {
-  return {
-    anmat: foodsBySource.anmat,
-    openfoodfacts: foodsBySource.openfoodfacts,
-    mfp: foodsBySource.mfp,
-  };
-}
+// Appends new rows to an accumulated source list, dropping duplicates by
+// canonicalKey (deeper pages can overlap the first page's over-fetch).
+export function appendUniqueFoods(existing: SearchFood[], incoming: SearchFood[]): SearchFood[] {
+  const seen = new Set(existing.map((food) => food.canonicalKey));
+  const merged = [...existing];
 
-function createAbortError(): Error {
-  const error = new Error("The operation was aborted.");
-  error.name = "AbortError";
-  return error;
-}
-
-export async function searchFoods(
-  query: string,
-  options: {
-    signal?: AbortSignal;
-    maxItems?: number;
-    onProgress?: (progress: SearchFoodsProgress) => void;
-  } = {},
-): Promise<SearchFood[]> {
-  const maxItems = options.maxItems ?? SEARCH_MAX_ITEMS_DEFAULT;
-  const foodsBySource = createEmptyFoodsBySource();
-  const tasks: Promise<SearchFood[]>[] = [
-    fetchBaseSearch(query, options.signal, maxItems, "anmat"),
-    fetchBaseSearch(query, options.signal, maxItems, "openfoodfacts"),
-    fetchBaseSearch(query, options.signal, maxItems, "mfp"),
-  ];
-  const queueTask = queueLiveAnmatSearch(query, options.signal, maxItems);
-
-  const results = await Promise.allSettled(
-    SEARCH_SOURCE_ORDER.map(async (source, index) => {
-      const foods = await tasks[index];
-      foodsBySource[source] = foods;
-      options.onProgress?.({
-        completedSource: source,
-        foodsBySource: snapshotFoodsBySource(foodsBySource),
-        foods: interleaveFoodResults(foodsBySource, maxItems),
-      });
-      return foods;
-    }),
-  );
-  await Promise.allSettled([queueTask]);
-
-  if (options.signal?.aborted) {
-    throw createAbortError();
+  for (const food of incoming) {
+    if (seen.has(food.canonicalKey)) {
+      continue;
+    }
+    seen.add(food.canonicalKey);
+    merged.push(food);
   }
 
-  if (!results.some((result) => result.status === "fulfilled")) {
-    const rejected = results.find((result) => result.status === "rejected");
-    throw rejected?.reason ?? new Error("Unable to search foods right now.");
-  }
-
-  return interleaveFoodResults(foodsBySource, maxItems);
+  return merged;
 }

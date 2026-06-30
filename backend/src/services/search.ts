@@ -139,6 +139,14 @@ export type SearchResultFood = FoodSearchResult & {
   resultId: string;
 };
 
+type SourceSearchResult = {
+  foods: FoodSearchResult[];
+  hasMore: boolean;
+};
+
+// Cap how deep infinite scroll can page into a single source.
+const SEARCH_MAX_PAGES = 10;
+
 function buildMfpSearchTraceId(): string {
   return createMfpTraceId();
 }
@@ -1245,7 +1253,7 @@ async function searchLocalAnmatFoods(query: string, limit: number): Promise<Food
   );
 }
 
-async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+async function searchMfpFoods(query: string, limit: number, page = 1): Promise<SourceSearchResult> {
   const startedAt = Date.now();
 
   return Sentry.startSpan(
@@ -1255,39 +1263,54 @@ async function searchMfpFoods(query: string, limit: number): Promise<FoodSearchR
       attributes: {
         "app.search.query_length": query.trim().length,
         "app.search.limit": limit,
+        "app.search.page": page,
       },
     },
     async (span) => {
       logInfo("mfp.search_foods.start", {
         query,
         limit,
+        page,
       });
+
+      const pageSize = limit;
+      const offset = (page - 1) * pageSize;
+      // The first page over-fetches to backfill rows dropped for missing
+      // nutrition; deeper pages fetch exactly one window so offsets stay aligned
+      // and pages don't overlap.
+      const maxItems = page === 1 ? Math.min(20, Math.max(pageSize * 2, 8)) : pageSize;
 
       const searchPayload = await executeSearch({
         query,
-        offset: 0,
-        maxItems: Math.min(20, Math.max(limit * 2, 8)),
+        offset,
+        maxItems,
         countryCode: "US",
         resourceType: "foods",
         includeDetails: true,
       });
 
+      const rawItemCount = countSearchItems(searchPayload.search.data) ?? 0;
       const mappedResults = mapMfpSearchResults(searchPayload).slice(0, limit);
+      const hasMore = rawItemCount >= maxItems;
 
       span.setAttribute("http.response.status_code", searchPayload.search.status);
       span.setAttribute("app.search.detail_count", searchPayload.detailCount);
       span.setAttribute("app.search.result_count", mappedResults.length);
+      span.setAttribute("app.search.has_more", hasMore);
 
       logInfo("mfp.search_foods.complete", {
         query,
         limit,
+        page,
         searchStatus: searchPayload.search.status,
         detailCount: searchPayload.detailCount,
         mappedCount: mappedResults.length,
+        rawItemCount,
+        hasMore,
         durationMs: Date.now() - startedAt,
       });
 
-      return mappedResults;
+      return { foods: mappedResults, hasMore };
     },
   );
 }
@@ -1346,7 +1369,18 @@ async function executeOpenFoodFactsSearch(params: {
   };
 }
 
-async function searchOpenFoodFactsFoods(query: string, limit: number): Promise<FoodSearchResult[]> {
+function computeOpenFoodFactsHasMore(data: unknown, page: number, pageSize: number): boolean {
+  const body = asRecord(data);
+  const total = asNumber(body?.count);
+  if (total !== undefined) {
+    return page * pageSize < total;
+  }
+
+  const products = Array.isArray(body?.products) ? body.products : [];
+  return products.length >= pageSize;
+}
+
+async function searchOpenFoodFactsFoods(query: string, limit: number, page = 1): Promise<SourceSearchResult> {
   const startedAt = Date.now();
 
   return Sentry.startSpan(
@@ -1356,36 +1390,46 @@ async function searchOpenFoodFactsFoods(query: string, limit: number): Promise<F
       attributes: {
         "app.search.query_length": query.trim().length,
         "app.search.limit": limit,
+        "app.search.page": page,
       },
     },
     async (span) => {
       logInfo("open_food_facts.search_foods.start", {
         query,
         limit,
+        page,
         cacheTtlDays: config.searchCacheTtlDays,
         baseUrl: OPEN_FOOD_FACTS_BASE_URL,
       });
 
+      // Keep page_size constant across pages for the paginating client (limit 20)
+      // while still over-fetching on the first page for small unified limits.
+      const pageSize = page === 1 ? Math.min(20, Math.max(limit * 2, 8)) : limit;
+
       const payload = await executeOpenFoodFactsSearch({
         query,
-        page: 1,
-        pageSize: Math.min(20, Math.max(limit * 2, 8)),
+        page,
+        pageSize,
       });
 
       const mappedResults = mapOpenFoodFactsSearchResults(payload).slice(0, limit);
+      const hasMore = computeOpenFoodFactsHasMore(payload.data, page, pageSize);
 
       span.setAttribute("http.response.status_code", payload.status);
       span.setAttribute("app.search.result_count", mappedResults.length);
+      span.setAttribute("app.search.has_more", hasMore);
 
       logInfo("open_food_facts.search_foods.complete", {
         query,
         limit,
+        page,
         status: payload.status,
         mappedCount: mappedResults.length,
+        hasMore,
         durationMs: Date.now() - startedAt,
       });
 
-      return mappedResults;
+      return { foods: mappedResults, hasMore };
     },
   );
 }
@@ -1464,28 +1508,20 @@ export async function searchUnifiedFoods(
       },
     },
     async (span) => {
-      const [anmatResult, mfpResult, openFoodFactsResult] = await Promise.allSettled([
-        searchLocalAnmatFoods(query, limit),
+      // ANMAT is intentionally excluded from displayed results for now; we still
+      // record ANMAT search queries elsewhere to seed results later.
+      const [mfpResult, openFoodFactsResult] = await Promise.allSettled([
         searchMfpFoods(query, limit),
         searchOpenFoodFactsFoods(query, limit),
       ]);
 
-      const anmatFoods = anmatResult.status === "fulfilled" ? anmatResult.value : [];
-      const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value : [];
-      const openFoodFactsFoods = openFoodFactsResult.status === "fulfilled" ? openFoodFactsResult.value : [];
-
-      if (anmatResult.status === "rejected") {
-        logWarn("food_search.anmat_failed", anmatResult.reason, {
-          query,
-          limit,
-        });
-      }
+      const mfpFoods = mfpResult.status === "fulfilled" ? mfpResult.value.foods : [];
+      const openFoodFactsFoods = openFoodFactsResult.status === "fulfilled" ? openFoodFactsResult.value.foods : [];
 
       if (mfpResult.status === "rejected") {
         logWarn("food_search.mfp_failed", mfpResult.reason, {
           query,
           limit,
-          anmatCount: anmatFoods.length,
         });
       }
 
@@ -1493,20 +1529,18 @@ export async function searchUnifiedFoods(
         logWarn("food_search.open_food_facts_failed", openFoodFactsResult.reason, {
           query,
           limit,
-          anmatCount: anmatFoods.length,
           mfpCount: mfpFoods.length,
         });
       }
 
-      if (anmatResult.status === "rejected" && mfpResult.status === "rejected" && openFoodFactsResult.status === "rejected") {
-        throw anmatResult.reason;
+      if (mfpResult.status === "rejected" && openFoodFactsResult.status === "rejected") {
+        throw mfpResult.reason;
       }
 
       if (mfpResult.status === "rejected" || openFoodFactsResult.status === "rejected") {
         logInfo("food_search.complete_with_partial_sources", {
           query,
           limit,
-          anmatCount: anmatFoods.length,
           mfpCount: mfpFoods.length,
           openFoodFactsCount: openFoodFactsFoods.length,
           mfpFailed: mfpResult.status === "rejected",
@@ -1517,14 +1551,12 @@ export async function searchUnifiedFoods(
           query,
           limit,
           mfpCount: mfpFoods.length,
-          anmatCount: anmatFoods.length,
           openFoodFactsCount: openFoodFactsFoods.length,
         });
       }
 
-      const mergedResults = interleaveFoodResults([anmatFoods, openFoodFactsFoods, mfpFoods], limit);
+      const mergedResults = interleaveFoodResults([openFoodFactsFoods, mfpFoods], limit);
       span.setAttribute("app.search.result_count", mergedResults.length);
-      span.setAttribute("app.search.anmat_count", anmatFoods.length);
       span.setAttribute("app.search.mfp_count", mfpFoods.length);
       span.setAttribute("app.search.open_food_facts_count", openFoodFactsFoods.length);
       return mergedResults;
@@ -1536,16 +1568,19 @@ async function searchFoodsBySource(
   source: SearchSource,
   query: string,
   limit: number,
-): Promise<FoodSearchResult[]> {
+  page: number,
+): Promise<SourceSearchResult> {
   if (source === "anmat") {
-    return searchLocalAnmatFoods(query, limit);
+    // ANMAT is still queryable per-source (kept for seeding results later) but
+    // is not paginated.
+    return { foods: await searchLocalAnmatFoods(query, limit), hasMore: false };
   }
 
   if (source === "openfoodfacts") {
-    return searchOpenFoodFactsFoods(query, limit);
+    return searchOpenFoodFactsFoods(query, limit, page);
   }
 
-  return searchMfpFoods(query, limit);
+  return searchMfpFoods(query, limit, page);
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -1566,15 +1601,27 @@ export async function handleSearchRequest(request: Request): Promise<Response> {
   }
 
   const maxItems = Math.max(1, Math.min(100, parseInteger(url.searchParams.get("maxItems"), 20)));
+  const page = Math.max(1, Math.min(SEARCH_MAX_PAGES, parseInteger(url.searchParams.get("page"), 1)));
   const provider = parseSearchSource(url.searchParams.get("provider"));
 
   try {
-    const foods = provider
-      ? await searchFoodsBySource(provider, query, maxItems)
-      : await searchUnifiedFoods(query, maxItems);
+    if (provider) {
+      const { foods, hasMore } = await searchFoodsBySource(provider, query, maxItems, page);
+      return json({
+        query,
+        provider,
+        page,
+        hasMore,
+        foods,
+      });
+    }
+
+    const foods = await searchUnifiedFoods(query, maxItems);
     return json({
       query,
-      provider,
+      provider: null,
+      page: 1,
+      hasMore: false,
       foods,
     });
   } catch (error) {
