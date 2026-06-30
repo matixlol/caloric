@@ -62,6 +62,18 @@ module.exports = {
     plugins: [
       "expo-router",
       [
+        "expo-build-properties",
+        {
+          // Clerk's transitive Google pods (AppCheckCore/GoogleUtilities/
+          // RecaptchaInterop) can't link as static libraries without modules.
+          // Static frameworks resolves it; verified the app + widget build
+          // and run under this linkage.
+          ios: {
+            useFrameworks: "static",
+          },
+        },
+      ],
+      [
         "expo-splash-screen",
         {
           image: "./assets/images/splash-icon.png",
