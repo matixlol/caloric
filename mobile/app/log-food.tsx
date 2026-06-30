@@ -26,7 +26,7 @@ import { MacroBadges } from "../src/components/MacroBadges";
 import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
 import type { FoodEntryRecord } from "../src/data/store";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
-import { formatPortionLabel, sanitizePortion } from "../src/portion";
+import { formatMixedQuarter, formatPortionLabel, sanitizePortion } from "../src/portion";
 import {
   QUICK_ADD_FOOD_NAME,
   QUICK_ADD_MANUAL_SERVING,
@@ -83,6 +83,12 @@ const QUICK_ADD_CALORIE_VALUES = Array.from(
 );
 const QUICK_ADD_REVERSED_CALORIE_VALUES = [...QUICK_ADD_CALORIE_VALUES].reverse();
 
+const PORTION_DRAG_STEP_PX = 25;
+const PORTION_FIRST_STEP_OFFSET_PX = 54;
+// 1/4 through 3 portions in quarter steps: [0.25, 0.5, ..., 3]
+const PORTION_SLIDER_VALUES = Array.from({ length: 12 }, (_, index) => (index + 1) * 0.25);
+const PORTION_REVERSED_SLIDER_VALUES = [...PORTION_SLIDER_VALUES].reverse();
+
 function createEmptyFoodsBySource(): SearchFoodsBySource {
   return {
     anmat: [],
@@ -117,6 +123,22 @@ function getCaloriesFromDragDelta(deltaY: number): number | null {
   );
 
   return QUICK_ADD_CALORIE_VALUES[nextIndex];
+}
+
+function getPortionFromDragDelta(deltaY: number): number | null {
+  const upwardDrag = -deltaY;
+  const sliderDrag = upwardDrag - PORTION_FIRST_STEP_OFFSET_PX;
+  if (sliderDrag < 0) {
+    return null;
+  }
+
+  const deltaSteps = Math.round(sliderDrag / PORTION_DRAG_STEP_PX);
+  const nextIndex = Math.min(
+    PORTION_SLIDER_VALUES.length - 1,
+    Math.max(0, deltaSteps),
+  );
+
+  return PORTION_SLIDER_VALUES[nextIndex];
 }
 
 function logQuickAddGesture(event: string, details?: Record<string, unknown>) {
@@ -282,12 +304,19 @@ export default function LogFoodScreen() {
   const [quickAddCarbsText, setQuickAddCarbsText] = useState("");
   const [quickAddFatText, setQuickAddFatText] = useState("");
   const [quickAddSliderCalories, setQuickAddSliderCalories] = useState<number | null>(null);
+  const [isPortionPickerActive, setIsPortionPickerActive] = useState(false);
+  const [portionSliderValue, setPortionSliderValue] = useState<number | null>(null);
   const [keyboardBottomOffset, setKeyboardBottomOffset] = useState(0);
   const isQuickAddExpandedRef = useRef(false);
   const isQuickAddPickerActiveRef = useRef(false);
   const isQuickAddLongPressingRef = useRef(false);
   const quickAddDragCaloriesRef = useRef<number | null>(null);
   const quickAddLongPressStartDeltaYRef = useRef(0);
+  const isPortionLongPressingRef = useRef(false);
+  const portionDragValueRef = useRef<number | null>(null);
+  const portionLongPressStartDeltaYRef = useRef(0);
+  const canAddToLogRef = useRef(false);
+  const addToLogRef = useRef<(portionOverride?: number) => void>(() => {});
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
   const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
@@ -528,6 +557,98 @@ export default function LogFoodScreen() {
     toggleQuickAddPanel,
   ]);
 
+  const applyPortionDragValue = useCallback((deltaY: number) => {
+    const nextPortion = getPortionFromDragDelta(deltaY);
+    if (portionDragValueRef.current === nextPortion) {
+      return;
+    }
+
+    portionDragValueRef.current = nextPortion;
+    setPortionSliderValue(nextPortion);
+    if (nextPortion !== null) {
+      triggerSelectionHaptic();
+    }
+  }, []);
+
+  const startPortionPicker = useCallback((startTranslationY: number) => {
+    if (!canAddToLogRef.current) {
+      return;
+    }
+
+    isPortionLongPressingRef.current = true;
+    portionLongPressStartDeltaYRef.current = startTranslationY;
+    portionDragValueRef.current = null;
+    setPortionSliderValue(null);
+    setIsPortionPickerActive(true);
+    triggerSelectionHaptic();
+  }, []);
+
+  const finishPortionHoldGesture = useCallback(() => {
+    if (!isPortionLongPressingRef.current) {
+      return;
+    }
+
+    const selectedPortion = portionDragValueRef.current;
+    isPortionLongPressingRef.current = false;
+    setIsPortionPickerActive(false);
+    if (selectedPortion === null) {
+      return;
+    }
+
+    addToLogRef.current(selectedPortion);
+    triggerImpactHaptic();
+  }, []);
+
+  const cancelPortionGesture = useCallback(() => {
+    isPortionLongPressingRef.current = false;
+    setIsPortionPickerActive(false);
+  }, []);
+
+  const portionGesture = useMemo(() => {
+    const holdDragGesture = Gesture.Pan()
+      .activateAfterLongPress(QUICK_ADD_LONG_PRESS_MS)
+      .minDistance(0)
+      .shouldCancelWhenOutside(false)
+      .runOnJS(true)
+      .onBegin(() => {
+        isPortionLongPressingRef.current = false;
+        portionLongPressStartDeltaYRef.current = 0;
+      })
+      .onStart((event) => {
+        startPortionPicker(event.translationY);
+      })
+      .onUpdate((event) => {
+        if (!isPortionLongPressingRef.current) {
+          return;
+        }
+
+        const adjustedDy = event.translationY - portionLongPressStartDeltaYRef.current;
+        applyPortionDragValue(adjustedDy);
+      })
+      .onEnd((_event, success) => {
+        if (success) {
+          finishPortionHoldGesture();
+        }
+      })
+      .onFinalize((_event, success) => {
+        if (!success && isPortionLongPressingRef.current) {
+          cancelPortionGesture();
+        }
+      });
+
+    const tapGesture = Gesture.Tap()
+      .maxDuration(QUICK_ADD_LONG_PRESS_MS)
+      .maxDistance(16)
+      .runOnJS(true)
+      .onEnd((_event, success) => {
+        if (success && canAddToLogRef.current) {
+          addToLogRef.current();
+        }
+      });
+
+    return Gesture.Exclusive(holdDragGesture, tapGesture);
+  }, [applyPortionDragValue, cancelPortionGesture, finishPortionHoldGesture, startPortionPicker]);
+
   useEffect(() => {
     const showEvent = Platform.OS === "ios" ? "keyboardWillShow" : "keyboardDidShow";
     const hideEvent = Platform.OS === "ios" ? "keyboardWillHide" : "keyboardDidHide";
@@ -643,7 +764,7 @@ export default function LogFoodScreen() {
   };
   const visibleFoods = activeProviderFilter === "all" ? foods : foodsBySource[activeProviderFilter];
 
-  const handleAddToLog = () => {
+  const handleAddToLog = (portionOverride?: number) => {
     const createdAt = Date.now();
 
     if (selectedFood) {
@@ -652,7 +773,7 @@ export default function LogFoodScreen() {
         foodName: selectedFood.name,
         brand: selectedFood.brand,
         serving: selectedFood.serving,
-        portion: 1,
+        portion: portionOverride ?? 1,
         nutrition: selectedFood.nutrition
           ? {
               calories: selectedFood.nutrition.calories,
@@ -669,7 +790,7 @@ export default function LogFoodScreen() {
         dateKey: selectedDateKey,
       });
     } else if (selectedRecentEntry) {
-      const portion = sanitizePortion(selectedRecentEntry.portion);
+      const portion = portionOverride ?? sanitizePortion(selectedRecentEntry.portion);
 
       void createFoodEntry({
         meal: selectedMeal,
@@ -687,6 +808,9 @@ export default function LogFoodScreen() {
 
     navigateAfterAdd();
   };
+
+  canAddToLogRef.current = Boolean(selectedFood || selectedRecentEntry);
+  addToLogRef.current = handleAddToLog;
 
   return (
     <View style={styles.screen}>
@@ -893,6 +1017,55 @@ export default function LogFoodScreen() {
             <View style={styles.quickAddSliderStem} />
           </View>
         ) : null}
+        {isPortionPickerActive ? (
+          <View pointerEvents="none" style={styles.portionSliderPopover}>
+            <View style={styles.quickAddSliderCard}>
+              <Text style={styles.quickAddSliderHint}>Hold & slide</Text>
+              <Text style={styles.quickAddSliderValue}>
+                {portionSliderValue === null
+                  ? "Slide up"
+                  : `${formatMixedQuarter(portionSliderValue)}×`}
+              </Text>
+              <View style={styles.quickAddSliderRail}>
+                {PORTION_REVERSED_SLIDER_VALUES.map((value) => {
+                  const isSelected = portionSliderValue === value;
+                  const isPassed = portionSliderValue !== null && value <= portionSliderValue;
+                  const isWhole = Number.isInteger(value);
+
+                  return (
+                    <View
+                      key={value}
+                      style={[
+                        styles.quickAddSliderStepRow,
+                        isWhole && styles.quickAddSliderStepRowWhole,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.quickAddSliderStepLabel,
+                          isWhole && styles.quickAddSliderStepLabelWhole,
+                          isSelected && styles.quickAddSliderStepLabelSelected,
+                        ]}
+                      >
+                        {formatMixedQuarter(value)}
+                      </Text>
+                      <View
+                        style={[
+                          styles.quickAddSliderStepSquare,
+                          isWhole && styles.quickAddSliderStepSquareWhole,
+                          isPassed && styles.quickAddSliderStepSquarePassed,
+                          isSelected && styles.quickAddSliderStepSquareSelected,
+                          isWhole && styles.quickAddSliderStepSquareWholeTall,
+                        ]}
+                      />
+                    </View>
+                  );
+                })}
+              </View>
+            </View>
+            <View style={styles.quickAddSliderStem} />
+          </View>
+        ) : null}
         {isQuickAddExpanded && !isQuickAddPickerActive ? (
           <View style={styles.quickAddPanel}>
             <View style={styles.quickAddHeaderRow}>
@@ -955,20 +1128,36 @@ export default function LogFoodScreen() {
           </View>
         ) : null}
         <View style={styles.actionButtonRow}>
-          <Pressable
-            accessibilityRole="button"
-            disabled={isQuickAddExpanded ? !canQuickAdd : !selectedFood && !selectedRecentEntry}
-            onPress={isQuickAddExpanded ? () => handleQuickAddToLog() : handleAddToLog}
-            style={[
-              styles.actionButton,
-              (isQuickAddExpanded ? !canQuickAdd : !selectedFood && !selectedRecentEntry) &&
-                styles.actionButtonDisabled,
-            ]}
-          >
-            <Text style={styles.actionButtonText}>
-              {isQuickAddExpanded ? "Add quick" : `Add to ${selectedMealLabel}`}
-            </Text>
-          </Pressable>
+          {isQuickAddExpanded ? (
+            <Pressable
+              accessibilityRole="button"
+              disabled={!canQuickAdd}
+              onPress={() => handleQuickAddToLog()}
+              style={[styles.actionButton, !canQuickAdd && styles.actionButtonDisabled]}
+            >
+              <Text style={styles.actionButtonText}>Add quick</Text>
+            </Pressable>
+          ) : (
+            <GestureDetector gesture={portionGesture}>
+              <View
+                accessible
+                accessibilityRole="button"
+                accessibilityLabel={`Add to ${selectedMealLabel}`}
+                accessibilityState={{ disabled: !selectedFood && !selectedRecentEntry }}
+                collapsable={false}
+                style={[
+                  styles.actionButton,
+                  !selectedFood && !selectedRecentEntry && styles.actionButtonDisabled,
+                ]}
+              >
+                <Text style={styles.actionButtonText}>
+                  {isPortionPickerActive && portionSliderValue !== null
+                    ? `Add ${formatMixedQuarter(portionSliderValue)}`
+                    : `Add to ${selectedMealLabel}`}
+                </Text>
+              </View>
+            </GestureDetector>
+          )}
           <GestureDetector gesture={quickAddGesture}>
             <View
               accessible
@@ -1174,6 +1363,14 @@ const styles = StyleSheet.create({
     alignItems: "center",
     zIndex: 20,
   },
+  portionSliderPopover: {
+    position: "absolute",
+    left: 16,
+    bottom: 82,
+    width: 132,
+    alignItems: "center",
+    zIndex: 20,
+  },
   quickAddSliderCard: {
     width: 132,
     borderRadius: 14,
@@ -1222,6 +1419,10 @@ const styles = StyleSheet.create({
     color: palette.secondaryLabel,
     fontVariant: ["tabular-nums"],
   },
+  quickAddSliderStepLabelWhole: {
+    color: palette.label,
+    fontWeight: "800",
+  },
   quickAddSliderStepLabelSelected: {
     color: palette.tint,
     fontWeight: "800",
@@ -1233,6 +1434,15 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: palette.separator,
     backgroundColor: palette.separator,
+  },
+  quickAddSliderStepRowWhole: {
+    height: 44,
+  },
+  quickAddSliderStepSquareWhole: {
+    borderColor: palette.secondaryLabel,
+  },
+  quickAddSliderStepSquareWholeTall: {
+    height: 40,
   },
   quickAddSliderStepSquarePassed: {
     borderColor: palette.badgeSelectedBorder,
