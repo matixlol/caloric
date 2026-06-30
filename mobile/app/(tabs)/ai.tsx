@@ -1415,6 +1415,11 @@ export default function AILogScreen() {
       // If the turn already started, a read failure just means the connection
       // dropped; keep it resumable. Otherwise there's nothing to resume.
       if (activeTurnRef.current) {
+        resumeRetriesRef.current += 1;
+        if (resumeRetriesRef.current > maxResumeRetries) {
+          finishTurn("AI turn could not be resumed.");
+          return;
+        }
         handleInterruptedTurn();
         return;
       }
