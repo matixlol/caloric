@@ -1,0 +1,33 @@
+# EAS regenerates native deps/builds during the build, so exclude them from the
+# uploaded archive. NOTE: when this file exists, EAS uses it INSTEAD of .gitignore,
+# so it must also cover what .gitignore excludes.
+
+# --- from .gitignore ---
+expo-env.d.ts
+.env.local
+
+# --- heavy generated output (regenerated on the build server) ---
+node_modules/
+
+# iOS native build artifacts / CocoaPods
+ios/Pods/
+ios/build/
+ios/DerivedData/
+ios/*.xcworkspace/xcuserdata/
+ios/*.xcodeproj/xcuserdata/
+
+# Android build artifacts
+android/build/
+android/app/build/
+android/.gradle/
+android/.cxx/
+
+# Expo / Metro caches
+.expo/
+.expo-shared/
+web-build/
+dist/
+
+# Misc
+*.log
+.DS_Store
