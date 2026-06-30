@@ -1221,8 +1221,9 @@ export default function AILogScreen() {
       }
     }
 
-    if (pending.trim()) {
-      for (const payload of parseSseEventsFromChunk(pending)) {
+    const flushed = decoder.decode();
+    if (pending.trim() || flushed) {
+      for (const payload of parseSseEventsFromChunk(`${pending}${flushed}`)) {
         handlePayload(payload);
       }
     }
