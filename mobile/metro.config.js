@@ -1,5 +1,4 @@
 const path = require("path");
-const { withNativeWind } = require("nativewind/metro");
 const {
   getSentryExpoConfig
 } = require("@sentry/react-native/metro");
@@ -13,6 +12,4 @@ config.resolver.nodeModulesPaths = [
   path.resolve(workspaceRoot, "node_modules"),
 ];
 
-module.exports = withNativeWind(config, {
-  input: "./global.css",
-});
+module.exports = config;
