@@ -1567,6 +1567,7 @@ export default function AILogScreen() {
 
     return () => {
       subscription.remove();
+      abortControllerRef.current?.abort();
       if (resumeTimerRef.current) {
         clearTimeout(resumeTimerRef.current);
         resumeTimerRef.current = null;
