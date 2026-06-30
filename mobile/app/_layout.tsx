@@ -9,6 +9,7 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import "../global.css";
 import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
+import { WidgetSyncCoordinator } from "../src/widget/WidgetSyncCoordinator";
 import { DataProvider } from "../src/data/DataProvider";
 import * as Sentry from "@sentry/react-native";
 import { useAppTheme } from "../src/theme/useAppTheme";
@@ -110,6 +111,7 @@ export default Sentry.wrap(function RootLayout() {
             <ThemeProvider value={navigationTheme}>
               <ClerkAuthGate>
                 <AutoBackupCoordinator />
+                <WidgetSyncCoordinator />
                 <AppNavigator />
               </ClerkAuthGate>
             </ThemeProvider>

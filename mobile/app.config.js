@@ -4,6 +4,7 @@ const bundleIdentifier = IS_DEV_APP ? "lol.mati.caloric.dev" : "lol.mati.caloric
 const appName = IS_DEV_APP ? "Caloric Dev" : "caloric";
 const scheme = IS_DEV_APP ? "caloric-dev" : "caloric";
 const iCloudContainer = `iCloud.${bundleIdentifier}`;
+const appGroup = `group.${bundleIdentifier}`;
 
 module.exports = {
   expo: {
@@ -27,6 +28,9 @@ module.exports = {
     ios: {
       supportsTablet: true,
       bundleIdentifier,
+      entitlements: {
+        "com.apple.security.application-groups": [appGroup],
+      },
       infoPlist: {
         ITSAppUsesNonExemptEncryption: false,
         NSMicrophoneUsageDescription: "Caloric uses your microphone so you can log food with voice.",
@@ -96,6 +100,7 @@ module.exports = {
           organization: "matiinc",
         },
       ],
+      "@bacons/apple-targets",
     ],
     experiments: {
       typedRoutes: true,
@@ -103,6 +108,7 @@ module.exports = {
     },
     extra: {
       router: {},
+      appGroup,
       eas: {
         projectId: "7e5b3130-5a61-430b-ba37-1958e9248b32",
       },
