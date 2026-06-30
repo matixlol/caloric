@@ -19,7 +19,7 @@
       "environment": "production",
       "autoIncrement": true,
       "env": {
-        "SENTRY_ALLOW_FAILURE": "true"
+        "SENTRY_DISABLE_AUTO_UPLOAD": "true"
       }
     },
     "development-simulator": {
