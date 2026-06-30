@@ -248,6 +248,7 @@ function subscribeToTurn(record: TurnRecord, cursor: number, sink: Subscriber): 
 export function createTurnSseResponse(record: TurnRecord, cursor: number, signal?: AbortSignal): Response {
   const encoder = new TextEncoder();
   let unsubscribe = () => {};
+  let finish = () => {};
 
   const stream = new ReadableStream<Uint8Array>({
     start(controller) {
@@ -257,7 +258,7 @@ export function createTurnSseResponse(record: TurnRecord, cursor: number, signal
         finish();
       };
 
-      const finish = () => {
+      finish = () => {
         if (closed) {
           return;
         }
@@ -305,6 +306,7 @@ export function createTurnSseResponse(record: TurnRecord, cursor: number, signal
     },
     cancel() {
       unsubscribe();
+      finish();
     },
   });
 
