@@ -1,0 +1,64 @@
+diff --git a/dist/module/components/shared/CustomHandle.js b/dist/module/components/shared/CustomHandle.js
+index 7e899293ad3bc5ea932ee739af4d408238ec3a6d..b08fe3c077d7f14a5d88de7492c36a5153dde5b6 100644
+--- a/dist/module/components/shared/CustomHandle.js
++++ b/dist/module/components/shared/CustomHandle.js
+@@ -67,7 +67,10 @@ function CustomHandleComponent({
+       collapsable: false,
+       ref: handleRef,
+       style: style,
+-      onLayout: runOnUI(onLayout),
++      // PATCH: invoke the worklet with no args. react-native-worklets >=0.10
++      // throws "Cannot copy value of type SyntheticEvent" when RN passes the
++      // LayoutChangeEvent into runOnUI(...). This worklet ignores its argument.
++      onLayout: () => runOnUI(onLayout)(),
+       children: children
+     })
+   });
+diff --git a/dist/module/providers/shared/PortalOutletProvider.js b/dist/module/providers/shared/PortalOutletProvider.js
+index 935d3324bde3a27a3cf97a1265e6e49a4cc3f203..1692a9c27bbd13a628464955dd96b53920e52952 100644
+--- a/dist/module/providers/shared/PortalOutletProvider.js
++++ b/dist/module/providers/shared/PortalOutletProvider.js
+@@ -19,7 +19,10 @@ const {
+     collapsable: false,
+     ref: portalOutletRef,
+     style: styles.container,
+-    onLayout: runOnUI(measurePortalOutlet),
++    // PATCH: invoke the worklet with no args. react-native-worklets >=0.10
++    // throws "Cannot copy value of type SyntheticEvent" when RN passes the
++    // LayoutChangeEvent into runOnUI(...). This worklet ignores its argument.
++    onLayout: () => runOnUI(measurePortalOutlet)(),
+     children: children
+   }),
+   value: true
+diff --git a/src/components/shared/CustomHandle.tsx b/src/components/shared/CustomHandle.tsx
+index 25e4cf1cce8d77b917eb7d8b464cd7d6ce078d3e..001448956fb82258d5cf11ed644a0d9794b83218 100644
+--- a/src/components/shared/CustomHandle.tsx
++++ b/src/components/shared/CustomHandle.tsx
+@@ -79,7 +79,10 @@ function CustomHandleComponent({
+         collapsable={false}
+         ref={handleRef}
+         style={style}
+-        onLayout={runOnUI(onLayout)}>
++        // PATCH: invoke the worklet with no args. react-native-worklets >=0.10
++        // throws "Cannot copy value of type SyntheticEvent" when RN passes the
++        // LayoutChangeEvent into runOnUI(...). This worklet ignores its argument.
++        onLayout={() => runOnUI(onLayout)()}>
+         {children}
+       </View>
+     </GestureDetector>
+diff --git a/src/providers/shared/PortalOutletProvider.tsx b/src/providers/shared/PortalOutletProvider.tsx
+index 7dc3857aede56fe22288f3fd8c8ec766159cfc63..a9239b6e4c5171489c9d7cc4d1eb775a2ebc036b 100644
+--- a/src/providers/shared/PortalOutletProvider.tsx
++++ b/src/providers/shared/PortalOutletProvider.tsx
+@@ -20,7 +20,10 @@ const { PortalOutletProvider, usePortalOutletContext } = createProvider(
+         collapsable={false}
+         ref={portalOutletRef}
+         style={styles.container}
+-        onLayout={runOnUI(measurePortalOutlet)}>
++        // PATCH: invoke the worklet with no args. react-native-worklets >=0.10
++        // throws "Cannot copy value of type SyntheticEvent" when RN passes the
++        // LayoutChangeEvent into runOnUI(...). This worklet ignores its argument.
++        onLayout={() => runOnUI(measurePortalOutlet)()}>
+         {children}
+       </View>
+     ),

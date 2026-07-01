@@ -2,3 +2,5 @@ packages:
   - mobile
   - backend
   - data-model
+patchedDependencies:
+  react-native-sortables@1.9.4: patches/react-native-sortables@1.9.4.patch
