@@ -102,7 +102,14 @@ export function AIConversationPanel() {
           style={panelStyles.scroll}
           contentContainerStyle={panelStyles.scrollContent}
           keyboardShouldPersistTaps="handled"
-          keyboardDismissMode="interactive"
+          // The transcript floats entirely above the keyboard, so "interactive"
+          // never engages (the drag can't reach the keyboard's top edge to grab
+          // it). "on-drag" dismisses on any scroll swipe — the expected
+          // "swipe the messages to put the keyboard away" gesture. alwaysBounce
+          // keeps that swipe working even when the transcript is too short to
+          // scroll.
+          keyboardDismissMode="on-drag"
+          alwaysBounceVertical
           onContentSizeChange={() => {
             scrollViewRef.current?.scrollToEnd({ animated: true });
           }}
