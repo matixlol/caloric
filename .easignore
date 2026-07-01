@@ -7,3 +7,16 @@ mobile/node_modules/
 backend/node_modules/
 data-model/node_modules/
 .git/
+
+# Native projects are generated output (CNG). EAS builds from the repo root in
+# this monorepo, so it uses THIS root .easignore (not mobile/.easignore) — the
+# native dirs must be excluded here, otherwise the locally-generated mobile/ios
+# is uploaded and leaks machine-specific paths (NODE_BINARY/hermesc) that don't
+# exist on the build server, breaking the Hermes bundle step. Excluding them
+# forces a clean `expo prebuild` in the cloud.
+mobile/ios/
+mobile/android/
+mobile/.expo/
+mobile/dist/
+*.log
+.DS_Store
