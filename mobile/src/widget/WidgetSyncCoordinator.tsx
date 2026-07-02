@@ -51,14 +51,19 @@ export function WidgetSyncCoordinator() {
       settings,
     });
 
+    // Uncapped percentages so the widget can show >100% when past a goal.
+    // (view.*Progress is clamped to 0-100 for the in-app fill widths.)
+    const uncappedPct = (value: number, goal: number) =>
+      Math.round((value / Math.max(goal, 1)) * 100);
+
     const summary: TodaySummary = {
       dateKey,
       calories: Math.round(view.calories),
       calorieGoal: view.calorieGoal,
-      calorieProgress: view.calorieProgress,
-      proteinProgress: view.proteinProgress,
-      carbsProgress: view.carbsProgress,
-      fatProgress: view.fatProgress,
+      calorieProgress: uncappedPct(view.calories, view.calorieGoal),
+      proteinProgress: uncappedPct(view.protein, view.proteinGoal),
+      carbsProgress: uncappedPct(view.carbs, view.carbsGoal),
+      fatProgress: uncappedPct(view.fat, view.fatGoal),
     };
 
     const payload = JSON.stringify(summary);
