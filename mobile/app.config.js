@@ -62,6 +62,13 @@ module.exports = {
     plugins: [
       "expo-router",
       [
+        "expo-camera",
+        {
+          cameraPermission: "Allow Caloric to scan food barcodes.",
+          barcodeScannerEnabled: true,
+        },
+      ],
+      [
         "expo-build-properties",
         {
           // Clerk's transitive Google pods (AppCheckCore/GoogleUtilities/

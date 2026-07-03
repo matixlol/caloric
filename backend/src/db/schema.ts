@@ -71,6 +71,26 @@ export const mfpFoodDetailResponses = pgTable(
   }),
 );
 
+export const mfpBarcodeResponses = pgTable(
+  "mfp_barcode_responses",
+  {
+    id: bigint("id", { mode: "number" }).primaryKey().generatedAlwaysAsIdentity(),
+    barcode: text("barcode").notNull(),
+    mfpUrl: text("mfp_url").notNull(),
+    mfpStatus: integer("mfp_status").notNull(),
+    resultCode: integer("result_code"),
+    responseBody: bytea("response_body"),
+    responseJson: jsonb("response_json"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (table) => ({
+    barcodeCreatedAtIdx: index("mfp_barcode_responses_barcode_created_at_idx").on(
+      table.barcode,
+      table.createdAt,
+    ),
+  }),
+);
+
 export const openFoodFactsSearchResponses = pgTable(
   "open_food_facts_search_responses",
   {
