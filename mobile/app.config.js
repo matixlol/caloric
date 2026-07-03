@@ -64,10 +64,9 @@ module.exports = {
       [
         "expo-build-properties",
         {
-          // Clerk's transitive Google pods (AppCheckCore/GoogleUtilities/
-          // RecaptchaInterop) can't link as static libraries without modules.
-          // Static frameworks resolves it; verified the app + widget build
-          // and run under this linkage.
+          // Static frameworks linkage. Originally required by Clerk's transitive
+          // Google pods; kept because the existing app + widget build is verified
+          // under this linkage and other pods may still rely on it.
           ios: {
             useFrameworks: "static",
           },
@@ -94,12 +93,6 @@ module.exports = {
       ],
       "./plugins/withThirdPartySQLitePod",
       "./plugins/withICloudBackup",
-      [
-        "@clerk/expo",
-        {
-          appleSignIn: false,
-        },
-      ],
       "expo-asset",
       "expo-font",
       "expo-image",

@@ -3,7 +3,7 @@
 A basic app for calorie/macros tracking that aims to get out of your way as soon as possible.
 
 ## Stack
-This project uses Clerk for auth, `@op-engineering/op-sqlite` for local-first mobile persistence, and the Bun backend + Postgres for sync/storage.
+This project uses [Better Auth](https://www.better-auth.com/) for auth (email-code and password login), `@op-engineering/op-sqlite` for local-first mobile persistence, and the Bun backend + Postgres for sync/storage.
 
 ## Repo Layout
 
@@ -15,12 +15,12 @@ This project uses Clerk for auth, `@op-engineering/op-sqlite` for local-first mo
 Create `mobile/.env.local` with:
 
 ```bash
-EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_your-clerk-publishable-key
 EXPO_PUBLIC_BACKEND_URL=https://backend.caloric.mati.lol
 ```
 
-You can create a publishable key in the [Clerk Dashboard](https://dashboard.clerk.com/).
 `EXPO_PUBLIC_BACKEND_URL` is optional and defaults to `https://backend.caloric.mati.lol` in the app.
+Auth (Better Auth) is configured entirely on the backend — the app has no auth key to set. See
+`backend/.env.example` for `BETTER_AUTH_SECRET` and the optional Resend email-delivery vars.
 
 ## Backend Service
 
@@ -52,8 +52,8 @@ Base URL: `https://backend.caloric.mati.lol`
 - Health check: `GET https://backend.caloric.mati.lol/health`
 - Search only: `GET https://backend.caloric.mati.lol/search?query=banana&maxItems=3&includeDetails=false`
 - Search + detail payloads: `GET https://backend.caloric.mati.lol/search?query=banana&maxItems=1&includeDetails=true`
-- Start AI session: `POST https://backend.caloric.mati.lol/ai/session` with `{ "recentLogs": [...] }` and a Clerk bearer token
-- Run AI turn: `POST https://backend.caloric.mati.lol/ai/turn` with `{ "sessionId": "...", "action": { ... } }` and a Clerk bearer token
+- Start AI session: `POST https://backend.caloric.mati.lol/ai/session` with `{ "recentLogs": [...] }` and a Better Auth session cookie
+- Run AI turn: `POST https://backend.caloric.mati.lol/ai/turn` with `{ "sessionId": "...", "action": { ... } }` and a Better Auth session cookie
 
 Note: there is no separate public detail endpoint right now; detail records are returned in the `details` array on `/search` when `includeDetails=true`.
 

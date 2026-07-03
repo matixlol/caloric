@@ -1,5 +1,5 @@
 import Ionicons from "@expo/vector-icons/Ionicons";
-import { useAuth } from "@clerk/expo";
+import { useAuth } from "../src/auth/auth-client";
 import { useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
 import { Platform, PlatformColor, Pressable, StyleSheet, Text, View } from "react-native";

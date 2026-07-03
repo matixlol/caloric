@@ -1,13 +1,11 @@
-import { ClerkProvider } from "@clerk/expo";
-import { tokenCache } from "@clerk/expo/token-cache";
 import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "expo-router/react-navigation";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack } from "expo-router";
 import { useMemo } from "react";
-import { Platform, PlatformColor, StyleSheet, Text, View } from "react-native";
+import { Platform, PlatformColor, StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AIChatProvider } from "../src/ai/AIChatProvider";
-import { ClerkAuthGate } from "../src/auth/ClerkAuthGate";
+import { AuthGate } from "../src/auth/AuthGate";
 import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
 import { WidgetSyncCoordinator } from "../src/widget/WidgetSyncCoordinator";
 import { DataProvider } from "../src/data/DataProvider";
@@ -28,22 +26,11 @@ Sentry.init({
   // spotlight: __DEV__,
 });
 
-const clerkPublishableKey = process.env.EXPO_PUBLIC_CLERK_PUBLISHABLE_KEY?.trim() || "";
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
 const navigationColor = (value: unknown, fallback: unknown) =>
   typeof value === "string" ? value : typeof fallback === "string" ? fallback : "#000000";
 const queryClient = new QueryClient();
-
-function MissingClerkKeyScreen() {
-  return (
-    <View style={styles.missingKeyContainer}>
-      <Text style={styles.missingKeyText}>
-        Missing authentication configuration. Set your publishable key to enable login.
-      </Text>
-    </View>
-  );
-}
 
 function AppNavigator() {
   return (
@@ -99,27 +86,21 @@ export default Sentry.wrap(function RootLayout() {
     };
   }, [colorScheme, palette]);
 
-  if (!clerkPublishableKey) {
-    return <MissingClerkKeyScreen />;
-  }
-
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>
-      <ClerkProvider publishableKey={clerkPublishableKey} tokenCache={tokenCache}>
-        <DataProvider>
-          <QueryClientProvider client={queryClient}>
-            <ThemeProvider value={navigationTheme}>
-              <ClerkAuthGate>
-                <AutoBackupCoordinator />
-                <WidgetSyncCoordinator />
-                <AIChatProvider>
-                  <AppNavigator />
-                </AIChatProvider>
-              </ClerkAuthGate>
-            </ThemeProvider>
-          </QueryClientProvider>
-        </DataProvider>
-      </ClerkProvider>
+      <DataProvider>
+        <QueryClientProvider client={queryClient}>
+          <ThemeProvider value={navigationTheme}>
+            <AuthGate>
+              <AutoBackupCoordinator />
+              <WidgetSyncCoordinator />
+              <AIChatProvider>
+                <AppNavigator />
+              </AIChatProvider>
+            </AuthGate>
+          </ThemeProvider>
+        </QueryClientProvider>
+      </DataProvider>
     </GestureHandlerRootView>
   );
 });
@@ -127,19 +108,5 @@ export default Sentry.wrap(function RootLayout() {
 const styles = StyleSheet.create({
   gestureRoot: {
     flex: 1,
-  },
-  missingKeyContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    paddingHorizontal: 24,
-    backgroundColor: iosColor("systemGroupedBackground", "#F3F4F6"),
-  },
-  missingKeyText: {
-    textAlign: "center",
-    fontSize: 17,
-    lineHeight: 24,
-    fontWeight: "600",
-    color: iosColor("label", "#111827"),
   },
 });

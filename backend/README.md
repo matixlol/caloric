@@ -14,14 +14,14 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `resourceType` (default `foods`)
     - `includeDetails` (default `true`)
 - `POST /ai/session`
-  - requires a Clerk bearer token
+  - requires a Better Auth session (cookie or bearer)
   - body:
     - `recentLogs` (optional)
   - returns:
     - `sessionId`
     - `status` (`ready`)
 - `POST /ai/turn`
-  - requires a Clerk bearer token
+  - requires a Better Auth session (cookie or bearer)
   - body (`application/json`):
     - `sessionId` (required)
     - `action` (required)
@@ -43,14 +43,28 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `type: "event"` with `event` (`assistant-delta`, `assistant`, `search`, `approval`)
     - `type: "resolved-user-message"` when a typed companion message was sent
 - `GET /sync/bootstrap`
-  - requires a Clerk bearer token
+  - requires a Better Auth session (cookie or bearer)
   - returns synced food entries plus user settings
 - `POST /sync/push`
-  - requires a Clerk bearer token
+  - requires a Better Auth session (cookie or bearer)
   - accepts dirty food entry upserts and settings upserts
 - `POST /mfp/session/refresh`
   - forces a Playwright login refresh and updates the stored MyFitnessPal session in Postgres
   - returns whether auth headers were refreshed successfully
+- `GET|POST /api/auth/*`
+  - Better Auth: email-code (OTP) and email+password sign-in/sign-up, session, sign-out
+
+## Auth (Better Auth)
+
+Auth is handled by [Better Auth](https://www.better-auth.com/) with the Drizzle/Postgres adapter.
+Both email-code (OTP) login and email+password login are enabled. The mobile app uses the
+`@better-auth/expo` client and sends the session cookie on backend requests.
+
+Login codes are delivered via Resend when `RESEND_API_KEY` is set; otherwise they are written to
+the server logs (password login does not depend on email delivery, which is what App Store review
+uses). See `migrate-clerk-users.local.ts` for the one-time script that recreates the pre-existing
+users as Better Auth accounts while preserving their user ids (so all their synced data keeps
+resolving with no rewrite).
 
 `/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
 OpenRouter tracking fields are sent as `user` (client user id) and `session_id` (backend session id).
@@ -73,8 +87,7 @@ The refresh path launches the verified Rebrowser Playwright + 2Captcha login har
 Copy `.env.example` to `.env` and set:
 
 - `DATABASE_URL`
-- `CLERK_SECRET_KEY`
-- `CLERK_PUBLISHABLE_KEY`
+- `BETTER_AUTH_SECRET` (sign/verify sessions; generate with `openssl rand -base64 32`)
 - `MFP_USERNAME`
 - `MFP_PASSWORD`
 - `TWO_CAPTCHA_API_KEY` (used to solve Cloudflare Turnstile during MyFitnessPal login)
@@ -93,7 +106,10 @@ Optional:
 - `OPEN_FOOD_FACTS_USER_EMAIL`
 - `OPENROUTER_MODEL`
 - `OPENROUTER_PROVIDER_ONLY` (optional; for Gemini 3 Flash use `google-ai-studio` or `google-vertex`; leave unset to let OpenRouter choose sorted by throughput)
-- `CLERK_JWT_KEY`
+- `BETTER_AUTH_URL` (public backend URL; defaults to the production host)
+- `AUTH_TRUSTED_ORIGINS` (comma-separated extra deep-link/web origins; app schemes are always trusted)
+- `WEB_ORIGINS` (comma-separated browser origins allowed to call the API with credentials)
+- `RESEND_API_KEY` and `AUTH_EMAIL_FROM` (email delivery for login codes; logs the code if unset)
 
 ## Run
 

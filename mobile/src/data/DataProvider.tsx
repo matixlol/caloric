@@ -1,7 +1,7 @@
 import { type ReactNode, createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useState, useSyncExternalStore } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
-import { useAuth } from "@clerk/expo";
+import { getAuthCookie, useAuth } from "../auth/auth-client";
 import { type Meal, type UserSettings } from "@caloric/data-model";
 import { focusManager, onlineManager } from "@tanstack/react-query";
 import {
@@ -25,17 +25,12 @@ const EMPTY_SYNC_STATUS: SyncStatusRecord = {
 const DataContext = createContext<DataContextValue | null>(null);
 
 export function DataProvider({ children }: { children: ReactNode }) {
-  const { isLoaded, isSignedIn, userId, getToken } = useAuth({ treatPendingAsSignedOut: false });
+  const { isLoaded, isSignedIn, userId } = useAuth();
   const [ready, setReady] = useState(false);
   const getTokenForStore = useEffectEvent(async () => {
-    try {
-      return await getToken();
-    } catch {
-      // Clerk rejects token requests once the session ends (e.g. it expired
-      // while the app was backgrounded). Treat that as "no token" so background
-      // sync backs off instead of surfacing an unhandled promise rejection.
-      return null;
-    }
+    // The stored session cookie authenticates our backend requests. Returns
+    // null once the session ends so background sync backs off cleanly.
+    return getAuthCookie();
   });
 
   useEffect(() => {
@@ -175,9 +170,9 @@ export function useDataStoreReady(): boolean {
 }
 
 // The id of the user who was signed in last time the app ran, read synchronously
-// from local SQLite. Lets the auth gate render cached data offline before Clerk's
-// network-dependent `isLoaded` resolves. Null until the store finishes init or if
-// no user has ever signed in on this device.
+// from local SQLite. Lets the auth gate render cached data offline before the
+// session finishes loading. Null until the store finishes init or if no user has
+// ever signed in on this device.
 export function useLastKnownUserId(): string | null {
   const { store, ready } = useDataContext();
   // Re-render when the store revision bumps (e.g. activateUser updates the id).

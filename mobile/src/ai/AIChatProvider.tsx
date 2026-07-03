@@ -1,5 +1,5 @@
 import { fetch as expoFetch } from "expo/fetch";
-import { useAuth } from "@clerk/expo";
+import { getAuthCookie, useAuth } from "../auth/auth-client";
 import * as Sentry from "@sentry/react-native";
 import {
   RecordingPresets,
@@ -125,7 +125,7 @@ export function useAIChat(): AIChatContextValue {
 }
 
 export function AIChatProvider({ children }: { children: ReactNode }) {
-  const { userId, getToken } = useAuth();
+  const { userId } = useAuth();
   const isDataReady = useDataStoreReady();
   const { createFoodEntry } = useDataStoreActions();
   const { data: recentEntries, isLoading: isLoadingEntries } = useAllFoodEntries();
@@ -305,8 +305,8 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
       return sessionIdRef.current;
     }
 
-    const token = await getToken();
-    if (!token) {
+    const cookie = getAuthCookie();
+    if (!cookie) {
       throw new UIError("Missing authentication token. Sign in again and retry.");
     }
 
@@ -315,8 +315,9 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     try {
       response = await fetch(sessionUrl, {
         method: "POST",
+        credentials: "omit",
         headers: {
-          Authorization: `Bearer ${token}`,
+          Cookie: cookie,
           "Content-Type": "application/json",
         },
         body: JSON.stringify({
@@ -390,8 +391,8 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     retry = true,
   ): Promise<Response> => {
     const sessionId = await ensureSessionId();
-    const token = await getToken();
-    if (!token) {
+    const cookie = getAuthCookie();
+    if (!cookie) {
       throw new UIError("Missing authentication token. Sign in again and retry.");
     }
 
@@ -424,9 +425,10 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     try {
       response = await expoFetch(turnUrl, {
         method: "POST",
+        credentials: "omit",
         headers: {
           Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`,
+          Cookie: cookie,
           ...(usingAudio
             ? {}
             : {
@@ -823,17 +825,18 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
     abortControllerRef.current = controller;
 
     try {
-      const token = await getToken();
-      if (!token) {
+      const cookie = getAuthCookie();
+      if (!cookie) {
         throw new UIError("Missing authentication token. Sign in again and retry.");
       }
 
       const resumeUrl = `${BACKEND_BASE_URL}/ai/turn/${encodeURIComponent(active.turnId)}/stream?cursor=${active.appliedSeq}`;
       const response = await expoFetch(resumeUrl, {
         method: "GET",
+        credentials: "omit",
         headers: {
           Accept: "text/event-stream",
-          Authorization: `Bearer ${token}`,
+          Cookie: cookie,
         },
         signal: controller.signal,
       });

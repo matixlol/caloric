@@ -44,6 +44,8 @@ export type SyncStatusRecord = {
 };
 
 type SqlRow = Record<string, Scalar>;
+// Returns the session cookie used to authenticate backend requests, or null
+// when signed out. Set by DataProvider from the Better Auth Expo client.
 type TokenProvider = () => Promise<string | null>;
 type BackendRequestOptions = Omit<RequestInit, "headers"> & { headers?: Record<string, string> };
 
@@ -180,7 +182,7 @@ export class LocalDataStore {
         `);
 
         // Cache the last signed-in user synchronously so the auth gate can
-        // render cached data offline before Clerk's network handshake resolves.
+        // render cached data offline before the session finishes loading.
         const currentUserRow = this.db.executeSync(
           "SELECT value FROM meta WHERE key = ? LIMIT 1",
           [CURRENT_USER_META_KEY],
@@ -542,8 +544,8 @@ export class LocalDataStore {
         return;
       }
 
-      const token = await tokenProvider();
-      if (!token || this.activeUserId !== activeUserId || this.tokenProvider !== tokenProvider) {
+      const cookie = await tokenProvider();
+      if (!cookie || this.activeUserId !== activeUserId || this.tokenProvider !== tokenProvider) {
         return;
       }
 
@@ -551,8 +553,9 @@ export class LocalDataStore {
       try {
         response = await fetch(`${BACKEND_BASE_URL}/sync/bootstrap`, {
           method: "GET",
+          credentials: "omit",
           headers: {
-            Authorization: `Bearer ${token}`,
+            Cookie: cookie,
           },
         });
       } catch {
@@ -650,8 +653,8 @@ export class LocalDataStore {
       return;
     }
 
-    const token = await this.tokenProvider();
-    if (!token) {
+    const cookie = await this.tokenProvider();
+    if (!cookie) {
       return;
     }
 
@@ -667,9 +670,10 @@ export class LocalDataStore {
     try {
       const response = await fetch(`${BACKEND_BASE_URL}/sync/push`, {
         method: "POST",
+        credentials: "omit",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
+          Cookie: cookie,
         },
         body: JSON.stringify({
           foodEntries: dirtyFoodEntries.map((row) => ({
@@ -814,19 +818,20 @@ export class LocalDataStore {
     path: string,
     options: BackendRequestOptions = {},
   ): Promise<T> {
-    const token = this.activeUserId && this.tokenProvider ? await this.tokenProvider() : null;
-    if (!token) {
+    const cookie = this.activeUserId && this.tokenProvider ? await this.tokenProvider() : null;
+    if (!cookie) {
       throw new Error("Not signed in");
     }
 
     const headers: Record<string, string> = {
-      Authorization: `Bearer ${token}`,
+      Cookie: cookie,
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...options.headers,
     };
 
     const response = await fetch(`${BACKEND_BASE_URL}${path}`, {
       ...options,
+      credentials: "omit",
       headers,
     }).catch(() => {
       throw new Error("Network request failed");

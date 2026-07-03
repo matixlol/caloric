@@ -1,5 +1,7 @@
 import { httpInstrumentationMiddleware } from "@hono/otel";
 import { Hono } from "hono";
+import { cors } from "hono/cors";
+import { auth } from "./auth";
 import { config } from "./config";
 import { SENTRY_ENABLE_LOGS, SENTRY_SERVICE_NAME, SENTRY_TRACES_SAMPLE_RATE, Sentry } from "./lib/sentry";
 import { logInfo, redactSecret } from "./logging";
@@ -21,6 +23,23 @@ app.use(
     captureResponseHeaders: ["content-type"],
   }),
 );
+
+// Browser (web build) cross-origin credentialed requests. Native clients send
+// no Origin header and ignore CORS, so this only affects the web app.
+if (config.webOrigins.length > 0) {
+  app.use(
+    "*",
+    cors({
+      origin: config.webOrigins,
+      allowHeaders: ["Content-Type", "Authorization"],
+      allowMethods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+      credentials: true,
+    }),
+  );
+}
+
+// Better Auth owns everything under /api/auth (sign-in, email OTP, session).
+app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 
 app.route("/", healthRoutes);
 app.route("/ai", aiRoutes);

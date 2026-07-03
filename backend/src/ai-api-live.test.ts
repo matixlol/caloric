@@ -2,8 +2,7 @@ import { describe, expect, it, mock } from "bun:test";
 
 const hasRequiredEnv =
   Boolean(Bun.env.DATABASE_URL) &&
-  Boolean(Bun.env.CLERK_SECRET_KEY) &&
-  Boolean(Bun.env.CLERK_PUBLISHABLE_KEY) &&
+  Boolean(Bun.env.BETTER_AUTH_SECRET) &&
   Boolean(Bun.env.GOOGLE_AI_STUDIO_API_KEY);
 
 const liveIt = hasRequiredEnv ? it : it.skip;
@@ -16,6 +15,11 @@ describe("ai api live", () => {
         authenticateUserRequest: async () => ({
           userId: "test-user-live-ai",
         }),
+        // server.ts mounts auth.handler; the live AI test never hits /api/auth,
+        // so a stub instance is enough to satisfy the import.
+        auth: {
+          handler: async () => new Response("{}", { status: 200 }),
+        },
       }));
 
       const { handleHttpRequest } = await import("./server");

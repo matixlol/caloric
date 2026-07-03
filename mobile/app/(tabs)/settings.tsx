@@ -1,4 +1,4 @@
-import { useClerk, useUser } from "@clerk/expo";
+import { authClient, useAuth } from "../../src/auth/auth-client";
 import {
   Button,
   Column,
@@ -452,8 +452,7 @@ function MacroRatioEditor({
 }
 
 export default function SettingsScreen() {
-  const clerk = useClerk();
-  const { user } = useUser();
+  const { userId, email: accountEmail } = useAuth();
   const queryClient = useQueryClient();
   const isDataReady = useDataStoreReady();
   const {
@@ -506,10 +505,7 @@ export default function SettingsScreen() {
     macroSplitBRef.current = macroSplitB;
   }, [macroSplitB]);
 
-  const clerkEmail =
-    user?.primaryEmailAddress?.emailAddress ||
-    user?.emailAddresses?.[0]?.emailAddress ||
-    "No email found";
+  const profileEmailValue = accountEmail || "No email found";
   const syncedGoal = syncedSettings?.calorieGoal;
   const syncedProtein = syncedSettings?.macroProteinPct;
   const syncedCarbs = syncedSettings?.macroCarbsPct;
@@ -624,8 +620,8 @@ export default function SettingsScreen() {
     carbsPct !== loadedMacros.carbs ||
     fatPct !== loadedMacros.fat;
 
-  const profileEmail = clerkEmail;
-  const socialOverviewQueryKey = ["socialOverview", user?.id ?? null] as const;
+  const profileEmail = profileEmailValue;
+  const socialOverviewQueryKey = ["socialOverview", userId ?? null] as const;
   const updatesErrorMessage = updatesActionError ?? (checkError || downloadError ? "Unknown error." : null);
   const updatesStatusLabel = getUpdatesStatusLabel({
     isEnabled: Updates.isEnabled,
@@ -687,7 +683,7 @@ export default function SettingsScreen() {
   const socialOverviewQuery = useQuery({
     queryKey: socialOverviewQueryKey,
     queryFn: getSocialOverview,
-    enabled: isDataReady && Boolean(user?.id),
+    enabled: isDataReady && Boolean(userId),
     refetchOnReconnect: true,
     refetchOnWindowFocus: true,
   });
@@ -765,7 +761,7 @@ export default function SettingsScreen() {
     setIsSigningOut(true);
 
     try {
-      await clerk.signOut();
+      await authClient.signOut();
     } catch {
       setSignOutError("Could not sign out. Try again.");
     } finally {
