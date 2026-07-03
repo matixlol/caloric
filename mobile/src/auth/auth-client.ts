@@ -66,10 +66,16 @@ type AuthState = {
 
 // Clerk-shaped auth state so call sites read the same fields they used to.
 export function useAuth(): AuthState {
-  const { data, isPending } = authClient.useSession();
+  const { data, isPending, isRefetching } = authClient.useSession();
 
   return {
-    isLoaded: !isPending,
+    // Treat a background refetch as "loaded". Better Auth flips isPending back to
+    // true on every refetch while signed out (data === null), and a refetch fires
+    // when the app returns to the foreground. Without the isRefetching guard the
+    // auth gate would fall back to its loading spinner on resume and remount the
+    // sign-in screen — wiping the entered email and the "code sent" state, so you
+    // could never come back with the emailed code.
+    isLoaded: !isPending || isRefetching,
     isSignedIn: Boolean(data?.user?.id),
     userId: data?.user?.id ?? null,
     email: data?.user?.email ?? null,
