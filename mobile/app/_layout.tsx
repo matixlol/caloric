@@ -1,7 +1,8 @@
+import { isRunningInExpoGo } from "expo";
 import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "expo-router/react-navigation";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { Stack } from "expo-router";
-import { useMemo } from "react";
+import { Stack, useNavigationContainerRef } from "expo-router";
+import { useEffect, useMemo } from "react";
 import { Platform, PlatformColor, StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AIChatProvider } from "../src/ai/AIChatProvider";
@@ -10,8 +11,20 @@ import { AutoBackupCoordinator } from "../src/backup/AutoBackupCoordinator";
 import { WidgetSyncCoordinator } from "../src/widget/WidgetSyncCoordinator";
 import { DataProvider } from "../src/data/DataProvider";
 import * as Sentry from "@sentry/react-native";
+import { getReactNativeStartupAttributes, logStartupMilestone, startStartupBreakdownTrace } from "../src/performance/startup";
 import { useAppTheme } from "../src/theme/useAppTheme";
 
+const isExpoGo = isRunningInExpoGo();
+const navigationIntegration = Sentry.reactNavigationIntegration({
+  enableTimeToInitialDisplay: !isExpoGo,
+});
+const parseSampleRate = (value: string | undefined, fallback: number) => {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? Math.max(0, Math.min(1, parsed)) : fallback;
+};
+
+const sentryInitStartedAt = performance.now();
+const sentryInitStartedAtEpochSeconds = Date.now() / 1000;
 Sentry.init({
   dsn: 'https://b717a9ae29012fc29268ccc8b531ea67@o4510397347987456.ingest.us.sentry.io/4511171255009280',
 
@@ -22,8 +35,28 @@ Sentry.init({
   // Enable Logs
   enableLogs: true,
 
+  // Keep these at 100% while launch performance is being diagnosed. Both can
+  // be reduced remotely per build environment without another code change.
+  tracesSampleRate: parseSampleRate(process.env.EXPO_PUBLIC_SENTRY_TRACES_SAMPLE_RATE, 1),
+  profilesSampleRate: isExpoGo
+    ? 0
+    : parseSampleRate(process.env.EXPO_PUBLIC_SENTRY_PROFILES_SAMPLE_RATE, 1),
+
+  integrations: [navigationIntegration],
+  enableAppStartTracking: true,
+  enableNativeFramesTracking: !isExpoGo,
+  enableStallTracking: true,
+  enableUserInteractionTracing: true,
+
   // uncomment the line below to enable Spotlight (https://spotlightjs.com)
   // spotlight: __DEV__,
+});
+const sentryInitDurationMs = Math.round((performance.now() - sentryInitStartedAt) * 10) / 10;
+startStartupBreakdownTrace(sentryInitStartedAtEpochSeconds, {
+  "startup.sentry_init_ms": sentryInitDurationMs,
+});
+logStartupMilestone("sentry.initialized", {
+  "startup.duration_ms": sentryInitDurationMs,
 });
 
 const iosColor = (name: string, fallback: string) =>
@@ -37,6 +70,7 @@ function AppNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="log-food" options={{ presentation: "modal" }} />
+      <Stack.Screen name="scan-barcode" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen
         name="entry-details"
         options={{
@@ -68,6 +102,7 @@ function AppNavigator() {
 }
 
 export default Sentry.wrap(function RootLayout() {
+  const navigationRef = useNavigationContainerRef();
   const { colorScheme, palette } = useAppTheme();
   const navigationTheme = useMemo<Theme>(() => {
     const baseTheme = colorScheme === "dark" ? DarkTheme : DefaultTheme;
@@ -85,6 +120,18 @@ export default Sentry.wrap(function RootLayout() {
       },
     };
   }, [colorScheme, palette]);
+
+  useEffect(() => {
+    navigationIntegration.registerNavigationContainer(navigationRef);
+  }, [navigationRef]);
+
+  useEffect(() => {
+    const frame = requestAnimationFrame(() => {
+      logStartupMilestone("root.first_frame", getReactNativeStartupAttributes());
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, []);
 
   return (
     <GestureHandlerRootView style={styles.gestureRoot}>

@@ -1,4 +1,6 @@
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
+import { Ionicons } from "@expo/vector-icons";
+import { useQuery } from "@tanstack/react-query";
 import type * as ExpoHaptics from "expo-haptics";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -29,6 +31,7 @@ import {
   createEmptyFoodsBySource,
   fetchFoodSourcePage,
   interleaveFoods,
+  lookupFoodBarcode,
   queueAnmatQuery,
 } from "../src/food-search";
 import { MacroBadges } from "../src/components/MacroBadges";
@@ -317,11 +320,17 @@ function FoodRow({
 export default function LogFoodScreen() {
   const insets = useSafeAreaInsets();
   const router = useRouter();
-  const params = useLocalSearchParams<{ meal?: string | string[]; day?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    meal?: string | string[];
+    day?: string | string[];
+    barcode?: string | string[];
+  }>();
   const isDataReady = useDataStoreReady();
   const { data: allFoodEntries } = useAllFoodEntries();
   const { createFoodEntry } = useDataStoreActions();
-  const [query, setQuery] = useState("");
+  const barcodeParam = Array.isArray(params.barcode) ? params.barcode[0] : params.barcode;
+  const [query, setQuery] = useState(barcodeParam ?? "");
+  const [scannedBarcode, setScannedBarcode] = useState(barcodeParam ?? "");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [foodsBySource, setFoodsBySource] = useState<SearchFoodsBySource>(createEmptyFoodsBySource);
   // Append-only interleaved list for the "All" tab. Each loaded page is
@@ -377,6 +386,13 @@ export default function LogFoodScreen() {
   });
   const canUseGlass =
     Platform.OS === "ios" && isGlassEffectAPIAvailable() && isLiquidGlassAvailable();
+  const barcodeQuery = useQuery({
+    queryKey: ["food-barcode", scannedBarcode],
+    queryFn: ({ signal }) => lookupFoodBarcode(scannedBarcode, signal),
+    enabled: isDataReady && scannedBarcode.length > 0,
+    retry: false,
+    staleTime: 5 * 60 * 1000,
+  });
   const selectedMeal = normalizeMeal(params.meal) ?? "lunch";
   const selectedDay = Array.isArray(params.day) ? params.day[0] : params.day;
   const selectedDateKey = normalizeLocalDateKey(selectedDay, Date.now());
@@ -814,7 +830,7 @@ export default function LogFoodScreen() {
   );
 
   useEffect(() => {
-    if (!isDataReady) {
+    if (!isDataReady || scannedBarcode) {
       return;
     }
 
@@ -880,7 +896,7 @@ export default function LogFoodScreen() {
     return () => {
       controller.abort();
     };
-  }, [debouncedQuery, isDataReady, loadPage]);
+  }, [debouncedQuery, isDataReady, loadPage, scannedBarcode]);
 
   const loadMoreFoods = useCallback(() => {
     if (loadingMoreRef.current) {
@@ -965,16 +981,37 @@ export default function LogFoodScreen() {
   const recentSearchMatches = canShowResults
     ? getRecentSearchMatches(recentEntries, trimmedQuery)
     : recentEntries;
-  const allFetchedFoods = [...foodsBySource.openfoodfacts, ...foodsBySource.mfp];
+  const displayedFoods = scannedBarcode ? (barcodeQuery.data ?? []) : foods;
+  const displayedFoodsBySource: SearchFoodsBySource = scannedBarcode
+    ? { openfoodfacts: [], mfp: displayedFoods }
+    : foodsBySource;
+  const displayedIsSearching = scannedBarcode ? barcodeQuery.isFetching : isSearching;
+  const displayedSearchError = scannedBarcode
+    ? barcodeQuery.error
+      ? getErrorMessage(barcodeQuery.error)
+      : barcodeQuery.isSuccess && displayedFoods.length === 0
+        ? "No MFP food found for this barcode."
+        : null
+    : searchError;
+  const allFetchedFoods = [
+    ...displayedFoodsBySource.openfoodfacts,
+    ...displayedFoodsBySource.mfp,
+  ];
+  const displayedSelectedFoodId =
+    scannedBarcode && allFetchedFoods.length === 1 ? allFetchedFoods[0].id : selectedFoodId;
   const selectedFood =
-    canShowResults ? allFetchedFoods.find((food) => food.id === selectedFoodId) || null : null;
+    canShowResults ? allFetchedFoods.find((food) => food.id === displayedSelectedFoodId) || null : null;
   const selectedRecentEntry =
     recentSearchMatches.find((entry) => entry.id === selectedRecentEntryId) || null;
   const providerCounts: Record<DisplayedFoodSource, number> = {
-    openfoodfacts: foodsBySource.openfoodfacts.length,
-    mfp: foodsBySource.mfp.length,
+    openfoodfacts: displayedFoodsBySource.openfoodfacts.length,
+    mfp: displayedFoodsBySource.mfp.length,
   };
-  const visibleFoods = activeProviderFilter === "all" ? foods : foodsBySource[activeProviderFilter];
+  const visibleFoods = scannedBarcode
+    ? displayedFoods
+    : activeProviderFilter === "all"
+      ? displayedFoods
+      : displayedFoodsBySource[activeProviderFilter];
 
   const handleAddToLog = (portionOverride?: number) => {
     const createdAt = Date.now();
@@ -1044,17 +1081,32 @@ export default function LogFoodScreen() {
         </Text>
 
         <View style={styles.searchCard}>
-          <TextInput
-            value={query}
-            onChangeText={setQuery}
-            placeholder="Search foods (example: banana)"
-            placeholderTextColor={palette.secondaryLabel}
-            style={styles.searchInput}
-            autoCapitalize="none"
-            autoCorrect={false}
-            returnKeyType="search"
-            clearButtonMode="while-editing"
-          />
+          <View style={styles.searchRow}>
+            <TextInput
+              value={query}
+              onChangeText={(value) => {
+                setScannedBarcode("");
+                setQuery(value);
+              }}
+              placeholder="Search foods (example: banana)"
+              placeholderTextColor={palette.secondaryLabel}
+              style={styles.searchInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+              returnKeyType="search"
+              clearButtonMode="while-editing"
+            />
+            <Pressable
+              accessibilityLabel="Scan barcode"
+              accessibilityRole="button"
+              onPress={() =>
+                router.push({ pathname: "/scan-barcode", params: { meal: selectedMeal, day: selectedDateKey } })
+              }
+              style={styles.scannerButton}
+            >
+              <Ionicons name="barcode-outline" size={25} color={palette.tint} />
+            </Pressable>
+          </View>
         </View>
 
         {!canShowResults ? (
@@ -1109,7 +1161,7 @@ export default function LogFoodScreen() {
             </View>
           </>
         ) : null}
-        {canShowResults ? (
+        {canShowResults && !scannedBarcode ? (
           <ScrollView
             horizontal
             showsHorizontalScrollIndicator={false}
@@ -1117,7 +1169,7 @@ export default function LogFoodScreen() {
           >
             {PROVIDER_FILTERS.map((filter) => {
               const isActive = activeProviderFilter === filter.key;
-              const count = filter.key === "all" ? foods.length : providerCounts[filter.key];
+              const count = filter.key === "all" ? displayedFoods.length : providerCounts[filter.key];
 
               return (
                 <Pressable
@@ -1137,17 +1189,19 @@ export default function LogFoodScreen() {
             })}
           </ScrollView>
         ) : null}
-        {canShowResults && isSearching ? (
+        {canShowResults && displayedIsSearching ? (
           <Text style={styles.helperText}>
-            Searching MFP and OpenFoodFacts. Results appear as each source returns.
+            {scannedBarcode
+              ? "Looking up barcode in MFP…"
+              : "Searching MFP and OpenFoodFacts. Results appear as each source returns."}
           </Text>
         ) : null}
-        {searchError ? <Text style={styles.errorText}>{searchError}</Text> : null}
+        {displayedSearchError ? <Text style={styles.errorText}>{displayedSearchError}</Text> : null}
 
-        {canShowResults && !isSearching && !searchError && foods.length === 0 ? (
+        {canShowResults && !displayedIsSearching && !displayedSearchError && displayedFoods.length === 0 ? (
           <Text style={styles.helperText}>{`No foods found for "${trimmedQuery}".`}</Text>
         ) : null}
-        {canShowResults && !isSearching && !searchError && foods.length > 0 && visibleFoods.length === 0 ? (
+        {canShowResults && !displayedIsSearching && !displayedSearchError && displayedFoods.length > 0 && visibleFoods.length === 0 ? (
           <Text style={styles.helperText}>{`No results from that source for "${trimmedQuery}".`}</Text>
         ) : null}
 
@@ -1162,7 +1216,7 @@ export default function LogFoodScreen() {
                   brand={food.brand}
                   serving={food.serving}
                   nutrition={food.nutrition}
-                  selected={selectedFoodId === food.id}
+                  selected={displayedSelectedFoodId === food.id}
                   isLast={index === visibleFoods.length - 1}
                   onPress={() => {
                     setSelectedFoodId(food.id);
@@ -1451,7 +1505,13 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     padding: 12,
   },
+  searchRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 10,
+  },
   searchInput: {
+    flex: 1,
     minHeight: 44,
     borderRadius: 10,
     backgroundColor: palette.searchInputBackground,
@@ -1459,6 +1519,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     fontSize: 16,
     lineHeight: 20,
+  },
+  scannerButton: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 10,
+    backgroundColor: palette.searchInputBackground,
   },
   helperText: {
     marginTop: 10,

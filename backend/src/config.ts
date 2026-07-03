@@ -67,6 +67,7 @@ export const config = {
   searchCacheTtlDays: Math.max(1, getNumberEnv("SEARCH_CACHE_TTL_DAYS", 30)),
   mfpUsername: Bun.env.MFP_USERNAME,
   mfpPassword: Bun.env.MFP_PASSWORD,
+  mfpGuestAccessToken: Bun.env.MFP_GUEST_ACCESS_TOKEN,
   mfpProxyUrl: Bun.env.MFP_PROXY_URL,
   mfpBrowserHeadless: getBooleanEnv("MFP_BROWSER_HEADLESS", true),
   twoCaptchaApiKey: Bun.env.TWO_CAPTCHA_API_KEY,

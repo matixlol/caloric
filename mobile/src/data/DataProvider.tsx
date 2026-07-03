@@ -1,4 +1,4 @@
-import { type ReactNode, createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useState, useSyncExternalStore } from "react";
+import { type ReactNode, createContext, useCallback, useContext, useEffect, useEffectEvent, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import NetInfo from "@react-native-community/netinfo";
 import { AppState } from "react-native";
 import { getAuthCookie, useAuth } from "../auth/auth-client";
@@ -10,6 +10,7 @@ import {
   type SyncStatusRecord,
   type UserSettingsRecord,
 } from "./store";
+import { logStartupMilestone, traceStartupOperation } from "../performance/startup";
 
 type DataContextValue = {
   store: typeof localDataStore;
@@ -27,6 +28,7 @@ const DataContext = createContext<DataContextValue | null>(null);
 export function DataProvider({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, userId } = useAuth();
   const [ready, setReady] = useState(false);
+  const hasLoggedAuthLoadedRef = useRef(false);
   const getTokenForStore = useEffectEvent(async () => {
     // The stored session cookie authenticates our backend requests. Returns
     // null once the session ends so background sync backs off cleanly.
@@ -36,7 +38,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let cancelled = false;
 
-    void localDataStore.initialize().then(() => {
+    void traceStartupOperation(
+      {
+        name: "data_store.initialize",
+        op: "db.connect",
+      },
+      () => localDataStore.initialize(),
+    ).then(() => {
       if (!cancelled) {
         setReady(true);
       }
@@ -46,6 +54,17 @@ export function DataProvider({ children }: { children: ReactNode }) {
       cancelled = true;
     };
   }, []);
+
+  useEffect(() => {
+    if (!isLoaded || hasLoggedAuthLoadedRef.current) {
+      return;
+    }
+
+    hasLoggedAuthLoadedRef.current = true;
+    logStartupMilestone("auth.loaded", {
+      "auth.signed_in": Boolean(isSignedIn),
+    });
+  }, [isLoaded, isSignedIn]);
 
   useEffect(() => {
     if (!isLoaded) {
@@ -61,12 +80,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     void (async () => {
       try {
-        await localDataStore.activateUser(userId, async () => getTokenForStore());
+        await traceStartupOperation(
+          {
+            name: "data_store.activate_user",
+            op: "db.transaction",
+          },
+          () => localDataStore.activateUser(userId, async () => getTokenForStore()),
+        );
         if (cancelled) {
           return;
         }
 
-        await localDataStore.bootstrapFromBackend();
+        await traceStartupOperation(
+          {
+            name: "data_store.bootstrap",
+            op: "http.client",
+          },
+          () => localDataStore.bootstrapFromBackend(),
+        );
       } catch {
         // Activation and bootstrap are best-effort; a failure here (offline,
         // ended session, transient backend error) must not escape as an
@@ -134,9 +165,15 @@ function useStoreRevision(): number {
   return useSyncExternalStore(store.subscribe, store.getRevision, store.getRevision);
 }
 
-function useStoreQuery<T>(query: () => Promise<T>, fallback: T) {
+function useStoreQuery<T>(
+  query: () => Promise<T>,
+  fallback: T,
+  operationName: string,
+  consumer?: string,
+) {
   const { ready } = useDataContext();
   const revision = useStoreRevision();
+  const hasCompletedInitialLoadRef = useRef(false);
   const [state, setState] = useState<{ data: T; isLoading: boolean }>({
     data: fallback,
     isLoading: true,
@@ -151,8 +188,20 @@ function useStoreQuery<T>(query: () => Promise<T>, fallback: T) {
     let cancelled = false;
 
     void (async () => {
-      const data = await query();
+      const data = !hasCompletedInitialLoadRef.current && consumer
+        ? await traceStartupOperation(
+            {
+              name: `query.${operationName}`,
+              op: "db.query",
+              attributes: {
+                "startup.consumer": consumer,
+              },
+            },
+            query,
+          )
+        : await query();
       if (!cancelled) {
+        hasCompletedInitialLoadRef.current = true;
         setState({ data, isLoading: false });
       }
     })();
@@ -160,7 +209,7 @@ function useStoreQuery<T>(query: () => Promise<T>, fallback: T) {
     return () => {
       cancelled = true;
     };
-  }, [fallback, query, ready, revision]);
+  }, [consumer, fallback, operationName, query, ready, revision]);
 
   return state;
 }
@@ -180,42 +229,42 @@ export function useLastKnownUserId(): string | null {
   return ready ? store.getLastKnownUserId() : null;
 }
 
-export function useFoodEntriesByDate(dateKey: string) {
+export function useFoodEntriesByDate(dateKey: string, consumer?: string) {
   const { store } = useDataContext();
   const query = useCallback(() => store.listFoodEntriesByDate(dateKey), [dateKey, store]);
 
-  return useStoreQuery(query, EMPTY_ENTRIES);
+  return useStoreQuery(query, EMPTY_ENTRIES, "food_entries.by_date", consumer);
 }
 
-export function useFoodEntry(entryId: string | undefined) {
+export function useFoodEntry(entryId: string | undefined, consumer?: string) {
   const { store } = useDataContext();
   const query = useCallback(
     () => (entryId ? store.getFoodEntry(entryId) : Promise.resolve(null)),
     [entryId, store],
   );
 
-  return useStoreQuery(query, null as FoodEntryRecord | null);
+  return useStoreQuery(query, null as FoodEntryRecord | null, "food_entry.by_id", consumer);
 }
 
-export function useAllFoodEntries() {
+export function useAllFoodEntries(consumer?: string) {
   const { store } = useDataContext();
   const query = useCallback(() => store.listAllFoodEntries(), [store]);
 
-  return useStoreQuery(query, EMPTY_ENTRIES);
+  return useStoreQuery(query, EMPTY_ENTRIES, "food_entries.all", consumer);
 }
 
-export function useUserSettings() {
+export function useUserSettings(consumer?: string) {
   const { store } = useDataContext();
   const query = useCallback(() => store.getUserSettings(), [store]);
 
-  return useStoreQuery(query, null as UserSettingsRecord | null);
+  return useStoreQuery(query, null as UserSettingsRecord | null, "user_settings", consumer);
 }
 
-export function useSyncStatus() {
+export function useSyncStatus(consumer?: string) {
   const { store } = useDataContext();
   const query = useCallback(() => store.getSyncStatus(), [store]);
 
-  return useStoreQuery(query, EMPTY_SYNC_STATUS);
+  return useStoreQuery(query, EMPTY_SYNC_STATUS, "sync_status", consumer);
 }
 
 export function useDataStoreActions() {

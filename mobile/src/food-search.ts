@@ -318,3 +318,26 @@ export function appendUniqueFoods(existing: SearchFood[], incoming: SearchFood[]
 
   return merged;
 }
+
+export async function lookupFoodBarcode(
+  barcode: string,
+  signal?: AbortSignal,
+): Promise<SearchFood[]> {
+  const url = new URL(`/search/barcode/${encodeURIComponent(barcode)}`, `${BACKEND_BASE_URL}/`);
+  const response = await fetch(url.toString(), { method: "GET", signal });
+
+  let payload: SearchResponsePayload | null = null;
+  try {
+    payload = (await response.json()) as SearchResponsePayload;
+  } catch {
+    payload = null;
+  }
+
+  if (response.status === 404) {
+    return [];
+  }
+  if (!response.ok) {
+    throw new Error(getPayloadErrorMessage(payload) ?? `Barcode lookup failed with ${response.status}`);
+  }
+  return mapFoods(payload);
+}

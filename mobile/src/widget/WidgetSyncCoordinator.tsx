@@ -5,6 +5,7 @@ import { AppState, Platform } from "react-native";
 import { buildDayViewData } from "../components/DayReadOnlyView";
 import { useAllFoodEntries, useDataStoreReady, useUserSettings } from "../data/DataProvider";
 import { getTodayLocalDateKey } from "../date";
+import { traceStartupOperation } from "../performance/startup";
 
 const SUMMARY_KEY = "todaySummary";
 
@@ -32,8 +33,9 @@ type TodaySummary = {
  */
 export function WidgetSyncCoordinator() {
   const isReady = useDataStoreReady();
-  const { data: logs } = useAllFoodEntries();
-  const { data: settings } = useUserSettings();
+  const { data: logs } = useAllFoodEntries("widget_sync");
+  const { data: settings } = useUserSettings("widget_sync");
+  const hasMeasuredInitialSyncRef = useRef(false);
   const lastPayloadRef = useRef<string | null>(null);
 
   const syncWidget = useCallback(() => {
@@ -51,14 +53,19 @@ export function WidgetSyncCoordinator() {
       settings,
     });
 
+    // Uncapped percentages so the widget can show >100% when past a goal.
+    // (view.*Progress is clamped to 0-100 for the in-app fill widths.)
+    const uncappedPct = (value: number, goal: number) =>
+      Math.round((value / Math.max(goal, 1)) * 100);
+
     const summary: TodaySummary = {
       dateKey,
       calories: Math.round(view.calories),
       calorieGoal: view.calorieGoal,
-      calorieProgress: view.calorieProgress,
-      proteinProgress: view.proteinProgress,
-      carbsProgress: view.carbsProgress,
-      fatProgress: view.fatProgress,
+      calorieProgress: uncappedPct(view.calories, view.calorieGoal),
+      proteinProgress: uncappedPct(view.protein, view.proteinGoal),
+      carbsProgress: uncappedPct(view.carbs, view.carbsGoal),
+      fatProgress: uncappedPct(view.fat, view.fatGoal),
     };
 
     const payload = JSON.stringify(summary);
@@ -67,8 +74,26 @@ export function WidgetSyncCoordinator() {
     }
     lastPayloadRef.current = payload;
 
-    storage.set(SUMMARY_KEY, summary);
-    ExtensionStorage.reloadWidget();
+    const writeWidget = () => {
+      storage.set(SUMMARY_KEY, summary);
+      ExtensionStorage.reloadWidget();
+    };
+
+    if (!hasMeasuredInitialSyncRef.current) {
+      hasMeasuredInitialSyncRef.current = true;
+      void traceStartupOperation(
+        {
+          name: "widget.sync",
+          op: "ui.widget.update",
+          attributes: {
+            "startup.payload_bytes": payload.length,
+          },
+        },
+        async () => writeWidget(),
+      );
+    } else {
+      writeWidget();
+    }
   }, [isReady, logs, settings]);
 
   // React to data / goal changes.

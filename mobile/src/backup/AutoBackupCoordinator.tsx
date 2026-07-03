@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef } from "react";
 import { AppState, Platform } from "react-native";
 import { useAllFoodEntries, useDataStoreReady, useUserSettings } from "../data/DataProvider";
 import { ensureICloudBackup } from "./iCloudBackup";
+import { traceStartupOperation } from "../performance/startup";
 
 function serializeNutrition(nutrition?: {
   calories?: number;
@@ -57,9 +58,10 @@ function serializeAccountSnapshot(logs: ReturnType<typeof useAllFoodEntries>["da
 
 export function AutoBackupCoordinator() {
   const isReady = useDataStoreReady();
-  const { data: logs } = useAllFoodEntries();
-  const { data: settings } = useUserSettings();
+  const { data: logs } = useAllFoodEntries("icloud_backup");
+  const { data: settings } = useUserSettings("icloud_backup");
   const isEnsuringBackupRef = useRef(false);
+  const hasMeasuredInitialBackupRef = useRef(false);
   const wasBackupSourceReadyRef = useRef(false);
 
   const createSnapshotJson = useCallback(() => {
@@ -71,15 +73,33 @@ export function AutoBackupCoordinator() {
   }, [isReady, logs, settings]);
 
   const ensureBackup = useCallback(async () => {
-    const json = createSnapshotJson();
-    if (!json || isEnsuringBackupRef.current) {
+    if (isEnsuringBackupRef.current) {
       return;
     }
 
     isEnsuringBackupRef.current = true;
+    const runBackup = async () => {
+      const json = createSnapshotJson();
+      if (!json) {
+        return;
+      }
+
+      await ensureICloudBackup(json);
+    };
 
     try {
-      await ensureICloudBackup(json);
+      if (!hasMeasuredInitialBackupRef.current) {
+        await traceStartupOperation(
+          {
+            name: "icloud_backup.ensure",
+            op: "file.write",
+          },
+          runBackup,
+        );
+        hasMeasuredInitialBackupRef.current = true;
+      } else {
+        await runBackup();
+      }
     } finally {
       isEnsuringBackupRef.current = false;
     }

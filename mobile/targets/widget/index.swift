@@ -114,6 +114,25 @@ struct CaloricProvider: TimelineProvider {
 
 // MARK: - Views
 
+/// Macro colors mirrored from the app's `src/theme/macroColors.ts`.
+enum MacroColor {
+  static let protein = Color(hex: 0x2563EB)
+  static let carbs = Color(hex: 0xF59E0B)
+  static let fat = Color(hex: 0x14B8A6)
+}
+
+private extension Color {
+  init(hex: UInt32) {
+    self.init(
+      .sRGB,
+      red: Double((hex >> 16) & 0xFF) / 255,
+      green: Double((hex >> 8) & 0xFF) / 255,
+      blue: Double(hex & 0xFF) / 255,
+      opacity: 1
+    )
+  }
+}
+
 private func kcalText(_ value: Double) -> String {
   let formatter = NumberFormatter()
   formatter.numberStyle = .decimal
@@ -121,13 +140,13 @@ private func kcalText(_ value: Double) -> String {
   return formatter.string(from: NSNumber(value: value)) ?? "\(Int(value))"
 }
 
-/// Lock screen — rectangular: total eaten kcal + per-macro % eaten.
+/// Lock screen — rectangular: total eaten kcal + % of goal + per-macro % eaten.
 struct RectangularView: View {
   let summary: TodaySummary
 
   var body: some View {
     VStack(alignment: .leading, spacing: 2) {
-      Text("\(kcalText(summary.calories)) kcal")
+      Text("\(kcalText(summary.calories)) kcal  \(Int(summary.calorieProgress))%")
         .font(.headline)
         .widgetAccentable()
       Text("P \(Int(summary.proteinProgress))%  C \(Int(summary.carbsProgress))%  F \(Int(summary.fatProgress))%")
@@ -153,36 +172,48 @@ struct CircularView: View {
   }
 }
 
+/// Compact macro row sized for the square home-screen widget.
 private struct MacroBar: View {
   let label: String
   let progress: Double
+  let color: Color
 
   var body: some View {
-    HStack(spacing: 8) {
+    HStack(spacing: 6) {
       Text(label)
         .font(.caption2)
-        .frame(width: 56, alignment: .leading)
+        .foregroundStyle(color)
+        .frame(width: 14, alignment: .leading)
+      // Fill is clamped to 100% even when the % label runs past goal.
       ProgressView(value: min(progress / 100, 1))
-        .tint(.accentColor)
+        .tint(color)
       Text("\(Int(progress))%")
         .font(.caption2)
         .monospacedDigit()
-        .frame(width: 36, alignment: .trailing)
+        .frame(width: 40, alignment: .trailing)
     }
   }
 }
 
-/// Home screen — medium: kcal eaten / goal and three macro progress bars.
-struct MediumView: View {
+/// Home screen — small (square): kcal eaten / goal, % of goal, and macros.
+struct SmallView: View {
   let summary: TodaySummary
 
   var body: some View {
-    VStack(alignment: .leading, spacing: 8) {
-      Text("\(kcalText(summary.calories)) / \(kcalText(summary.calorieGoal)) kcal")
-        .font(.headline)
-      MacroBar(label: "Protein", progress: summary.proteinProgress)
-      MacroBar(label: "Carbs", progress: summary.carbsProgress)
-      MacroBar(label: "Fat", progress: summary.fatProgress)
+    VStack(alignment: .leading, spacing: 6) {
+      VStack(alignment: .leading, spacing: 0) {
+        Text("\(kcalText(summary.calories)) kcal")
+          .font(.system(size: 22, weight: .bold))
+          .minimumScaleFactor(0.6)
+          .lineLimit(1)
+        Text("\(Int(summary.calorieProgress))% of \(kcalText(summary.calorieGoal))")
+          .font(.caption2)
+          .foregroundStyle(.secondary)
+      }
+      Spacer(minLength: 0)
+      MacroBar(label: "P", progress: summary.proteinProgress, color: MacroColor.protein)
+      MacroBar(label: "C", progress: summary.carbsProgress, color: MacroColor.carbs)
+      MacroBar(label: "F", progress: summary.fatProgress, color: MacroColor.fat)
     }
     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
   }
@@ -205,7 +236,7 @@ struct CaloricWidgetEntryView: View {
     case .accessoryRectangular:
       RectangularView(summary: entry.summary)
     default:
-      MediumView(summary: entry.summary)
+      SmallView(summary: entry.summary)
     }
   }
 }
@@ -234,7 +265,7 @@ struct CaloricWidget: Widget {
     }
     .configurationDisplayName("Today's Nutrition")
     .description("Calories eaten and how much of each macro you've hit today.")
-    .supportedFamilies([.accessoryRectangular, .accessoryCircular, .systemMedium])
+    .supportedFamilies([.accessoryRectangular, .accessoryCircular, .systemSmall])
   }
 }
 
