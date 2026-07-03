@@ -83,6 +83,7 @@ function AppNavigator() {
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />
       <Stack.Screen name="log-food" options={{ presentation: "modal" }} />
+      <Stack.Screen name="scan-barcode" options={{ presentation: "fullScreenModal" }} />
       <Stack.Screen
         name="entry-details"
         options={{
