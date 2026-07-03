@@ -5,6 +5,7 @@ import { AppState, Platform } from "react-native";
 import { buildDayViewData } from "../components/DayReadOnlyView";
 import { useAllFoodEntries, useDataStoreReady, useUserSettings } from "../data/DataProvider";
 import { getTodayLocalDateKey } from "../date";
+import { traceStartupOperation } from "../performance/startup";
 
 const SUMMARY_KEY = "todaySummary";
 
@@ -32,8 +33,9 @@ type TodaySummary = {
  */
 export function WidgetSyncCoordinator() {
   const isReady = useDataStoreReady();
-  const { data: logs } = useAllFoodEntries();
-  const { data: settings } = useUserSettings();
+  const { data: logs } = useAllFoodEntries("widget_sync");
+  const { data: settings } = useUserSettings("widget_sync");
+  const hasMeasuredInitialSyncRef = useRef(false);
   const lastPayloadRef = useRef<string | null>(null);
 
   const syncWidget = useCallback(() => {
@@ -72,8 +74,26 @@ export function WidgetSyncCoordinator() {
     }
     lastPayloadRef.current = payload;
 
-    storage.set(SUMMARY_KEY, summary);
-    ExtensionStorage.reloadWidget();
+    const writeWidget = () => {
+      storage.set(SUMMARY_KEY, summary);
+      ExtensionStorage.reloadWidget();
+    };
+
+    if (!hasMeasuredInitialSyncRef.current) {
+      hasMeasuredInitialSyncRef.current = true;
+      void traceStartupOperation(
+        {
+          name: "widget.sync",
+          op: "ui.widget.update",
+          attributes: {
+            "startup.payload_bytes": payload.length,
+          },
+        },
+        async () => writeWidget(),
+      );
+    } else {
+      writeWidget();
+    }
   }, [isReady, logs, settings]);
 
   // React to data / goal changes.

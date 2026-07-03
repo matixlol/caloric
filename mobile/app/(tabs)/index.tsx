@@ -14,6 +14,7 @@ import {
 } from "react-native";
 import { useQuery } from "@tanstack/react-query";
 import type { FriendDailySummary } from "@caloric/data-model";
+import * as Sentry from "@sentry/react-native";
 import Animated, { useAnimatedRef } from "react-native-reanimated";
 import Sortable from "react-native-sortables";
 import PagerView, { type PagerViewOnPageSelectedEvent } from "react-native-pager-view";
@@ -38,6 +39,7 @@ import {
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
+import { finishStartupBreakdownTrace, logStartupMilestone } from "../../src/performance/startup";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -229,8 +231,9 @@ export default function HomeScreen() {
   const { userId } = useAuth();
   const isDataReady = useDataStoreReady();
   const { deleteFoodEntry, getFriendDailySummaries, reorderFoodEntriesForDate } = useDataStoreActions();
-  const { data: allLogs, isLoading: isLoadingEntries } = useAllFoodEntries();
-  const { data: settings, isLoading: isLoadingSettings } = useUserSettings();
+  const { data: allLogs, isLoading: isLoadingEntries } = useAllFoodEntries("home");
+  const { data: settings, isLoading: isLoadingSettings } = useUserSettings("home");
+  const hasLoggedFullDisplayRef = useRef(false);
 
   const [dayOffset, setDayOffset] = useState(0);
   const [todayDateKey, setTodayDateKey] = useState(() => getTodayLocalDateKey());
@@ -462,9 +465,42 @@ export default function HomeScreen() {
     });
   }, [allLogs, dayOffset, settings, todayDateKey]);
 
-  if (!isDataReady || isLoadingEntries || isLoadingSettings || !settings || !dayView || !olderPreview || !newerPreview) {
+  const isFullyDisplayed = Boolean(
+    isDataReady &&
+    !isLoadingEntries &&
+    !isLoadingSettings &&
+    settings &&
+    dayView &&
+    olderPreview &&
+    newerPreview,
+  );
+
+  useEffect(() => {
+    if (!isFullyDisplayed || hasLoggedFullDisplayRef.current) {
+      return;
+    }
+
+    const frame = requestAnimationFrame(() => {
+      if (hasLoggedFullDisplayRef.current) {
+        return;
+      }
+
+      hasLoggedFullDisplayRef.current = true;
+      logStartupMilestone("home.full_display", {
+        "startup.food_entry_count": allLogs.length,
+      });
+      finishStartupBreakdownTrace({
+        "startup.food_entry_count": allLogs.length,
+      });
+    });
+
+    return () => cancelAnimationFrame(frame);
+  }, [allLogs.length, isFullyDisplayed]);
+
+  if (!isFullyDisplayed || !settings || !dayView || !olderPreview || !newerPreview) {
     return (
       <View style={styles.loadingContainer}>
+        <Sentry.TimeToFullDisplay record={false} />
         <Text style={styles.loadingText}>Loading...</Text>
       </View>
     );
@@ -717,6 +753,7 @@ export default function HomeScreen() {
 
   return (
     <View style={styles.screen}>
+      <Sentry.TimeToFullDisplay record={isFullyDisplayed} />
       <PagerView
         initialPage={1}
         onPageSelected={handlePagerPageSelected}

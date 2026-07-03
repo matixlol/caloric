@@ -128,7 +128,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
   const { userId, getToken } = useAuth();
   const isDataReady = useDataStoreReady();
   const { createFoodEntry } = useDataStoreActions();
-  const { data: recentEntries, isLoading: isLoadingEntries } = useAllFoodEntries();
+  const { data: recentEntries, isLoading: isLoadingEntries } = useAllFoodEntries("ai_chat");
 
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<UIMessage[]>([]);
