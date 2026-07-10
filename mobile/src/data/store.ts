@@ -6,6 +6,8 @@ import {
   type FriendDailySummary,
   FoodEntrySchema,
   type FoodEntry,
+  RecipeSchema,
+  type Recipe,
   MealSchema,
   type Meal,
   SocialOverviewSchema,
@@ -15,7 +17,7 @@ import {
   type UserSettings,
 } from "@caloric/data-model";
 import { open, type DB, type Scalar, type Transaction } from "@op-engineering/op-sqlite";
-import { createFoodEntryId } from "../id";
+import { createFoodEntryId, createRecipeId } from "../id";
 
 const BACKEND_BASE_URL =
   (process.env.EXPO_PUBLIC_BACKEND_URL?.trim() ?? "").replace(/\/+$/, "") ||
@@ -31,6 +33,7 @@ export type FoodEntryRecord = FoodEntry & {
   deletedAt: number | null;
   dirty: boolean;
 };
+export type RecipeRecord = Recipe & { id: string; updatedAt: number; deletedAt: number | null; dirty: boolean };
 
 export type UserSettingsRecord = UserSettings & {
   id: typeof USER_SETTINGS_ROW_ID;
@@ -81,6 +84,11 @@ function parseFoodEntryRow(row: SqlRow): FoodEntryRecord {
     dirty: asNumber(row.dirty, "dirty") === 1,
     ...payload,
   };
+}
+
+function parseRecipeRow(row: SqlRow): RecipeRecord {
+  const payload = RecipeSchema.parse(JSON.parse(asString(row.payload_json, "payload_json")));
+  return { id: asString(row.id, "id"), updatedAt: asNumber(row.updated_at, "updated_at"), deletedAt: row.deleted_at === null ? null : asNumber(row.deleted_at, "deleted_at"), dirty: asNumber(row.dirty, "dirty") === 1, ...payload };
 }
 
 function parseUserSettingsRow(row: SqlRow): UserSettingsRecord {
@@ -167,6 +175,8 @@ export class LocalDataStore {
             dirty INTEGER NOT NULL DEFAULT 1
           )
         `);
+        this.db.executeSync(`CREATE TABLE IF NOT EXISTS user_recipes (id TEXT PRIMARY KEY NOT NULL, payload_json TEXT NOT NULL, updated_at INTEGER NOT NULL, deleted_at INTEGER, dirty INTEGER NOT NULL DEFAULT 1)`);
+        this.db.executeSync(`CREATE INDEX IF NOT EXISTS user_recipes_dirty_idx ON user_recipes (dirty, updated_at)`);
         this.db.executeSync(`
           CREATE INDEX IF NOT EXISTS food_entries_date_key_idx
           ON food_entries (json_extract(payload_json, '$.dateKey'))
@@ -208,6 +218,7 @@ export class LocalDataStore {
     if (currentUserId !== userId) {
       await this.withTransaction(async (tx) => {
         await tx.execute("DELETE FROM food_entries");
+        await tx.execute("DELETE FROM user_recipes");
         await tx.execute("DELETE FROM user_settings");
         await tx.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", [
           CURRENT_USER_META_KEY,
@@ -288,6 +299,18 @@ export class LocalDataStore {
     return result.rows.map((row) => parseFoodEntryRow(row as SqlRow));
   }
 
+  async listRecipes(): Promise<RecipeRecord[]> {
+    await this.initialize();
+    const result = await this.getDb().execute(`SELECT id, payload_json, updated_at, deleted_at, dirty FROM user_recipes WHERE deleted_at IS NULL ORDER BY lower(json_extract(payload_json, '$.name')), id`);
+    return result.rows.map((row) => parseRecipeRow(row as SqlRow));
+  }
+
+  async getRecipe(id: string): Promise<RecipeRecord | null> {
+    await this.initialize();
+    const result = await this.getDb().execute(`SELECT id, payload_json, updated_at, deleted_at, dirty FROM user_recipes WHERE id = ? AND deleted_at IS NULL LIMIT 1`, [id]);
+    return result.rows[0] ? parseRecipeRow(result.rows[0] as SqlRow) : null;
+  }
+
   async getUserSettings(): Promise<UserSettingsRecord> {
     await this.initialize();
     const result = await this.getDb().execute(
@@ -314,13 +337,14 @@ export class LocalDataStore {
 
   async getSyncStatus(): Promise<SyncStatusRecord> {
     await this.initialize();
-    const [foodEntriesResult, settingsResult] = await Promise.all([
+    const [foodEntriesResult, recipesResult, settingsResult] = await Promise.all([
       this.getDb().execute(
         `
           SELECT MAX(updated_at) AS updated_at, MAX(dirty) AS dirty
           FROM food_entries
         `,
       ),
+      this.getDb().execute(`SELECT MAX(updated_at) AS updated_at, MAX(dirty) AS dirty FROM user_recipes`),
       this.getDb().execute(
         `
           SELECT MAX(updated_at) AS updated_at, MAX(dirty) AS dirty
@@ -331,14 +355,15 @@ export class LocalDataStore {
 
     const foodEntriesRow = (foodEntriesResult.rows[0] ?? {}) as SqlRow;
     const settingsRow = (settingsResult.rows[0] ?? {}) as SqlRow;
+    const recipesRow = (recipesResult.rows[0] ?? {}) as SqlRow;
     const foodEntriesUpdatedAt = typeof foodEntriesRow.updated_at === "number" ? foodEntriesRow.updated_at : 0;
     const settingsUpdatedAt = typeof settingsRow.updated_at === "number" ? settingsRow.updated_at : 0;
     const hasDirtyFoodEntries = foodEntriesRow.dirty === 1;
     const hasDirtySettings = settingsRow.dirty === 1;
 
     return {
-      updatedAt: Math.max(foodEntriesUpdatedAt, settingsUpdatedAt),
-      dirty: hasDirtyFoodEntries || hasDirtySettings,
+      updatedAt: Math.max(foodEntriesUpdatedAt, settingsUpdatedAt, typeof recipesRow.updated_at === "number" ? recipesRow.updated_at : 0),
+      dirty: hasDirtyFoodEntries || hasDirtySettings || recipesRow.dirty === 1,
     };
   }
 
@@ -375,6 +400,28 @@ export class LocalDataStore {
       dirty: true,
       ...nextEntry,
     };
+  }
+
+  async createRecipe(input: Recipe): Promise<RecipeRecord> {
+    await this.initialize();
+    const id = createRecipeId(); const recipe = RecipeSchema.parse(input); const updatedAt = Date.now();
+    await this.getDb().execute(`INSERT INTO user_recipes (id, payload_json, updated_at, deleted_at, dirty) VALUES (?, ?, ?, NULL, 1)`, [id, JSON.stringify(recipe), updatedAt]);
+    this.bumpRevision(); this.scheduleSync();
+    return { id, updatedAt, deletedAt: null, dirty: true, ...recipe };
+  }
+
+  async updateRecipe(id: string, updater: (current: RecipeRecord) => Recipe): Promise<RecipeRecord | null> {
+    await this.initialize(); const current = await this.getRecipe(id); if (!current) return null;
+    const recipe = RecipeSchema.parse(updater(current)); const updatedAt = Date.now();
+    await this.getDb().execute(`UPDATE user_recipes SET payload_json = ?, updated_at = ?, dirty = 1 WHERE id = ?`, [JSON.stringify(recipe), updatedAt, id]);
+    this.bumpRevision(); this.scheduleSync();
+    return { id, updatedAt, deletedAt: null, dirty: true, ...recipe };
+  }
+
+  async deleteRecipe(id: string): Promise<void> {
+    await this.initialize(); const updatedAt = Date.now();
+    await this.getDb().execute(`UPDATE user_recipes SET deleted_at = ?, updated_at = ?, dirty = 1 WHERE id = ?`, [updatedAt, updatedAt, id]);
+    this.bumpRevision(); this.scheduleSync();
   }
 
   async updateFoodEntry(
@@ -465,6 +512,8 @@ export class LocalDataStore {
           serving: current.serving,
           portion: current.portion,
           nutrition: current.nutrition,
+          recipeId: current.recipeId,
+          recipeItems: current.recipeItems,
           createdAt: current.createdAt,
           dateKey: current.dateKey,
           sortIndex: nextSortIndex,
@@ -572,6 +621,7 @@ export class LocalDataStore {
           data: FoodEntry;
           updatedAt: number;
         }[];
+        recipes?: { id: string; data: Recipe; updatedAt: number }[];
         settings?: {
           id: typeof USER_SETTINGS_ROW_ID;
           data: UserSettings;
@@ -584,7 +634,9 @@ export class LocalDataStore {
       }
 
       const foodEntries = payload.foodEntries ?? [];
+      const recipes = payload.recipes ?? [];
       const currentFoodEntriesById = await this.getFoodEntryRowsByIds(foodEntries.map((row) => row.id));
+      const currentRecipesById = await this.getRecipeRowsByIds(recipes.map((row) => row.id));
       const currentSettings = payload.settings ? await this.getUserSettingsRow() : null;
       let changed = false;
 
@@ -605,6 +657,13 @@ export class LocalDataStore {
               `,
               [row.id, JSON.stringify(FoodEntrySchema.parse(row.data)), row.updatedAt],
             );
+            changed = true;
+          }
+        }
+        for (const row of recipes) {
+          const current = currentRecipesById.get(row.id);
+          if (!current || row.updatedAt >= current.updatedAt) {
+            await tx.execute(`INSERT INTO user_recipes (id, payload_json, updated_at, deleted_at, dirty) VALUES (?, ?, ?, NULL, 0) ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at, deleted_at = NULL, dirty = 0 WHERE user_recipes.updated_at <= excluded.updated_at`, [row.id, JSON.stringify(RecipeSchema.parse(row.data)), row.updatedAt]);
             changed = true;
           }
         }
@@ -659,9 +718,10 @@ export class LocalDataStore {
     }
 
     const dirtyFoodEntries = await this.getDirtyFoodEntryRows();
+    const dirtyRecipes = await this.getDirtyRecipeRows();
     const dirtySettings = await this.getDirtySettingsRow();
 
-    if (dirtyFoodEntries.length === 0 && !dirtySettings) {
+    if (dirtyFoodEntries.length === 0 && dirtyRecipes.length === 0 && !dirtySettings) {
       return;
     }
 
@@ -685,6 +745,8 @@ export class LocalDataStore {
               serving: row.serving,
               portion: row.portion,
               nutrition: row.nutrition,
+              recipeId: row.recipeId,
+              recipeItems: row.recipeItems,
               createdAt: row.createdAt,
               dateKey: row.dateKey,
               sortIndex: row.sortIndex,
@@ -692,6 +754,7 @@ export class LocalDataStore {
             updatedAt: row.updatedAt,
             deletedAt: row.deletedAt,
           })),
+          recipes: dirtyRecipes.map((row) => ({ id: row.id, data: RecipeSchema.parse({ name: row.name, items: row.items, createdAt: row.createdAt }), updatedAt: row.updatedAt, deletedAt: row.deletedAt })),
           settings: dirtySettings
             ? {
                 id: USER_SETTINGS_ROW_ID,
@@ -709,6 +772,7 @@ export class LocalDataStore {
 
       const payload = await fetchJson<{
         acceptedFoodEntryIds?: string[];
+        acceptedRecipeIds?: string[];
         acceptedSettings?: boolean;
       }>(response);
 
@@ -731,6 +795,9 @@ export class LocalDataStore {
             [row.id, row.updatedAt],
           );
         }
+        for (const row of dirtyRecipes) {
+          if (payload?.acceptedRecipeIds?.includes(row.id)) await tx.execute(`UPDATE user_recipes SET dirty = 0 WHERE id = ? AND updated_at = ?`, [row.id, row.updatedAt]);
+        }
 
         if (dirtySettings && payload?.acceptedSettings) {
           await tx.execute(
@@ -744,7 +811,7 @@ export class LocalDataStore {
         }
       });
 
-      if ((payload?.acceptedFoodEntryIds?.length ?? 0) > 0 || payload?.acceptedSettings) {
+      if ((payload?.acceptedFoodEntryIds?.length ?? 0) > 0 || (payload?.acceptedRecipeIds?.length ?? 0) > 0 || payload?.acceptedSettings) {
         this.bumpRevision();
       }
     } catch {
@@ -952,6 +1019,18 @@ export class LocalDataStore {
     );
 
     return result.rows.map((row) => parseFoodEntryRow(row as SqlRow));
+  }
+
+  private async getRecipeRowsByIds(ids: string[]): Promise<Map<string, RecipeRecord>> {
+    if (!ids.length) return new Map();
+    const unique = [...new Set(ids)]; const placeholders = unique.map(() => "?").join(", ");
+    const result = await this.getDb().execute(`SELECT id, payload_json, updated_at, deleted_at, dirty FROM user_recipes WHERE id IN (${placeholders})`, unique);
+    return new Map(result.rows.map((row) => { const parsed = parseRecipeRow(row as SqlRow); return [parsed.id, parsed] as const; }));
+  }
+
+  private async getDirtyRecipeRows(): Promise<RecipeRecord[]> {
+    const result = await this.getDb().execute(`SELECT id, payload_json, updated_at, deleted_at, dirty FROM user_recipes WHERE dirty = 1 ORDER BY updated_at, id`);
+    return result.rows.map((row) => parseRecipeRow(row as SqlRow));
   }
 
   private async getUserSettingsRow(): Promise<UserSettingsRecord | null> {

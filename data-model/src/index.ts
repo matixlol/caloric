@@ -17,6 +17,23 @@ export const NutritionSchema = z
   .strict();
 export type Nutrition = z.infer<typeof NutritionSchema>;
 
+export const RecipeItemSchema = z.object({
+  id: z.string().min(1),
+  foodName: z.string().min(1),
+  brand: z.string().min(1).optional(),
+  serving: z.string().min(1).optional(),
+  portion: z.number().positive(),
+  nutrition: NutritionSchema.optional(),
+}).strict();
+export type RecipeItem = z.infer<typeof RecipeItemSchema>;
+
+export const RecipeSchema = z.object({
+  name: z.string().min(1),
+  items: z.array(RecipeItemSchema),
+  createdAt: z.number().int().nonnegative(),
+}).strict();
+export type Recipe = z.infer<typeof RecipeSchema>;
+
 export const FoodEntrySchema = z
   .object({
     meal: MealSchema,
@@ -25,6 +42,8 @@ export const FoodEntrySchema = z
     serving: z.string().min(1).optional(),
     portion: z.number().positive(),
     nutrition: NutritionSchema.optional(),
+    recipeId: z.string().min(1).optional(),
+    recipeItems: z.array(RecipeItemSchema).optional(),
     createdAt: z.number().int().nonnegative(),
     dateKey: z.string().min(1),
     sortIndex: z.number(),

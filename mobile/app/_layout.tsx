@@ -77,6 +77,7 @@ function AppNavigator() {
           presentation: "pageSheet",
         }}
       />
+      <Stack.Screen name="recipe-editor" options={{ presentation: "pageSheet" }} />
       <Stack.Screen
         name="friend-day"
         dangerouslySingular={(_name, params) => {

@@ -35,9 +35,11 @@ import {
   queueAnmatQuery,
 } from "../src/food-search";
 import { MacroBadges } from "../src/components/MacroBadges";
-import { useAllFoodEntries, useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
+import { useAllFoodEntries, useDataStoreActions, useDataStoreReady, useFoodEntry, useRecipe, useRecipes } from "../src/data/DataProvider";
 import type { FoodEntryRecord } from "../src/data/store";
 import { mealLabelFor, normalizeMeal } from "../src/meals";
+import { createRecipeItemId } from "../src/id";
+import { aggregateRecipeNutrition, buildRecipeLogEntryInput } from "../src/recipes";
 import { formatMixedQuarter, formatPortionLabel, sanitizePortion } from "../src/portion";
 import {
   QUICK_ADD_FOOD_NAME,
@@ -324,10 +326,18 @@ export default function LogFoodScreen() {
     meal?: string | string[];
     day?: string | string[];
     barcode?: string | string[];
+    recipeId?: string | string[];
+    recipeEntryId?: string | string[];
   }>();
   const isDataReady = useDataStoreReady();
   const { data: allFoodEntries } = useAllFoodEntries();
-  const { createFoodEntry } = useDataStoreActions();
+  const recipeId = Array.isArray(params.recipeId) ? params.recipeId[0] : params.recipeId;
+  const recipeEntryId = Array.isArray(params.recipeEntryId) ? params.recipeEntryId[0] : params.recipeEntryId;
+  const isRecipeMode = Boolean(recipeId || recipeEntryId);
+  const { data: targetRecipe } = useRecipe(recipeId);
+  const { data: targetRecipeEntry } = useFoodEntry(recipeEntryId);
+  const { data: recipes } = useRecipes();
+  const { createFoodEntry, createRecipe, updateFoodEntry, updateRecipe } = useDataStoreActions();
   const barcodeParam = Array.isArray(params.barcode) ? params.barcode[0] : params.barcode;
   const [query, setQuery] = useState(barcodeParam ?? "");
   const [scannedBarcode, setScannedBarcode] = useState(barcodeParam ?? "");
@@ -344,6 +354,7 @@ export default function LogFoodScreen() {
   const [searchError, setSearchError] = useState<string | null>(null);
   const [selectedFoodId, setSelectedFoodId] = useState<string | null>(null);
   const [selectedRecentEntryId, setSelectedRecentEntryId] = useState<string | null>(null);
+  const [selectedRecipeId, setSelectedRecipeId] = useState<string | null>(null);
   const [activeProviderFilter, setActiveProviderFilter] = useState<SearchProviderFilter>("all");
   const [isQuickAddExpanded, setIsQuickAddExpanded] = useState(false);
   const [isQuickAddPickerActive, setIsQuickAddPickerActive] = useState(false);
@@ -1003,6 +1014,7 @@ export default function LogFoodScreen() {
     canShowResults ? allFetchedFoods.find((food) => food.id === displayedSelectedFoodId) || null : null;
   const selectedRecentEntry =
     recentSearchMatches.find((entry) => entry.id === selectedRecentEntryId) || null;
+  const selectedRecipe = recipes.find((recipe) => recipe.id === selectedRecipeId) || null;
   const providerCounts: Record<DisplayedFoodSource, number> = {
     openfoodfacts: displayedFoodsBySource.openfoodfacts.length,
     mfp: displayedFoodsBySource.mfp.length,
@@ -1015,6 +1027,37 @@ export default function LogFoodScreen() {
 
   const handleAddToLog = (portionOverride?: number) => {
     const createdAt = Date.now();
+
+    if (isRecipeMode && targetRecipe && (selectedFood || selectedRecentEntry)) {
+      const source = selectedFood ?? selectedRecentEntry!;
+      const item = {
+        id: createRecipeItemId(),
+        foodName: "name" in source ? source.name : source.foodName,
+        brand: source.brand,
+        serving: source.serving,
+        portion: portionOverride ?? ("name" in source ? 1 : sanitizePortion(source.portion)),
+        nutrition: source.nutrition,
+      };
+      void updateRecipe(targetRecipe.id, (current) => ({ name: current.name, createdAt: current.createdAt, items: [...current.items, item] }));
+      navigateAfterAdd();
+      return;
+    }
+    if (isRecipeMode && targetRecipeEntry?.recipeItems && (selectedFood || selectedRecentEntry)) {
+      const source = selectedFood ?? selectedRecentEntry!;
+      const item = { id: createRecipeItemId(), foodName: "name" in source ? source.name : source.foodName, brand: source.brand, serving: source.serving, portion: portionOverride ?? ("name" in source ? 1 : sanitizePortion(source.portion)), nutrition: source.nutrition };
+      void updateFoodEntry(targetRecipeEntry.id, (current) => {
+        const recipeItems = [...(current.recipeItems ?? []), item];
+        return { meal: current.meal, foodName: current.foodName, brand: current.brand, serving: current.serving, portion: current.portion, nutrition: aggregateRecipeNutrition(recipeItems), recipeId: current.recipeId, recipeItems, createdAt: current.createdAt, dateKey: current.dateKey, sortIndex: current.sortIndex };
+      });
+      navigateAfterAdd();
+      return;
+    }
+
+    if (selectedRecipe) {
+      void createFoodEntry(buildRecipeLogEntryInput(selectedRecipe, { meal: selectedMeal, dateKey: selectedDateKey, portion: portionOverride ?? 1 }));
+      navigateAfterAdd();
+      return;
+    }
 
     if (selectedFood) {
       void createFoodEntry({
@@ -1058,7 +1101,7 @@ export default function LogFoodScreen() {
     navigateAfterAdd();
   };
 
-  canAddToLogRef.current = Boolean(selectedFood || selectedRecentEntry);
+  canAddToLogRef.current = Boolean(selectedFood || selectedRecentEntry || selectedRecipe);
   addToLogRef.current = handleAddToLog;
 
   return (
@@ -1075,9 +1118,9 @@ export default function LogFoodScreen() {
           },
         ]}
       >
-        <Text style={styles.largeTitle}>Foods</Text>
+        <Text style={styles.largeTitle}>{isRecipeMode ? "Add ingredient" : "Foods"}</Text>
         <Text style={styles.subtitle}>
-          Search and pick one item to add to {selectedMealLabel.toLowerCase()}
+          {isRecipeMode ? `Search and pick one item for ${targetRecipe?.name ?? targetRecipeEntry?.foodName ?? "this recipe"}` : `Search and pick one item to add to ${selectedMealLabel.toLowerCase()}`}
         </Text>
 
         <View style={styles.searchCard}>
@@ -1100,7 +1143,7 @@ export default function LogFoodScreen() {
               accessibilityLabel="Scan barcode"
               accessibilityRole="button"
               onPress={() =>
-                router.push({ pathname: "/scan-barcode", params: { meal: selectedMeal, day: selectedDateKey } })
+                router.push({ pathname: "/scan-barcode", params: { meal: selectedMeal, day: selectedDateKey, recipeId, recipeEntryId } })
               }
               style={styles.scannerButton}
             >
@@ -1111,6 +1154,27 @@ export default function LogFoodScreen() {
 
         {!canShowResults ? (
           <>
+            {!isRecipeMode ? <>
+              <Text style={styles.sectionTitle}>Recipes</Text>
+              <View style={styles.card}>
+                {recipes.map((recipe, index) => {
+                  const expanded = selectedRecipeId === recipe.id;
+                  return <View key={recipe.id} style={index < recipes.length - 1 ? styles.foodRowDivider : undefined}>
+                    <View style={styles.foodRow}>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`${expanded ? "Hide" : "Show"} ${recipe.name} ingredients`} style={styles.foodMain} onPress={() => { setSelectedRecipeId(expanded ? null : recipe.id); setSelectedFoodId(null); setSelectedRecentEntryId(null); }}>
+                        <Text style={styles.foodName}>{recipe.name}</Text><Text style={styles.foodMeta}>{recipe.items.length} ingredient{recipe.items.length === 1 ? "" : "s"}</Text><MacroBadges nutrition={aggregateRecipeNutrition(recipe.items)} />
+                      </Pressable>
+                      <Pressable accessibilityRole="button" accessibilityLabel={`Edit ${recipe.name}`} onPress={() => router.push({ pathname: "/recipe-editor", params: { recipeId: recipe.id } })}><Ionicons name="pencil" size={20} color={palette.tint}/></Pressable>
+                      <Ionicons name={expanded ? "chevron-up" : "chevron-down"} size={18} color={palette.secondaryLabel}/>
+                    </View>
+                    {expanded ? <View style={styles.recipePreview}>
+                      {recipe.items.length ? recipe.items.map((item) => <View key={item.id} style={styles.recipePreviewRow}><View style={styles.foodMain}><Text style={styles.recipePreviewName}>{item.foodName}</Text><Text style={styles.foodMeta}>{formatPortionLabel(item.portion)}{item.brand ? ` • ${item.brand}` : ""}</Text></View><MacroBadges nutrition={item.nutrition} multiplier={item.portion}/></View>) : <Text style={styles.helperText}>No ingredients yet. Tap the pencil to add some.</Text>}
+                    </View> : null}
+                  </View>;
+                })}
+                <Pressable style={styles.foodRow} onPress={() => void createRecipe({ name: "New recipe", items: [], createdAt: Date.now() }).then((recipe) => router.push({ pathname: "/recipe-editor", params: { recipeId: recipe.id } }))}><Ionicons name="add-circle-outline" size={22} color={palette.tint}/><Text style={styles.foodName}>New recipe</Text></Pressable>
+              </View>
+            </> : null}
             <Text style={styles.sectionTitle}>Recents</Text>
             {recentEntries.length > 0 ? (
               <View style={styles.card}>
@@ -1128,6 +1192,7 @@ export default function LogFoodScreen() {
                     onPress={() => {
                       setSelectedRecentEntryId(entry.id);
                       setSelectedFoodId(null);
+                      setSelectedRecipeId(null);
                     }}
                   />
                 ))}
@@ -1155,6 +1220,7 @@ export default function LogFoodScreen() {
                   onPress={() => {
                     setSelectedRecentEntryId(entry.id);
                     setSelectedFoodId(null);
+                    setSelectedRecipeId(null);
                   }}
                 />
               ))}
@@ -1221,6 +1287,7 @@ export default function LogFoodScreen() {
                   onPress={() => {
                     setSelectedFoodId(food.id);
                     setSelectedRecentEntryId(null);
+                    setSelectedRecipeId(null);
                   }}
                 />
               );
@@ -1413,23 +1480,23 @@ export default function LogFoodScreen() {
               <View
                 accessible
                 accessibilityRole="button"
-                accessibilityLabel={`Add to ${selectedMealLabel}`}
-                accessibilityState={{ disabled: !selectedFood && !selectedRecentEntry }}
+                accessibilityLabel={isRecipeMode ? "Add to recipe" : `Add to ${selectedMealLabel}`}
+                accessibilityState={{ disabled: !selectedFood && !selectedRecentEntry && !selectedRecipe }}
                 collapsable={false}
                 style={[
                   styles.actionButton,
-                  !selectedFood && !selectedRecentEntry && styles.actionButtonDisabled,
+                  !selectedFood && !selectedRecentEntry && !selectedRecipe && styles.actionButtonDisabled,
                 ]}
               >
                 <Text style={styles.actionButtonText}>
                   {isPortionPickerActive && portionSliderValue !== null
                     ? `Add ${formatMixedQuarter(portionSliderValue)}`
-                    : `Add to ${selectedMealLabel}`}
+                    : isRecipeMode ? "Add to recipe" : `Add to ${selectedMealLabel}`}
                 </Text>
               </View>
             </GestureDetector>
           )}
-          <GestureDetector gesture={quickAddGesture}>
+          {!isRecipeMode ? <GestureDetector gesture={quickAddGesture}>
             <View
               accessible
               accessibilityRole="button"
@@ -1447,7 +1514,7 @@ export default function LogFoodScreen() {
                 Quick add
               </Text>
             </View>
-          </GestureDetector>
+          </GestureDetector> : null}
         </View>
       </View>
     </View>
@@ -1592,6 +1659,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: palette.separator,
   },
+  recipePreview: { paddingBottom: 12, paddingLeft: 12, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.separator },
+  recipePreviewRow: { paddingTop: 10 },
+  recipePreviewName: { fontSize: 15, lineHeight: 19, color: palette.label },
   foodMain: {
     flex: 1,
   },

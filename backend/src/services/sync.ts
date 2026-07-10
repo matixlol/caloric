@@ -1,7 +1,7 @@
 import { USER_SETTINGS_ROW_ID } from "@caloric/data-model";
 import { and, eq, isNull, lte } from "drizzle-orm";
 import { db } from "../db";
-import { userFoodEntries, userSettings } from "../db/schema";
+import { userFoodEntries, userRecipes, userSettings } from "../db/schema";
 import { isObjectRecord, jsonResponse, requireAuthenticatedUser } from "../http";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
@@ -134,6 +134,13 @@ async function upsertUserSettingsRow(
 
   return true;
 }
+async function upsertUserRecipe(userId: string, row: ReturnType<typeof parseSyncPushBody>["recipes"][number]): Promise<boolean> {
+  const existing = await db.select({ updatedAt: userRecipes.updatedAt }).from(userRecipes).where(and(eq(userRecipes.userId, userId), eq(userRecipes.id, row.id))).limit(1);
+  if (!shouldApplyIncomingWrite(existing[0]?.updatedAt, row.updatedAt)) return false;
+  const updatedAt = new Date(row.updatedAt); const deletedAt = dateFromMillis(row.deletedAt ?? null);
+  await db.insert(userRecipes).values({ userId, id: row.id, data: row.data, updatedAt, deletedAt }).onConflictDoUpdate({ target: [userRecipes.userId, userRecipes.id], set: { data: row.data, updatedAt, deletedAt }, setWhere: lte(userRecipes.updatedAt, updatedAt) });
+  return true;
+}
 
 export async function handleSyncBootstrapRequest(request: Request): Promise<Response> {
   const auth = await requireAuthenticatedUser(request);
@@ -142,7 +149,10 @@ export async function handleSyncBootstrapRequest(request: Request): Promise<Resp
   }
 
   try {
-    const [foodEntryRows, settingsRows] = await Promise.all([
+    const [foodEntryRows, recipeRows, settingsRows] = await Promise.all([
+      db
+        .select({ id: userRecipes.id, data: userRecipes.data, updatedAt: userRecipes.updatedAt })
+        .from(userRecipes).where(and(eq(userRecipes.userId, auth.userId), isNull(userRecipes.deletedAt))).orderBy(userRecipes.updatedAt),
       db
         .select({
           id: userFoodEntries.id,
@@ -168,6 +178,7 @@ export async function handleSyncBootstrapRequest(request: Request): Promise<Resp
         data: row.data,
         updatedAt: row.updatedAt.getTime(),
       })),
+      recipes: recipeRows.map((row) => ({ id: row.id, data: row.data, updatedAt: row.updatedAt.getTime() })),
       settings: settingsRows[0]
         ? {
             id: USER_SETTINGS_ROW_ID,
@@ -190,12 +201,14 @@ export async function handleSyncPushRequest(request: Request): Promise<Response>
   try {
     const body = parseSyncPushBody(await parseJsonBody(request));
     const acceptedFoodEntryIds: string[] = [];
+    const acceptedRecipeIds: string[] = [];
 
     for (const row of body.foodEntries) {
       if (await upsertUserFoodEntry(auth.userId, row)) {
         acceptedFoodEntryIds.push(row.id);
       }
     }
+    for (const row of body.recipes) if (await upsertUserRecipe(auth.userId, row)) acceptedRecipeIds.push(row.id);
 
     let acceptedSettings = false;
     if (body.settings) {
@@ -204,6 +217,7 @@ export async function handleSyncPushRequest(request: Request): Promise<Response>
 
     return jsonResponse({
       acceptedFoodEntryIds,
+      acceptedRecipeIds,
       acceptedSettings,
     });
   } catch (error) {
