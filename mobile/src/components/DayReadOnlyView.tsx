@@ -3,6 +3,9 @@ import type { FoodEntry, UserSettings } from "@caloric/data-model";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../meals";
 import { formatPortionLabel, sanitizePortion } from "../portion";
 import { macroColors } from "../theme/macroColors";
+import { isQuickAddEntry } from "../quickAdd";
+import { hasCalorieMacroMismatch } from "../nutritionConsistency";
+import { CalorieMismatchBadge } from "./CalorieMismatchBadge";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -25,6 +28,7 @@ export type DayMealEntry = {
   name: string;
   meta?: string;
   calories: number;
+  hasCalorieMacroMismatch: boolean;
 };
 
 export type FoodEntryWithId = FoodEntry & { id: string };
@@ -99,6 +103,8 @@ function buildLogsByMeal(entries: FoodEntryWithId[]): Record<MealKey, DayMealEnt
       name: entry.foodName,
       meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
       calories: (entry.nutrition?.calories ?? 0) * portion,
+      hasCalorieMacroMismatch:
+        !isQuickAddEntry(entry) && hasCalorieMacroMismatch(entry.nutrition),
     });
   });
 
@@ -310,6 +316,7 @@ export function ReadOnlyDayView({
                         <View style={styles.rowMain}>
                           <Text style={styles.rowTitle}>{entry.name}</Text>
                           {entry.meta ? <Text style={styles.rowSubtitle}>{entry.meta}</Text> : null}
+                          {entry.hasCalorieMacroMismatch ? <CalorieMismatchBadge /> : null}
                         </View>
                         <Text style={styles.rowValue}>{formatCalories(entry.calories)}</Text>
                       </View>

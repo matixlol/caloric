@@ -40,6 +40,7 @@ import { MEAL_TIMES, type MealKey, normalizeMeal } from "../../src/meals";
 import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
 import { finishStartupBreakdownTrace, logStartupMilestone } from "../../src/performance/startup";
+import { CalorieMismatchBadge } from "../../src/components/CalorieMismatchBadge";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -133,6 +134,7 @@ function MealRow({
   name,
   meta,
   calories,
+  hasCalorieMacroMismatch,
   isLast,
   onDelete,
   onPress,
@@ -141,6 +143,7 @@ function MealRow({
   name: string;
   meta?: string;
   calories: number;
+  hasCalorieMacroMismatch: boolean;
   isLast: boolean;
   onDelete: (id: string) => void;
   onPress: (id: string) => void;
@@ -175,6 +178,7 @@ function MealRow({
           <View style={styles.rowMain}>
             <Text style={styles.rowTitle}>{name}</Text>
             {meta ? <Text style={styles.rowSubtitle}>{meta}</Text> : null}
+            {hasCalorieMacroMismatch ? <CalorieMismatchBadge /> : null}
           </View>
           <Text style={styles.rowValue}>{formatCalories(calories)}</Text>
         </View>
@@ -742,6 +746,7 @@ export default function HomeScreen() {
             name={item.entry.name}
             meta={item.entry.meta}
             calories={item.entry.calories}
+            hasCalorieMacroMismatch={item.entry.hasCalorieMacroMismatch}
             isLast={isLast}
             onDelete={handleDeleteEntry}
             onPress={handleOpenEntry}
