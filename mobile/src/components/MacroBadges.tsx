@@ -1,5 +1,7 @@
 import { StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import { macroColors } from "../theme/macroColors";
+import { hasCalorieMacroMismatch } from "../nutritionConsistency";
+import { CalorieMismatchBadge } from "./CalorieMismatchBadge";
 
 type NutritionLike = {
   calories?: number;
@@ -19,7 +21,7 @@ function formatCalories(value: number | undefined): string | null {
     return null;
   }
 
-  return `${Math.round(value).toLocaleString()} kcal`;
+  return `${Math.round(value).toLocaleString()} kc`;
 }
 
 function formatMacroValue(value: number | undefined): string | null {
@@ -79,28 +81,31 @@ export function MacroBadges({
 
   return (
     <View style={[styles.row, containerStyle]}>
-      {badges.map((badge) => (
-        <View
-          key={badge.key}
-          style={[
-            styles.badge,
-            {
-              backgroundColor: badge.colors.background,
-            },
-          ]}
-        >
-          <Text
+      <View style={styles.badgeGroup}>
+        {badges.map((badge) => (
+          <View
+            key={badge.key}
             style={[
-              styles.badgeText,
+              styles.badge,
               {
-                color: badge.colors.text,
+                backgroundColor: badge.colors.background,
               },
             ]}
           >
-            {badge.prefix ? `${badge.prefix} ${badge.label}` : badge.label}
-          </Text>
-        </View>
-      ))}
+            <Text
+              style={[
+                styles.badgeText,
+                {
+                  color: badge.colors.text,
+                },
+              ]}
+            >
+              {badge.prefix ? `${badge.prefix} ${badge.label}` : badge.label}
+            </Text>
+          </View>
+        ))}
+      </View>
+      {hasCalorieMacroMismatch(nutrition) ? <CalorieMismatchBadge /> : null}
     </View>
   );
 }
@@ -112,9 +117,13 @@ const styles = StyleSheet.create({
     flexWrap: "wrap",
     gap: 6,
   },
-  badge: {
+  badgeGroup: {
     borderRadius: 7,
-    paddingHorizontal: 8,
+    flexDirection: "row",
+    overflow: "hidden",
+  },
+  badge: {
+    paddingHorizontal: 6,
     paddingVertical: 4,
   },
   badgeText: {
