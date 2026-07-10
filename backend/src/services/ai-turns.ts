@@ -129,7 +129,6 @@ function finalizeTurn(
 export function startResumableTurn(params: {
   turnId: string;
   userId: string;
-  signal?: AbortSignal;
   run: (emit: TurnEmitter, signal: AbortSignal) => Promise<void>;
   onError: (error: unknown) => { code: string; message: string };
 }): TurnRecord {
@@ -178,15 +177,17 @@ export function startResumableTurn(params: {
     },
   };
 
+  // The run is intentionally NOT abortable by the caller/client: a resumable turn
+  // must survive the client disconnecting (e.g. the app backgrounding mid-turn).
+  // Its only kill switch is this internal deadline, which prevents a hung LLM call
+  // from keeping the turn "running" — and leaking its record — forever.
   const deadlineController = new AbortController();
   const deadlineTimer = setTimeout(() => {
     deadlineController.abort(new Error("AI turn timed out."));
   }, turnDeadlineMs);
   deadlineTimer.unref?.();
 
-  const signal = params.signal
-    ? AbortSignal.any([deadlineController.signal, params.signal])
-    : deadlineController.signal;
+  const signal = deadlineController.signal;
 
   void (async () => {
     try {

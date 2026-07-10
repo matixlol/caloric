@@ -95,6 +95,9 @@ export type TurnStreamOutcome = {
   // and the turn is still running server-side, ready to be resumed.
   terminal: ChatStatus | "error" | null;
   errorMessage?: string;
+  // Distinguishing error code from the server's terminal `error` payload (e.g.
+  // "ai_turn_failed"), surfaced so a failure is identifiable in Sentry.
+  errorCode?: string;
 };
 
 export type ActiveTurn = {

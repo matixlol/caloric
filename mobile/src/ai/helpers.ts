@@ -94,11 +94,22 @@ export function isErrorLike(value: unknown): value is { message?: unknown; stack
 
 export class UIError extends Error {
   details?: string;
+  // Stable, machine-readable code (e.g. the server's terminal error code) used to
+  // tag/fingerprint the Sentry capture so distinct failures are distinguishable.
+  code?: string;
+  // Structured context attached to the Sentry capture (e.g. turnId, server code).
+  context?: Record<string, unknown>;
 
-  constructor(message: string, details?: string) {
+  constructor(
+    message: string,
+    details?: string,
+    options?: { code?: string; context?: Record<string, unknown> },
+  ) {
     super(message);
     this.name = "UIError";
     this.details = details?.trim() || undefined;
+    this.code = options?.code?.trim() || undefined;
+    this.context = options?.context;
   }
 }
 
@@ -121,6 +132,17 @@ export function getErrorDetails(error: unknown): string | null {
     const details = (error as UIError).details;
     if (typeof details === "string" && details.trim()) {
       return details.trim();
+    }
+  }
+
+  return null;
+}
+
+export function getErrorCode(error: unknown): string | null {
+  if (isErrorLike(error) && typeof error.name === "string" && error.name === "UIError") {
+    const code = (error as UIError).code;
+    if (typeof code === "string" && code.trim()) {
+      return code.trim();
     }
   }
 
