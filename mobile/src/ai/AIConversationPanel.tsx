@@ -2,7 +2,7 @@ import Ionicons from "@expo/vector-icons/Ionicons";
 import { GlassView } from "expo-glass-effect";
 import { useEffect, useRef } from "react";
 import { Keyboard, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
-import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
+import Animated from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { StreamdownRN } from "streamdown-rn";
 import { MacroBadges } from "../components/MacroBadges";
@@ -10,7 +10,7 @@ import { mealLabelFor } from "../meals";
 import { formatPortionLabel } from "../portion";
 import { useThemedStyles } from "../theme/useAppTheme";
 import { useAIChat } from "./AIChatProvider";
-import { searchLayoutTransition } from "./animations";
+import { panelEnterTransition, panelExitTransition, searchLayoutTransition } from "./animations";
 import { AudioBubbleWaveform, SearchResultsDisclosure, TypingIndicator } from "./components";
 import { COMPOSER_BAR_HEIGHT } from "./FloatingComposer";
 import { inferSearchQueryFromFoods } from "./helpers";
@@ -60,8 +60,11 @@ export function AIConversationPanel() {
 
   return (
     <Animated.View
-      entering={FadeIn.duration(160)}
-      exiting={FadeOut.duration(120)}
+      // Transform-only transitions: an opacity fade here breaks the GlassView
+      // card's glass effect (expo/expo#41024) and a stuck entering fade would
+      // leave the panel invisible at opacity 0.
+      entering={panelEnterTransition}
+      exiting={panelExitTransition}
       pointerEvents="box-none"
       style={[panelStyles.container, { bottom: bottomOffset, top: insets.top + 8 }]}
     >
@@ -77,6 +80,9 @@ export function AIConversationPanel() {
       ) : null}
       {isConversationVisible ? (
       <GlassView
+        // Keyed by scheme: re-assigning UIGlassEffect on appearance change
+        // renders incorrectly (expo/expo#43732); remount for a clean effect.
+        key={isDark ? "panel-dark" : "panel-light"}
         glassEffectStyle="regular"
         colorScheme={isDark ? "dark" : "light"}
         style={panelStyles.card}
