@@ -47,6 +47,7 @@ type Subscriber = (message: TurnOutbound) => void;
 type TurnRecord = {
   id: string;
   userId: string;
+  sessionId: string;
   status: "running" | "done" | "error";
   errorCode?: string;
   errorMessage?: string;
@@ -57,6 +58,9 @@ type TurnRecord = {
   assistantBuffer: string;
   subscribers: Set<Subscriber>;
   cleanupTimer?: ReturnType<typeof setTimeout>;
+  // Aborts the running turn with a specific terminal code/message (timeout,
+  // supersede) instead of the generic onError mapping. No-op once finished.
+  interrupt?: (code: string, message: string) => void;
 };
 
 export type TurnEmitter = {
@@ -76,6 +80,12 @@ const finishedTurnTtlMs = 5 * 60 * 1000;
 const turnDeadlineMs = 3 * 60 * 1000;
 
 const turns = new Map<string, TurnRecord>();
+
+// The turn currently running for each session. A session's conversation is a
+// single mutable document (last-write-wins in the store), so two concurrent runs
+// on one session would silently clobber each other's messages; starting a new
+// turn supersedes (aborts) the previous one instead.
+const runningTurnsBySession = new Map<string, TurnRecord>();
 
 const sseHeaders = {
   "Content-Type": "text/event-stream; charset=utf-8",
@@ -129,13 +139,21 @@ function finalizeTurn(
 export function startResumableTurn(params: {
   turnId: string;
   userId: string;
-  signal?: AbortSignal;
+  sessionId: string;
   run: (emit: TurnEmitter, signal: AbortSignal) => Promise<void>;
   onError: (error: unknown) => { code: string; message: string };
 }): TurnRecord {
+  // A session runs at most one turn at a time: abort any still-running turn for
+  // this session before starting the new one, so an abandoned run (client gave up
+  // resuming, then re-sent) can't race the new turn's saveAiSession.
+  runningTurnsBySession
+    .get(params.sessionId)
+    ?.interrupt?.("ai_turn_superseded", "This AI turn was superseded by a newer message.");
+
   const record: TurnRecord = {
     id: params.turnId,
     userId: params.userId,
+    sessionId: params.sessionId,
     status: "running",
     seqCounter: 0,
     durable: [],
@@ -144,6 +162,7 @@ export function startResumableTurn(params: {
   };
 
   turns.set(record.id, record);
+  runningTurnsBySession.set(params.sessionId, record);
 
   const emitDurable = (message: DistributiveOmit<DurableOutbound, "seq">): void => {
     const seq = (record.seqCounter += 1);
@@ -178,25 +197,47 @@ export function startResumableTurn(params: {
     },
   };
 
-  const deadlineController = new AbortController();
+  // The run is intentionally NOT abortable by the client's connection: a resumable
+  // turn must survive the client disconnecting (e.g. the app backgrounding
+  // mid-turn). Its kill switches are the internal deadline (which prevents a hung
+  // LLM call from keeping the turn "running" — and leaking its record — forever)
+  // and being superseded by a newer turn on the same session. Both interrupt with
+  // a distinct terminal code rather than the generic onError mapping.
+  let interruptReason: { code: string; message: string } | null = null;
+  const abortController = new AbortController();
+
+  record.interrupt = (code, message) => {
+    if (record.status !== "running" || interruptReason) {
+      return;
+    }
+    interruptReason = { code, message };
+    abortController.abort(new Error(message));
+  };
+
   const deadlineTimer = setTimeout(() => {
-    deadlineController.abort(new Error("AI turn timed out."));
+    record.interrupt?.("ai_turn_timeout", "The AI response took too long. Please try again.");
   }, turnDeadlineMs);
   deadlineTimer.unref?.();
 
-  const signal = params.signal
-    ? AbortSignal.any([deadlineController.signal, params.signal])
-    : deadlineController.signal;
-
   void (async () => {
     try {
-      await params.run(emitter, signal);
+      await params.run(emitter, abortController.signal);
       finalizeTurn(record, "done");
     } catch (error) {
-      const { code, message } = params.onError(error);
-      finalizeTurn(record, "error", code, message);
+      // Assertion required: TS's control-flow analysis can't see the assignment
+      // inside record.interrupt and narrows the variable to its initial null.
+      const reason = interruptReason as { code: string; message: string } | null;
+      if (reason) {
+        finalizeTurn(record, "error", reason.code, reason.message);
+      } else {
+        const { code, message } = params.onError(error);
+        finalizeTurn(record, "error", code, message);
+      }
     } finally {
       clearTimeout(deadlineTimer);
+      if (runningTurnsBySession.get(params.sessionId) === record) {
+        runningTurnsBySession.delete(params.sessionId);
+      }
     }
   })();
 

@@ -68,6 +68,7 @@ describe("ai-turns resumable runner", () => {
     const gate = deferred();
     const record = startResumableTurn({
       turnId: "ai_turn_test_full",
+      sessionId: "session_ai_turn_test_full",
       userId: "user-1",
       onError: noopOnError,
       run: async (emit: TurnEmitter) => {
@@ -106,6 +107,7 @@ describe("ai-turns resumable runner", () => {
     const gate2 = deferred();
     const record = startResumableTurn({
       turnId: "ai_turn_test_resume",
+      sessionId: "session_ai_turn_test_resume",
       userId: "user-1",
       onError: noopOnError,
       run: async (emit: TurnEmitter) => {
@@ -147,6 +149,7 @@ describe("ai-turns resumable runner", () => {
     const gate = deferred();
     const record = startResumableTurn({
       turnId: "ai_turn_test_partial",
+      sessionId: "session_ai_turn_test_partial",
       userId: "user-1",
       onError: noopOnError,
       run: async (emit: TurnEmitter) => {
@@ -173,6 +176,7 @@ describe("ai-turns resumable runner", () => {
   it("reports a terminal error to subscribers when the run throws", async () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_error",
+      sessionId: "session_ai_turn_test_error",
       userId: "user-1",
       onError: () => ({ code: "ai_turn_failed", message: "boom" }),
       run: async () => {
@@ -189,6 +193,7 @@ describe("ai-turns resumable runner", () => {
   it("scopes turn lookup to the owning user", async () => {
     const record = startResumableTurn({
       turnId: "ai_turn_test_owner",
+      sessionId: "session_ai_turn_test_owner",
       userId: "owner",
       onError: noopOnError,
       run: async () => {
@@ -199,5 +204,49 @@ describe("ai-turns resumable runner", () => {
     expect(getResumableTurn(record.id, "owner")?.id).toBe(record.id);
     expect(getResumableTurn(record.id, "intruder")).toBeNull();
     expect(getResumableTurn("ai_turn_missing", "owner")).toBeNull();
+  });
+
+  it("supersedes a still-running turn when a new turn starts on the same session", async () => {
+    const firstAborted = deferred();
+    const first = startResumableTurn({
+      turnId: "ai_turn_test_supersede_old",
+      sessionId: "session_supersede",
+      userId: "user-1",
+      onError: () => ({ code: "ai_turn_failed", message: "should not be used" }),
+      run: async (emit: TurnEmitter, signal: AbortSignal) => {
+        emit.event({ kind: "assistant", text: "old turn" });
+        await new Promise<void>((_, reject) => {
+          signal.addEventListener(
+            "abort",
+            () => {
+              firstAborted.resolve();
+              reject(signal.reason);
+            },
+            { once: true },
+          );
+        });
+      },
+    });
+
+    const second = startResumableTurn({
+      turnId: "ai_turn_test_supersede_new",
+      sessionId: "session_supersede",
+      userId: "user-1",
+      onError: noopOnError,
+      run: async (emit: TurnEmitter) => {
+        emit.event({ kind: "assistant", text: "new turn" });
+      },
+    });
+
+    await firstAborted.promise;
+
+    // The old turn finalizes with the distinct supersede code, not the generic
+    // onError mapping; the new turn completes normally.
+    const oldPayloads = await readAll(createTurnSseResponse(first, -1));
+    const oldError = oldPayloads.find((p) => p.type === "error");
+    expect(oldError).toMatchObject({ error: "ai_turn_superseded" });
+
+    const newPayloads = await readAll(createTurnSseResponse(second, -1));
+    expect(newPayloads.some((p) => p.type === "status" && p.status === "ready")).toBe(true);
   });
 });
