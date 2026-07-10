@@ -63,9 +63,12 @@ export function AIComposer() {
   }, [blurNonce]);
 
   // A liquid-glass circle that sits behind a button's icon, so the action
-  // buttons read as glassy pills rather than solid fills.
+  // buttons read as glassy pills rather than solid fills. Keyed by scheme:
+  // re-assigning an already-mounted UIGlassEffect on appearance change renders
+  // incorrectly (expo/expo#43732), so force a clean remount instead.
   const glassCircle = (
     <GlassView
+      key={isDark ? "glass-dark" : "glass-light"}
       pointerEvents="none"
       glassEffectStyle="regular"
       colorScheme={isDark ? "dark" : "light"}
@@ -225,15 +228,17 @@ export function AIComposer() {
               style={[
                 styles.voiceButton,
                 isRecording && styles.voiceButtonRecording,
-                !canUseComposerActions && styles.buttonDisabled,
                 voiceButtonAnimatedStyle as never,
               ]}
             >
               {glassCircle}
+              {/* Disabled dim goes on the icon, never on the wrapper: opacity
+                  on the glass circle's ancestors kills the glass effect. */}
               <Ionicons
                 name={isRecording ? "lock-open" : "mic"}
                 size={isRecording ? 22 : 24}
                 color={isRecording ? palette.error : palette.tint}
+                style={canUseComposerActions ? undefined : styles.buttonDisabled}
               />
             </Animated.View>
           </Animated.View>
