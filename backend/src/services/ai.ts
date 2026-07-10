@@ -819,11 +819,13 @@ async function handleUserMessageAction(
   // Deliberately do NOT forward `request.signal` here: it aborts as soon as the
   // client disconnects (which the app does on backgrounding), and wiring it into
   // the run would abort the in-flight LLM call and finalize the turn as an error
-  // even though the user only backgrounded mid-turn. The run is bounded solely by
-  // the internal deadline; `request.signal` still tears down this SSE viewer below.
+  // even though the user only backgrounded mid-turn. The run is bounded by the
+  // internal deadline and by being superseded by a newer turn on this session;
+  // `request.signal` still tears down this SSE viewer below.
   const record = startResumableTurn({
     turnId: createAiTurnId(),
     userId: session.userId,
+    sessionId: session.id,
     onError: (error) => {
       captureUnknownError("ai_turn_failed", error);
       return { code: "ai_turn_failed", message: "Unknown error." };

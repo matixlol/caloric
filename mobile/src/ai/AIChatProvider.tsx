@@ -43,6 +43,7 @@ import {
   createMessageId,
   formatRecordingDuration,
   getErrorCode,
+  getErrorContext,
   getErrorDetails,
   getErrorMessage,
   inferAudioMeta,
@@ -114,6 +115,35 @@ type AIChatContextValue = {
   openConversation: () => void;
   closeConversation: () => void;
 };
+
+const turnStreamUrl = (turnId: string) =>
+  `${BACKEND_BASE_URL}/ai/turn/${encodeURIComponent(turnId)}/stream`;
+
+// The request an SSE stream came from, threaded into error details so a failure
+// reports the URL that was actually fetched (initial POST vs resume GET).
+type TurnStreamSource = { method: string; url: string };
+
+const resumeFailureError = (
+  turnId: string,
+  options: { status?: number; underlyingError?: unknown; resumeRetries?: number; code: string },
+) =>
+  new UIError(
+    "AI turn could not be resumed.",
+    buildErrorDetails({
+      method: "GET",
+      url: turnStreamUrl(turnId),
+      status: options.status,
+      underlyingError: options.underlyingError,
+    }),
+    {
+      code: options.code,
+      context: {
+        turnId,
+        ...(options.status !== undefined ? { status: options.status } : {}),
+        ...(options.resumeRetries !== undefined ? { resumeRetries: options.resumeRetries } : {}),
+      },
+    },
+  );
 
 const AIChatContext = createContext<AIChatContextValue | null>(null);
 
@@ -298,24 +328,22 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
   const showError = (nextError: unknown) => {
     const details = getErrorDetails(nextError);
     const code = getErrorCode(nextError);
-    const context = nextError instanceof UIError ? nextError.context : undefined;
+    const context = getErrorContext(nextError);
 
     // Sentry's default Error serialization keeps only name/message/stack, so the
     // real cause (server error code + payload) would be lost. Attach it explicitly
     // as a tag/context and fingerprint by code so distinct failures don't all
     // collapse into a single opaque "UIError: Unknown error." issue.
-    const extra: Record<string, unknown> = {};
+    // `details` is set last so a context key can't shadow it.
+    const extra: Record<string, unknown> = { ...context };
     if (details) {
       extra.details = details;
-    }
-    if (context) {
-      Object.assign(extra, context);
     }
 
     Sentry.captureException(nextError, {
       ...(code ? { tags: { ai_error_code: code } } : {}),
       ...(Object.keys(extra).length > 0 ? { contexts: { aiError: extra } } : {}),
-      ...(code ? { fingerprint: ["ai-turn-error", code] } : {}),
+      ...(code ? { fingerprint: ["ai-chat-error", code] } : {}),
     });
 
     setError(getErrorMessage(nextError));
@@ -358,6 +386,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
           url: sessionUrl,
           underlyingError: networkError,
         }),
+        { code: "ai_session_network_error" },
       );
     }
 
@@ -381,6 +410,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
           status: response.status,
           payload,
         }),
+        { code: "ai_session_http_error", context: { status: response.status } },
       );
     }
 
@@ -398,6 +428,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
           status: response.status,
           payload,
         }),
+        { code: "ai_session_invalid_response" },
       );
     }
 
@@ -474,6 +505,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
           url: turnUrl,
           underlyingError: networkError,
         }),
+        { code: "ai_turn_network_error" },
       );
     }
 
@@ -496,6 +528,12 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
           : typeof payload?.error === "string"
             ? payload.error
             : "Unknown error.";
+      // The backend's `error` field is its machine-readable code; prefer it so
+      // failures group by their real cause.
+      const backendCode =
+        typeof payload?.error === "string" && payload.error.trim()
+          ? payload.error.trim()
+          : "ai_turn_http_error";
       throw new UIError(
         backendMessage,
         buildErrorDetails({
@@ -504,6 +542,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
           status: response.status,
           payload,
         }),
+        { code: backendCode, context: { status: response.status } },
       );
     }
 
@@ -755,7 +794,12 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
 
   // Drives a single SSE response to completion, routing events into the UI and
   // tracking the resume cursor. Decides whether the turn finished or was interrupted.
-  const driveTurnStream = async (response: Response, appendResolvedUserMessage: boolean) => {
+  // `source` names the request the response came from, for error reporting.
+  const driveTurnStream = async (
+    response: Response,
+    appendResolvedUserMessage: boolean,
+    source: TurnStreamSource,
+  ) => {
     streamConsumerActiveRef.current = true;
 
     let outcome: TurnStreamOutcome;
@@ -809,21 +853,11 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
         resumeRetriesRef.current += 1;
         if (resumeRetriesRef.current > maxResumeRetries) {
           finishTurn(
-            new UIError(
-              "AI turn could not be resumed.",
-              buildErrorDetails({
-                method: "GET",
-                url: `${BACKEND_BASE_URL}/ai/turn/${activeTurnRef.current.turnId}/stream`,
-                underlyingError: streamError,
-              }),
-              {
-                code: "ai_turn_resume_exhausted",
-                context: {
-                  turnId: activeTurnRef.current.turnId,
-                  resumeRetries: resumeRetriesRef.current,
-                },
-              },
-            ),
+            resumeFailureError(activeTurnRef.current.turnId, {
+              code: "ai_turn_resume_exhausted",
+              underlyingError: streamError,
+              resumeRetries: resumeRetriesRef.current,
+            }),
           );
           return;
         }
@@ -843,13 +877,9 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
         new UIError(
           serverMessage,
           buildErrorDetails({
-            method: "GET",
-            url: `${BACKEND_BASE_URL}/ai/turn/${failedTurnId ?? "unknown"}/stream`,
-            payload: {
-              turnId: failedTurnId,
-              serverErrorCode: serverCode,
-              serverMessage,
-            },
+            method: source.method,
+            url: source.url,
+            payload: { serverErrorCode: serverCode },
           }),
           {
             // Prefer the server's own code so genuine turn failures group by their
@@ -902,7 +932,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
         throw new UIError("Missing authentication token. Sign in again and retry.");
       }
 
-      const resumeUrl = `${BACKEND_BASE_URL}/ai/turn/${encodeURIComponent(active.turnId)}/stream?cursor=${active.appliedSeq}`;
+      const resumeUrl = `${turnStreamUrl(active.turnId)}?cursor=${active.appliedSeq}`;
       const response = await expoFetch(resumeUrl, {
         method: "GET",
         credentials: "omit",
@@ -919,6 +949,12 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
         const message = unauthorized
           ? "This AI turn is not available."
           : "The AI response expired before it could be restored. Please try again.";
+        // Propagate the server's own code (turn_unauthorized / turn_not_found /
+        // future values) instead of remapping a closed set client-side.
+        const serverCode =
+          typeof payload?.error === "string" && payload.error.trim()
+            ? payload.error.trim()
+            : "ai_turn_expired";
         finishTurn(
           new UIError(
             message,
@@ -929,7 +965,7 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
               payload,
             }),
             {
-              code: unauthorized ? "ai_turn_unauthorized" : "ai_turn_expired",
+              code: serverCode,
               context: { turnId: active.turnId },
             },
           ),
@@ -939,43 +975,31 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
 
       if (!response.ok) {
         finishTurn(
-          new UIError(
-            "AI turn could not be resumed.",
-            buildErrorDetails({
-              method: "GET",
-              url: resumeUrl,
-              status: response.status,
-            }),
-            {
-              code: "ai_turn_resume_http_error",
-              context: { turnId: active.turnId, status: response.status },
-            },
-          ),
+          resumeFailureError(active.turnId, {
+            code: "ai_turn_resume_http_error",
+            status: response.status,
+          }),
         );
         return;
       }
 
       // Reaching the server counts as progress; reset the failure budget.
       resumeRetriesRef.current = 0;
-      await driveTurnStream(response, active.appendResolvedUserMessage);
+      await driveTurnStream(response, active.appendResolvedUserMessage, {
+        method: "GET",
+        url: resumeUrl,
+      });
     } catch (resumeError) {
       // Network failure while resuming. Retry with a bounded budget so a persistent
       // failure ends the turn instead of wedging the chat in "streaming" forever.
       resumeRetriesRef.current += 1;
       if (resumeRetriesRef.current > maxResumeRetries) {
         finishTurn(
-          new UIError(
-            "AI turn could not be resumed.",
-            buildErrorDetails({
-              method: "GET",
-              url: `${BACKEND_BASE_URL}/ai/turn/${active.turnId}/stream`,
-              underlyingError: resumeError,
-            }),
-            {
-              code: "ai_turn_resume_exhausted",
-              context: { turnId: active.turnId, resumeRetries: resumeRetriesRef.current },
-            },
-          ),
+          resumeFailureError(active.turnId, {
+            code: "ai_turn_resume_exhausted",
+            underlyingError: resumeError,
+            resumeRetries: resumeRetriesRef.current,
+          }),
         );
         return;
       }
@@ -1017,7 +1041,10 @@ export function AIChatProvider({ children }: { children: ReactNode }) {
         audio: options?.audio,
         signal: controller.signal,
       });
-      await driveTurnStream(response, Boolean(options?.appendResolvedUserMessage));
+      await driveTurnStream(response, Boolean(options?.appendResolvedUserMessage), {
+        method: "POST",
+        url: `${BACKEND_BASE_URL}/ai/turn`,
+      });
     } catch (loopError) {
       showError(loopError);
       finishTurn();

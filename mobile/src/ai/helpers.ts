@@ -149,6 +149,17 @@ export function getErrorCode(error: unknown): string | null {
   return null;
 }
 
+export function getErrorContext(error: unknown): Record<string, unknown> | null {
+  if (isErrorLike(error) && typeof error.name === "string" && error.name === "UIError") {
+    const context = (error as UIError).context;
+    if (context && typeof context === "object") {
+      return context;
+    }
+  }
+
+  return null;
+}
+
 export function isStreamingPayload(value: unknown): value is StreamingPayload {
   return Boolean(value && typeof value === "object");
 }
