@@ -1,4 +1,4 @@
-import type { FoodEntry, UserSettings } from "@caloric/data-model";
+import type { FoodEntry, Recipe, UserSettings } from "@caloric/data-model";
 import { bigint, boolean, customType, index, integer, jsonb, pgTable, primaryKey, text, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 
 const bytea = customType<{ data: Uint8Array; driverData: Uint8Array | Buffer }>({
@@ -284,6 +284,9 @@ export const userFoodEntries = pgTable(
     userUpdatedAtIdx: index("user_food_entries_user_updated_at_idx").on(table.userId, table.updatedAt),
   }),
 );
+export const userRecipes = pgTable("user_recipes", {
+  userId: text("user_id").notNull(), id: text("id").notNull(), data: jsonb("data").$type<Recipe>().notNull(), updatedAt: timestamp("updated_at", { withTimezone: true }).notNull(), deletedAt: timestamp("deleted_at", { withTimezone: true }),
+}, (table) => ({ pk: primaryKey({ columns: [table.userId, table.id], name: "user_recipes_pk" }), userUpdatedAtIdx: index("user_recipes_user_updated_at_idx").on(table.userId, table.updatedAt) }));
 
 export const userSettings = pgTable(
   "user_settings",

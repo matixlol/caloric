@@ -22,6 +22,7 @@ describe("sync", () => {
           deletedAt: 1700000002000,
         },
       ],
+      recipes: [{ id: "recipe-1", data: { name: "Bowl", createdAt: 1700000000000, items: [{ id: "recipe_item-1", foodName: "Rice", portion: 0.5, nutrition: { calories: 200 } }] }, updatedAt: 1700000002500 }],
       settings: {
         id: "settings",
         data: {
@@ -35,6 +36,7 @@ describe("sync", () => {
     });
 
     expect(payload.foodEntries).toHaveLength(1);
+    expect(payload.recipes).toHaveLength(1);
     expect(payload.foodEntries[0]?.deletedAt).toBe(1700000002000);
     expect(payload.settings?.id).toBe("settings");
   });

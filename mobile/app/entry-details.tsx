@@ -27,6 +27,8 @@ import {
   parseOptionalMacroInput,
 } from "../src/quickAdd";
 import { macroColors } from "../src/theme/macroColors";
+import { MacroBadges } from "../src/components/MacroBadges";
+import { aggregateRecipeNutrition } from "../src/recipes";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -298,6 +300,8 @@ export default function EntryDetailsScreen() {
         serving: current.serving,
         portion: current.portion,
         nutrition,
+        recipeId: current.recipeId,
+        recipeItems: current.recipeItems,
         createdAt: current.createdAt,
         dateKey: current.dateKey,
         sortIndex: current.sortIndex,
@@ -318,6 +322,24 @@ export default function EntryDetailsScreen() {
       serving: current.serving,
       portion: nextPortion,
       nutrition: current.nutrition,
+      recipeId: current.recipeId,
+      recipeItems: current.recipeItems,
+      createdAt: current.createdAt,
+      dateKey: current.dateKey,
+      sortIndex: current.sortIndex,
+    }));
+  };
+
+  const updateLoggedRecipeItems = (items: NonNullable<typeof entry.recipeItems>) => {
+    void updateFoodEntry(entry.id, (current) => ({
+      meal: current.meal,
+      foodName: current.foodName,
+      brand: current.brand,
+      serving: current.serving,
+      portion: current.portion,
+      nutrition: aggregateRecipeNutrition(items),
+      recipeId: current.recipeId,
+      recipeItems: items,
       createdAt: current.createdAt,
       dateKey: current.dateKey,
       sortIndex: current.sortIndex,
@@ -446,6 +468,42 @@ export default function EntryDetailsScreen() {
             </View>
           </View>
         </View>}
+
+        {entry.recipeItems ? (
+          <View style={styles.ingredientsCard}>
+            <View style={styles.ingredientsHeader}>
+              <View>
+                <Text style={styles.ingredientsTitle}>Ingredients</Text>
+                <Text style={styles.ingredientsHint}>Changes here affect only this diary entry.</Text>
+              </View>
+              {entry.recipeId ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Edit reusable recipe"
+                  onPress={() => router.push({ pathname: "/recipe-editor", params: { recipeId: entry.recipeId } })}
+                  style={styles.editRecipeButton}
+                >
+                  <Text style={styles.editRecipeButtonText}>Edit recipe</Text>
+                </Pressable>
+              ) : null}
+            </View>
+            {entry.recipeItems.map((item, index) => (
+              <View key={item.id} style={[styles.ingredientRow, index > 0 && styles.ingredientDivider]}>
+                <View style={styles.ingredientMain}>
+                  <Text style={styles.ingredientName}>{item.foodName}</Text>
+                  <Text style={styles.ingredientMeta}>{formatPortionLabel(item.portion)}{item.brand ? ` • ${item.brand}` : ""}</Text>
+                  <MacroBadges nutrition={item.nutrition} multiplier={item.portion} />
+                </View>
+                <View style={styles.ingredientActions}>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Decrease ${item.foodName}`} onPress={() => updateLoggedRecipeItems(entry.recipeItems!.map((candidate) => candidate.id === item.id ? { ...candidate, portion: sanitizePortion(candidate.portion - 0.25) } : candidate))} style={styles.ingredientAction}><Text style={styles.ingredientActionText}>−¼</Text></Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Increase ${item.foodName}`} onPress={() => updateLoggedRecipeItems(entry.recipeItems!.map((candidate) => candidate.id === item.id ? { ...candidate, portion: sanitizePortion(candidate.portion + 0.25) } : candidate))} style={styles.ingredientAction}><Text style={styles.ingredientActionText}>+¼</Text></Pressable>
+                  <Pressable accessibilityRole="button" accessibilityLabel={`Remove ${item.foodName}`} onPress={() => updateLoggedRecipeItems(entry.recipeItems!.filter((candidate) => candidate.id !== item.id))} style={styles.ingredientAction}><Ionicons name="trash-outline" size={16} color="#B91C1C" /></Pressable>
+                </View>
+              </View>
+            ))}
+            <Pressable accessibilityRole="button" accessibilityLabel="Add ingredient to this entry" onPress={() => router.push({ pathname: "/log-food", params: { recipeEntryId: entry.id, meal: entry.meal, day: entry.dateKey } })} style={styles.addIngredientButton}><Ionicons name="add" size={18} color={palette.tint}/><Text style={styles.addIngredientText}>Add to this entry</Text></Pressable>
+          </View>
+        ) : null}
 
         <Pressable
           accessibilityRole="button"
@@ -616,6 +674,22 @@ const styles = StyleSheet.create({
     paddingVertical: 12,
     gap: 10,
   },
+  ingredientsCard: { borderRadius: 14, backgroundColor: palette.card, paddingHorizontal: 12, paddingVertical: 12 },
+  ingredientsHeader: { flexDirection: "row", alignItems: "flex-start", justifyContent: "space-between", gap: 10, marginBottom: 4 },
+  ingredientsTitle: { fontSize: 18, lineHeight: 22, fontWeight: "700", color: palette.label },
+  ingredientsHint: { marginTop: 2, fontSize: 12, lineHeight: 16, color: palette.secondaryLabel },
+  editRecipeButton: { paddingHorizontal: 10, paddingVertical: 7, borderRadius: 9, backgroundColor: palette.background },
+  editRecipeButtonText: { fontSize: 13, fontWeight: "700", color: palette.tint },
+  ingredientRow: { flexDirection: "row", alignItems: "center", gap: 8, paddingVertical: 10 },
+  ingredientDivider: { borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.separator },
+  ingredientMain: { flex: 1 },
+  ingredientName: { fontSize: 16, lineHeight: 20, color: palette.label },
+  ingredientMeta: { marginTop: 2, marginBottom: 3, fontSize: 12, lineHeight: 16, color: palette.secondaryLabel },
+  ingredientActions: { flexDirection: "row", gap: 5 },
+  ingredientAction: { minWidth: 36, minHeight: 34, alignItems: "center", justifyContent: "center", borderRadius: 8, backgroundColor: palette.background },
+  ingredientActionText: { fontSize: 13, fontWeight: "700", color: palette.tint },
+  addIngredientButton: { minHeight: 42, flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 5, borderTopWidth: StyleSheet.hairlineWidth, borderTopColor: palette.separator },
+  addIngredientText: { fontSize: 14, fontWeight: "700", color: palette.tint },
   macroLegendRow: {
     flexDirection: "row",
     flexWrap: "wrap",

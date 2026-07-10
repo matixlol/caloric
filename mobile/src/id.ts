@@ -9,6 +9,9 @@ export function createFoodEntryId(): string {
   return createTimestampedTypeId("food_entry");
 }
 
+export function createRecipeId(): string { return createTimestampedTypeId("recipe"); }
+export function createRecipeItemId(): string { return createTimestampedTypeId("recipe_item"); }
+
 export function createAiMessageId(): string {
   return createTimestampedTypeId("ai_message");
 }

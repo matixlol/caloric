@@ -12,7 +12,7 @@ function first(value: string | string[] | undefined) {
 export default function ScanBarcodeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ meal?: string | string[]; day?: string | string[] }>();
+  const params = useLocalSearchParams<{ meal?: string | string[]; day?: string | string[]; recipeId?: string | string[]; recipeEntryId?: string | string[] }>();
   const [permission, requestPermission] = useCameraPermissions();
   const hasScanned = useRef(false);
 
@@ -30,6 +30,8 @@ export default function ScanBarcodeScreen() {
         meal: first(params.meal),
         day: first(params.day),
         barcode,
+        recipeId: first(params.recipeId),
+        recipeEntryId: first(params.recipeEntryId),
       },
     });
   };

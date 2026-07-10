@@ -7,6 +7,7 @@ import { focusManager, onlineManager } from "@tanstack/react-query";
 import {
   localDataStore,
   type FoodEntryRecord,
+  type RecipeRecord,
   type SyncStatusRecord,
   type UserSettingsRecord,
 } from "./store";
@@ -18,6 +19,7 @@ type DataContextValue = {
 };
 
 const EMPTY_ENTRIES: FoodEntryRecord[] = [];
+const EMPTY_RECIPES: RecipeRecord[] = [];
 const EMPTY_SYNC_STATUS: SyncStatusRecord = {
   updatedAt: 0,
   dirty: false,
@@ -252,6 +254,16 @@ export function useAllFoodEntries(consumer?: string) {
 
   return useStoreQuery(query, EMPTY_ENTRIES, "food_entries.all", consumer);
 }
+export function useRecipes(consumer?: string) {
+  const { store } = useDataContext();
+  const query = useCallback(() => store.listRecipes(), [store]);
+  return useStoreQuery(query, EMPTY_RECIPES, "recipes.all", consumer);
+}
+export function useRecipe(id: string | undefined, consumer?: string) {
+  const { store } = useDataContext();
+  const query = useCallback(() => id ? store.getRecipe(id) : Promise.resolve(null), [id, store]);
+  return useStoreQuery(query, null as RecipeRecord | null, "recipe.by_id", consumer);
+}
 
 export function useUserSettings(consumer?: string) {
   const { store } = useDataContext();
@@ -275,6 +287,9 @@ export function useDataStoreActions() {
       createFoodEntry: store.createFoodEntry.bind(store),
       updateFoodEntry: store.updateFoodEntry.bind(store),
       deleteFoodEntry: store.deleteFoodEntry.bind(store),
+      createRecipe: store.createRecipe.bind(store),
+      updateRecipe: store.updateRecipe.bind(store),
+      deleteRecipe: store.deleteRecipe.bind(store),
       reorderFoodEntriesForDate: (
         dateKey: string,
         orderedEntries: { id: string; meal: Meal }[],
