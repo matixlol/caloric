@@ -41,6 +41,7 @@ import { formatRelativeTimestamp } from "../../src/time";
 import { macroColors } from "../../src/theme/macroColors";
 import { finishStartupBreakdownTrace, logStartupMilestone } from "../../src/performance/startup";
 import { CalorieMismatchBadge } from "../../src/components/CalorieMismatchBadge";
+import { MacroBadges } from "../../src/components/MacroBadges";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -84,6 +85,9 @@ type MealHeaderItem = {
   meal: MealKey;
   label: string;
   calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
   isFirst: boolean;
 };
 
@@ -302,6 +306,9 @@ export default function HomeScreen() {
     MEAL_TIMES.forEach((meal, mealIndex) => {
       const entries = dayView?.logsByMeal[meal.key] ?? [];
       const calories = entries.reduce((sum, entry) => sum + entry.calories, 0);
+      const protein = entries.reduce((sum, entry) => sum + entry.protein, 0);
+      const carbs = entries.reduce((sum, entry) => sum + entry.carbs, 0);
+      const fat = entries.reduce((sum, entry) => sum + entry.fat, 0);
 
       items.push({
         type: "header",
@@ -309,6 +316,9 @@ export default function HomeScreen() {
         meal: meal.key,
         label: meal.label,
         calories,
+        protein,
+        carbs,
+        fat,
         isFirst: mealIndex === 0,
       });
 
@@ -696,9 +706,15 @@ export default function HomeScreen() {
             style={[styles.mealHeaderCard, !item.isFirst && styles.mealHeaderCardSpaced]}
           >
             <View style={styles.mealHeader}>
-              <View style={styles.mealCaloriesRow}>
-                <Text style={styles.mealCalories}>{formatCalories(item.calories)}</Text>
-                <Text style={styles.mealCaloriesUnit}>kcal</Text>
+              <View style={styles.mealNutritionRow}>
+                <View style={styles.mealCaloriesRow}>
+                  <Text style={styles.mealCalories}>{formatCalories(item.calories)}</Text>
+                  <Text style={styles.mealCaloriesUnit}>kcal</Text>
+                </View>
+                <MacroBadges
+                  containerStyle={styles.mealMacroBadges}
+                  nutrition={{ protein: item.protein, carbs: item.carbs, fat: item.fat }}
+                />
               </View>
 
               <Pressable
@@ -1158,6 +1174,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 6,
+  },
+  mealNutritionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  mealMacroBadges: {
+    marginTop: 0,
   },
   mealCaloriesUnit: {
     fontSize: 11,
