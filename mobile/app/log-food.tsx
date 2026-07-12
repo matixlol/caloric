@@ -339,8 +339,8 @@ export default function LogFoodScreen() {
   const { data: recipes } = useRecipes();
   const { createFoodEntry, createRecipe, updateFoodEntry, updateRecipe } = useDataStoreActions();
   const barcodeParam = Array.isArray(params.barcode) ? params.barcode[0] : params.barcode;
-  const [query, setQuery] = useState(barcodeParam ?? "");
-  const [scannedBarcode, setScannedBarcode] = useState(barcodeParam ?? "");
+  const scannedBarcode = barcodeParam ?? "";
+  const [query, setQuery] = useState("");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [foodsBySource, setFoodsBySource] = useState<SearchFoodsBySource>(createEmptyFoodsBySource);
   // Append-only interleaved list for the "All" tab. Each loaded page is
@@ -983,7 +983,7 @@ export default function LogFoodScreen() {
     );
   }
 
-  const trimmedQuery = query.trim();
+  const trimmedQuery = (scannedBarcode || query).trim();
   const canShowResults = trimmedQuery.length >= 2;
   const recentEntries = allFoodEntries
     .filter((entry) => !isQuickAddEntry(entry))
@@ -1126,9 +1126,11 @@ export default function LogFoodScreen() {
         <View style={styles.searchCard}>
           <View style={styles.searchRow}>
             <TextInput
-              value={query}
+              value={scannedBarcode || query}
               onChangeText={(value) => {
-                setScannedBarcode("");
+                if (scannedBarcode) {
+                  router.setParams({ barcode: "" });
+                }
                 setQuery(value);
               }}
               placeholder="Search foods (example: banana)"

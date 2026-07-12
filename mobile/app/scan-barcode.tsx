@@ -5,6 +5,8 @@ import { useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+const SIMULATED_BARCODE = "3017624010701";
+
 function first(value: string | string[] | undefined) {
   return Array.isArray(value) ? value[0] : value;
 }
@@ -17,7 +19,7 @@ export default function ScanBarcodeScreen() {
   const hasScanned = useRef(false);
 
   const close = () => router.back();
-  const handleScan = ({ data, type }: BarcodeScanningResult) => {
+  const submitBarcode = (data: string, type: BarcodeScanningResult["type"]) => {
     if (hasScanned.current) return;
     let barcode = data.replace(/\D/g, "");
     if (type === "upc_a" && barcode.length === 12) barcode = `0${barcode}`;
@@ -35,6 +37,8 @@ export default function ScanBarcodeScreen() {
       },
     });
   };
+  const handleScan = ({ data, type }: BarcodeScanningResult) => submitBarcode(data, type);
+  const simulateScan = () => submitBarcode(SIMULATED_BARCODE, "ean13");
 
   if (!permission) {
     return <View style={styles.screen} />;
@@ -52,6 +56,11 @@ export default function ScanBarcodeScreen() {
         <Pressable accessibilityRole="button" onPress={close} style={styles.secondaryButton}>
           <Text style={styles.secondaryButtonText}>Cancel</Text>
         </Pressable>
+        {__DEV__ ? (
+          <Pressable accessibilityLabel="Simulate barcode scan" accessibilityRole="button" onPress={simulateScan} style={styles.simulateButton}>
+            <Text style={styles.simulateButtonText}>Simulate barcode scan</Text>
+          </Pressable>
+        ) : null}
       </View>
     );
   }
@@ -73,6 +82,16 @@ export default function ScanBarcodeScreen() {
         <View style={styles.scanFrame} />
         <Text style={styles.hint}>Hold the barcode inside the frame</Text>
       </View>
+      {__DEV__ ? (
+        <Pressable
+          accessibilityLabel="Simulate barcode scan"
+          accessibilityRole="button"
+          onPress={simulateScan}
+          style={[styles.cameraSimulateButton, { bottom: insets.bottom + 24 }]}
+        >
+          <Text style={styles.cameraSimulateButtonText}>Simulate scan</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -92,9 +111,13 @@ const styles = StyleSheet.create({
   primaryButtonText: { fontSize: 17, fontWeight: "700", color: "#FFFFFF" },
   secondaryButton: { marginTop: 10, minHeight: 44, justifyContent: "center", paddingHorizontal: 20 },
   secondaryButtonText: { fontSize: 17, color: "#2563EB" },
+  simulateButton: { marginTop: 20, minHeight: 44, justifyContent: "center", paddingHorizontal: 20 },
+  simulateButtonText: { fontSize: 15, fontWeight: "600", color: "#6B7280" },
   topBar: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 18 },
   closeButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22, backgroundColor: "rgba(0,0,0,0.55)" },
   overlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },
   scanFrame: { width: "82%", height: 210, borderWidth: 3, borderRadius: 18, borderColor: "#FFFFFF", backgroundColor: "transparent" },
   hint: { marginTop: 22, paddingHorizontal: 14, paddingVertical: 8, borderRadius: 10, overflow: "hidden", fontSize: 16, fontWeight: "600", color: "#FFFFFF", backgroundColor: "rgba(0,0,0,0.6)" },
+  cameraSimulateButton: { position: "absolute", alignSelf: "center", minHeight: 44, justifyContent: "center", paddingHorizontal: 18, borderRadius: 12, backgroundColor: "rgba(0,0,0,0.7)" },
+  cameraSimulateButtonText: { fontSize: 15, fontWeight: "700", color: "#FFFFFF" },
 });
