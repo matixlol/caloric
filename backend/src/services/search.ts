@@ -12,6 +12,7 @@ import {
 import { logError, logInfo, logWarn, summarizeText } from "../logging";
 import { normalizeTextValue } from "../providers/anmat/html";
 import { fetchFoodDetail, searchNutrition } from "../providers/myfitnesspal/client";
+import { getMfpNetCarbs } from "../providers/myfitnesspal/nutrition";
 import { getMfpAuthHeaders, MFP_BASE_URL } from "../providers/myfitnesspal/session";
 import { OPEN_FOOD_FACTS_BASE_URL, searchOpenFoodFacts } from "../providers/open-food-facts/client";
 import { Sentry } from "../lib/sentry";
@@ -82,6 +83,7 @@ type MfpNutritionalContents = {
   };
   protein?: unknown;
   carbohydrates?: unknown;
+  net_carbs?: unknown;
   fat?: unknown;
   fiber?: unknown;
   sugar?: unknown;
@@ -314,12 +316,17 @@ function mapNutrition(contents: MfpNutritionalContents | null | undefined): Sear
     return undefined;
   }
 
+  const fiber = asNumber(contents.fiber);
   const nutrition = {
     calories: asNumber(contents.energy?.value),
     protein: asNumber(contents.protein),
-    carbs: asNumber(contents.carbohydrates),
+    carbs: getMfpNetCarbs(
+      asNumber(contents.carbohydrates),
+      fiber,
+      asNumber(contents.net_carbs),
+    ),
     fat: asNumber(contents.fat),
-    fiber: asNumber(contents.fiber),
+    fiber,
     sugars: asNumber(contents.sugar),
     sodiumMg: asNumber(contents.sodium),
     potassiumMg: asNumber(contents.potassium),
