@@ -6,6 +6,7 @@ import { macroColors } from "../theme/macroColors";
 import { isQuickAddEntry } from "../quickAdd";
 import { hasCalorieMacroMismatch } from "../nutritionConsistency";
 import { CalorieMismatchBadge } from "./CalorieMismatchBadge";
+import { MacroBadges } from "./MacroBadges";
 
 const iosColor = (name: string, fallback: string) =>
   Platform.OS === "ios" ? PlatformColor(name) : fallback;
@@ -28,6 +29,9 @@ export type DayMealEntry = {
   name: string;
   meta?: string;
   calories: number;
+  protein: number;
+  carbs: number;
+  fat: number;
   hasCalorieMacroMismatch: boolean;
 };
 
@@ -103,6 +107,9 @@ function buildLogsByMeal(entries: FoodEntryWithId[]): Record<MealKey, DayMealEnt
       name: entry.foodName,
       meta: [formatPortionLabel(portion), entry.brand, entry.serving].filter(Boolean).join(" • "),
       calories: (entry.nutrition?.calories ?? 0) * portion,
+      protein: (entry.nutrition?.protein ?? 0) * portion,
+      carbs: (entry.nutrition?.carbs ?? 0) * portion,
+      fat: (entry.nutrition?.fat ?? 0) * portion,
       hasCalorieMacroMismatch:
         !isQuickAddEntry(entry) && hasCalorieMacroMismatch(entry.nutrition),
     });
@@ -283,6 +290,9 @@ export function ReadOnlyDayView({
       {MEAL_TIMES.map((meal, index) => {
         const entries = view.logsByMeal[meal.key];
         const mealCalories = entries.reduce((sum, entry) => sum + entry.calories, 0);
+        const mealProtein = entries.reduce((sum, entry) => sum + entry.protein, 0);
+        const mealCarbs = entries.reduce((sum, entry) => sum + entry.carbs, 0);
+        const mealFat = entries.reduce((sum, entry) => sum + entry.fat, 0);
 
         return (
           <View key={`readonly-${view.selectedDateKey}-${meal.key}`} style={styles.mealSection}>
@@ -294,9 +304,15 @@ export function ReadOnlyDayView({
 
             <View style={[styles.mealHeaderCard, index > 0 && styles.mealHeaderCardSpaced]}>
               <View style={styles.mealHeader}>
-                <View style={styles.mealCaloriesRow}>
-                  <Text style={styles.mealCalories}>{formatCalories(mealCalories)}</Text>
-                  <Text style={styles.mealCaloriesUnit}>kcal</Text>
+                <View style={styles.mealNutritionRow}>
+                  <View style={styles.mealCaloriesRow}>
+                    <Text style={styles.mealCalories}>{formatCalories(mealCalories)}</Text>
+                    <Text style={styles.mealCaloriesUnit}>kcal</Text>
+                  </View>
+                  <MacroBadges
+                    containerStyle={styles.mealMacroBadges}
+                    nutrition={{ protein: mealProtein, carbs: mealCarbs, fat: mealFat }}
+                  />
                 </View>
               </View>
             </View>
@@ -525,6 +541,14 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "flex-end",
     gap: 6,
+  },
+  mealNutritionRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 12,
+  },
+  mealMacroBadges: {
+    marginTop: 0,
   },
   mealCalories: {
     fontSize: 28,
