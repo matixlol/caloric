@@ -1,4 +1,5 @@
 import { config } from "../../config";
+import { getMfpNetCarbs } from "./nutrition";
 
 export const MFP_SYNC_URL = "https://sync.myfitnesspal.com/iphone_api/synchronize?lang=en_US";
 const PACKET_MAGIC = 0x04d3;
@@ -184,6 +185,7 @@ function parseFood(payload: Uint8Array): MfpBarcodeFood {
       serving = `${Number.isInteger(amount) ? amount : Number(amount.toFixed(2))} ${description}`;
     }
   }
+  const fiber = cleanNumber(nutrients[10]);
   return {
     id: masterId,
     uid,
@@ -196,8 +198,8 @@ function parseFood(payload: Uint8Array): MfpBarcodeFood {
       fat: cleanNumber(nutrients[1]),
       sodiumMg: cleanNumber(nutrients[7]),
       potassiumMg: cleanNumber(nutrients[8]),
-      carbs: cleanNumber(nutrients[9]),
-      fiber: cleanNumber(nutrients[10]),
+      carbs: getMfpNetCarbs(cleanNumber(nutrients[9]), fiber),
+      fiber,
       sugars: cleanNumber(nutrients[11]),
       protein: cleanNumber(nutrients[12]),
     },
