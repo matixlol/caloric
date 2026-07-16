@@ -1,7 +1,7 @@
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, type BarcodeScanningResult, useCameraPermissions } from "expo-camera";
 import { useLocalSearchParams, useRouter } from "expo-router";
-import { useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
@@ -12,12 +12,18 @@ function first(value: string | string[] | undefined) {
 export default function ScanBarcodeScreen() {
   const router = useRouter();
   const insets = useSafeAreaInsets();
-  const params = useLocalSearchParams<{ meal?: string | string[]; day?: string | string[]; recipeId?: string | string[]; recipeEntryId?: string | string[] }>();
+  const params = useLocalSearchParams<{
+    meal?: string | string[];
+    day?: string | string[];
+    recipeId?: string | string[];
+    recipeEntryId?: string | string[];
+    testBarcode?: string | string[];
+  }>();
   const [permission, requestPermission] = useCameraPermissions();
   const hasScanned = useRef(false);
 
   const close = () => router.back();
-  const handleScan = ({ data, type }: BarcodeScanningResult) => {
+  const handleScan = useCallback(({ data, type }: BarcodeScanningResult) => {
     if (hasScanned.current) return;
     let barcode = data.replace(/\D/g, "");
     if (type === "upc_a" && barcode.length === 12) barcode = `0${barcode}`;
@@ -34,7 +40,14 @@ export default function ScanBarcodeScreen() {
         recipeEntryId: first(params.recipeEntryId),
       },
     });
-  };
+  }, [params.day, params.meal, params.recipeEntryId, params.recipeId, router]);
+
+  useEffect(() => {
+    const testBarcode = first(params.testBarcode);
+    if (!__DEV__ || !testBarcode) return;
+
+    handleScan({ data: testBarcode, type: "ean13" });
+  }, [handleScan, params.testBarcode]);
 
   if (!permission) {
     return <View style={styles.screen} />;
