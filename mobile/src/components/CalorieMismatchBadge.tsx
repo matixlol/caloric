@@ -4,7 +4,7 @@ import { StyleSheet, Text, View } from "react-native";
 export function CalorieMismatchBadge() {
   return (
     <View
-      accessibilityLabel="Calories and macros differ by more than 8 percent"
+      accessibilityLabel="Calories and macros differ by more than 15 percent"
       style={styles.badge}
     >
       <Ionicons color="#92400E" name="alert-circle" size={12} />
