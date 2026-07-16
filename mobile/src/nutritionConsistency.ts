@@ -5,7 +5,7 @@ export type CalorieNutrition = {
   fat?: number;
 };
 
-export const CALORIE_MISMATCH_THRESHOLD = 0.08;
+export const CALORIE_MISMATCH_THRESHOLD = 0.15;
 
 export function hasCalorieMacroMismatch(nutrition: CalorieNutrition | undefined): boolean {
   if (!nutrition) return false;
