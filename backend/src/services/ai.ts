@@ -4,7 +4,10 @@ import {
   type JSONValue,
   type ModelMessage,
 } from "ai";
-import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import {
+  createGoogleGenerativeAI,
+  type GoogleLanguageModelOptions,
+} from "@ai-sdk/google";
 import { z } from "zod";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "../ai-log-context";
 import { config } from "../config";
@@ -106,6 +109,11 @@ const systemPrompt = [
   "Only set resultId, meal, portion, and reason in each suggestion.",
   "Portion should be in quarter increments (0.25).",
   "If the user sends audio, understand it directly from the audio input instead of talking about transcription.",
+  "Before searching, silently make a checklist of every requested food, explicit brand or variant, meal, and quantity.",
+  "Search every checklist item using the user's exact brand and variant terms.",
+  "Reject implausible matches, such as a normal single slice, egg, glass of milk, or ordinary serving with clearly impossible calories or macros, and search again.",
+  "If the exact variant is unavailable, prefer a plausible generic match over a conflicting brand or variant.",
+  "Before requesting approval, verify that every requested food appears exactly once, explicit meal buckets are preserved, no unmentioned foods were added, and each portion correctly converts the requested amount into the selected entry's serving units.",
   "When you answer, keep the wording concise and practical.",
 ].join(" ");
 
@@ -353,6 +361,13 @@ async function requestAiSdkTurn(
     messages: session.conversation,
     tools: aiSdkTools,
     abortSignal: options?.signal,
+    providerOptions: {
+      google: {
+        thinkingConfig: {
+          thinkingLevel: config.geminiThinkingLevel,
+        },
+      } satisfies GoogleLanguageModelOptions,
+    },
     experimental_telemetry: {
       isEnabled: true,
       functionId: "backend.ai.turn",
@@ -362,6 +377,7 @@ async function requestAiSdkTurn(
         toolCount: Object.keys(aiSdkTools).length,
         provider: "google-ai-studio",
         model: config.geminiModel,
+        thinkingLevel: config.geminiThinkingLevel,
       },
     },
   });

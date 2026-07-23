@@ -35,6 +35,28 @@ function getBooleanEnv(name: string, fallback: boolean): boolean {
   throw new Error(`Environment variable ${name} must be a valid boolean`);
 }
 
+const geminiThinkingLevels = ["minimal", "low", "medium", "high"] as const;
+type GeminiThinkingLevel = (typeof geminiThinkingLevels)[number];
+
+function getGeminiThinkingLevel(
+  raw: string | undefined,
+  fallback: GeminiThinkingLevel,
+): GeminiThinkingLevel {
+  if (!raw) {
+    return fallback;
+  }
+
+  const normalized = raw.trim().toLowerCase();
+  const parsed = geminiThinkingLevels.find((level) => level === normalized);
+  if (parsed) {
+    return parsed;
+  }
+
+  throw new Error(
+    `Environment variable GEMINI_THINKING_LEVEL must be one of: ${geminiThinkingLevels.join(", ")}`,
+  );
+}
+
 function parseTrustedOrigins(raw: string | undefined): string[] {
   if (!raw) {
     return [];
@@ -81,5 +103,6 @@ export const config = {
     Bun.env.OPEN_FOOD_FACTS_USER_AGENT ?? "Caloric/1.0 (OpenFoodFacts integration; contact required)",
   openFoodFactsUserEmail: Bun.env.OPEN_FOOD_FACTS_USER_EMAIL,
   googleAiStudioApiKey: getRequiredEnv("GOOGLE_AI_STUDIO_API_KEY"),
-  geminiModel: Bun.env.GEMINI_MODEL ?? "gemini-3-flash-preview",
+  geminiModel: Bun.env.GEMINI_MODEL ?? "gemini-3.6-flash",
+  geminiThinkingLevel: getGeminiThinkingLevel(Bun.env.GEMINI_THINKING_LEVEL, "low"),
 };
