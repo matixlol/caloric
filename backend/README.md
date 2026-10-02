@@ -120,3 +120,73 @@ PLAYWRIGHT_BROWSERS_PATH=0 pnpm run mfp:install-browser
 pnpm run db:push
 pnpm run dev
 ```
+
+## Web journal
+
+The React web client lives in `web/` and is built with Bun. The backend serves
+the signed-in app at `/` and compiled assets at `/web/*`.
+It shares the native food, recipe, settings and social schemas.
+Normal backend `dev` and `start` commands build the web client first; after editing
+the client, run `pnpm --dir backend web:build` to refresh the bundle.
+
+Base UI provides swipe-dismissable, focus-managed bottom sheets and segmented
+controls, styled to match Expo. dnd-kit provides whole-row touch sorting with the
+native 170 ms hold, cross-meal drops (including empty meals), auto-scroll and
+keyboard sorting (Space to lift/drop, arrows to move, Escape to cancel). A quick
+swipe still scrolls; tapping edits. Drops save through `/sync/push`; failed writes
+restore the saved order. There are no move buttons or reorder success toasts.
+
+The food and recipe Add button also matches the native gesture: hold 260 ms,
+slide upward to select ¼–3 servings, and release to add. Whole servings have
+larger targets; releasing below the dead zone cancels. A normal tap still adds
+the entered serving quantity. Motion animates measured drawer heights as content
+changes, without scaling text; reduced-motion preferences disable resizing motion.
+Sheets slide in with a fading backdrop. Adding food, including through the
+assistant or Duplicate, reveals the saved row when the sheet closes instead of
+showing an added/duplicated success toast. Errors and delete/undo notices remain.
+
+From the repository root, launch a real backend preview with an isolated loopback
+PostgreSQL database and an Amp portal in one command:
+
+```bash
+env -u DATABASE_URL backend/web-preview.sh
+```
+
+Sign in with `preview@caloric.local` / `CaloricPreview123!`. This uses the same
+Better Auth, sync, social, food-search and AI paths as the deployed backend; there
+is no demo or scripted fallback. Local state is preserved between launches. Set
+`WEB_PREVIEW_RESET=1` for an explicit reset. The script automatically uses the
+Amp portal URL for auth and trusted origins; an origin argument or
+`WEB_PREVIEW_ORIGIN` overrides it. Optional live provider credentials already in
+the environment enable their corresponding AI and search behavior:
+`GOOGLE_AI_STUDIO_API_KEY` for AI, and the existing MFP credentials for MyFitnessPal.
+Open Food Facts uses its real upstream service. Email codes are logged locally;
+the preview disables outgoing email and production telemetry.
+
+The web preview is not an offline-sync replacement for the native app. Camera
+barcode scanning, push notifications, native haptics and native voice behavior
+are unavailable. Home-screen standalone display is declared in the manifest;
+browser/device support varies, and there is no offline service worker.
+
+Checks (no production services required):
+
+```bash
+pnpm --dir backend web:test
+pnpm --dir backend web:check
+# Start web:preview first, then set CALORIC_WEB_URL to its printed portal URL.
+pnpm --dir backend exec playwright install chromium webkit
+pnpm --dir backend web:e2e
+CALORIC_BROWSER=webkit pnpm --dir backend web:e2e
+```
+
+`CHROMIUM_PATH` can select an installed Chromium executable. `CALORIC_WEB_URL`
+selects the isolated preview; do not target production. Tests verify the seeded
+account is present, then create a disposable test account for writes so your
+preview edits stay intact. They exercise real authentication and database
+persistence, touch scrolling/long-press sorting in Chromium, mouse sorting in
+WebKit, keyboard sorting, auto-scroll, empty-meal drops, cancellation and failed
+reorder rollback, swipe sheet dismissal, failed form writes, hold-and-slide
+portions, and frame-sampled drawer resizing.
+Set `CALORIC_SCREENSHOTS` to a directory to capture phone-sized sheets, drag,
+editor and dark-mode states plus a short drawer-resize recording.
+Browser emulation is not real-device verification.

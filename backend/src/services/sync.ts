@@ -149,7 +149,7 @@ export async function handleSyncBootstrapRequest(request: Request): Promise<Resp
   }
 
   try {
-    const [foodEntryRows, recipeRows, settingsRows] = await Promise.all([
+    const [recipeRows, foodEntryRows, settingsRows] = await Promise.all([
       db
         .select({ id: userRecipes.id, data: userRecipes.data, updatedAt: userRecipes.updatedAt })
         .from(userRecipes).where(and(eq(userRecipes.userId, auth.userId), isNull(userRecipes.deletedAt))).orderBy(userRecipes.updatedAt),

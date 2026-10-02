@@ -12,6 +12,7 @@ import { myFitnessPalRoutes } from "./routes/myfitnesspal";
 import { searchRoutes } from "./routes/search";
 import { socialRoutes } from "./services/social";
 import { syncRoutes } from "./routes/sync";
+import { createWebRoutes } from "./routes/web";
 
 export const app = new Hono();
 
@@ -47,6 +48,7 @@ app.route("/mfp", myFitnessPalRoutes);
 app.route("/search", searchRoutes);
 app.route("/social", socialRoutes);
 app.route("/sync", syncRoutes);
+app.route("/", createWebRoutes());
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 

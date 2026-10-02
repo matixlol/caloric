@@ -1,0 +1,15 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["bun", "react", "react-dom"],
+    "noEmit": true
+  },
+  "include": [
+    "*.ts",
+    "*.tsx",
+    "../src/routes/web.ts",
+    "../src/routes/web.test.ts"
+  ]
+}

@@ -102,7 +102,10 @@ export const config = {
   openFoodFactsUserAgent:
     Bun.env.OPEN_FOOD_FACTS_USER_AGENT ?? "Caloric/1.0 (OpenFoodFacts integration; contact required)",
   openFoodFactsUserEmail: Bun.env.OPEN_FOOD_FACTS_USER_EMAIL,
-  googleAiStudioApiKey: getRequiredEnv("GOOGLE_AI_STUDIO_API_KEY"),
+  // AI is optional at process startup (for example, the local web preview).
+  // The Google provider reports its configuration error if an AI route is
+  // actually used without a key; all non-AI routes remain available.
+  googleAiStudioApiKey: Bun.env.GOOGLE_AI_STUDIO_API_KEY?.trim() || undefined,
   geminiModel: Bun.env.GEMINI_MODEL ?? "gemini-3.6-flash",
   geminiThinkingLevel: getGeminiThinkingLevel(Bun.env.GEMINI_THINKING_LEVEL, "low"),
 };
