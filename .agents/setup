@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
+
+step() {
+  local label="$1" started=$SECONDS
+  shift
+  echo "==> $label"
+  "$@"
+  echo "==> $label finished in $((SECONDS - started))s"
+}
+
+# Match CI's Node 22 and the workspace's packageManager pin. Global binaries
+# remain available to Amp and supervised services in fresh login shells.
+if [[ "$(node -p 'process.versions.node.split(".")[0]')" != 22 ]]; then
+  # The orb template's Node binary is not npm-managed; replace it explicitly.
+  step "Install Node 22" sudo npm install --global --force node@22
+  hash -r
+fi
+pnpm_version="$(node -p 'require("./package.json").packageManager.split("+")[0].split("@")[1]')"
+if ! command -v pnpm >/dev/null || [[ "$(pnpm --version)" != "$pnpm_version" ]]; then
+  step "Install pnpm $pnpm_version" sudo npm install --global --force "pnpm@$pnpm_version"
+fi
+if ! command -v bun >/dev/null || [[ "$(bun --version)" != 1.3.10 ]]; then
+  step "Install Bun 1.3.10" sudo npm install --global --force bun@1.3.10
+fi
+
+# PostgreSQL is used by backend/web-preview.sh. Chromium's native libraries
+# match the backend's Railway build; do not start daemons during snapshot setup.
+packages=(postgresql openssl libglib2.0-0 libatk1.0-0 libatk-bridge2.0-0
+  libcups2 libxkbcommon0 libatspi2.0-0 libxcomposite1 libxdamage1 libxfixes3
+  libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libnss3 libnspr4)
+missing=()
+for package in "${packages[@]}"; do
+  if [[ "$(dpkg-query -W -f='${Status}' "$package" 2>/dev/null || true)" != "install ok installed" ]]; then
+    missing+=("$package")
+  fi
+done
+if (( ${#missing[@]} )); then
+  step "Refresh system package index" sudo apt-get update -qq
+  step "Install missing system packages" sudo env DEBIAN_FRONTEND=noninteractive \
+    apt-get install -y --no-install-recommends "${missing[@]}"
+fi
+
+step "Install workspace dependencies" env CI=1 pnpm install --frozen-lockfile
+# Playwright's own revision cache makes these no-ops on a warm snapshot.
+step "Install backend browser" pnpm --dir backend run mfp:install-browser
+step "Install E2E Chromium" pnpm --dir backend exec playwright install chromium
+step "Build web client" pnpm --dir backend run web:build
+
+# No env templates, user credentials, database seed or login state are cached.
+# The existing preview command creates its isolated database and auth secret
+# only when an agent actually needs a running app.
+echo "Orb ready: Node $(node --version), pnpm $(pnpm --version), Bun $(bun --version)."

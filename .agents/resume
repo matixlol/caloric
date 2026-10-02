@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Toolchains and dependencies live in the snapshot. No per-user authentication
+# is required here; existing preview services are managed by Amp's supervisor.
+echo "Orb resumed; use env -u DATABASE_URL backend/web-preview.sh to start the isolated preview."

@@ -53,4 +53,7 @@ app-example
 /mobile/ios
 /mobile/android
 
+# Orb-generated portal manifests
+.amp/portals/*
+
 __pycache__
