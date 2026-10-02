@@ -13,6 +13,14 @@ const assets = new Set([
 // An explicit allowlist keeps backend sources and secrets out of static serving.
 export function createWebRoutes() {
   const routes = new Hono();
+  // Preserve the association previously served by caloric.mati.lol's worker.
+  routes.get("/.well-known/apple-app-site-association", (c) =>
+    c.json({
+      applinks: {},
+      webcredentials: { apps: ["BQ7842UUHJ.lol.mati.caloric"] },
+      appclips: {},
+    }),
+  );
   routes.get("/web/:asset", async (c) => {
     const name = c.req.param("asset");
     if (!assets.has(name)) return c.notFound();

@@ -23,6 +23,8 @@ export const auth = betterAuth({
     schema: { user, session, account, verification },
   }),
   trustedOrigins: [
+    // The web app shares this backend through its own Railway custom domain.
+    "https://caloric.mati.lol",
     ...APP_SCHEMES,
     ...DEV_ORIGINS,
     ...config.webOrigins,

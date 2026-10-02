@@ -129,6 +129,26 @@ It shares the native food, recipe, settings and social schemas.
 Normal backend `dev` and `start` commands build the web client first; after editing
 the client, run `pnpm --dir backend web:build` to refresh the bundle.
 
+### Production web domain
+
+The backend supports serving the web app at `https://caloric.mati.lol` while
+keeping `https://backend.caloric.mati.lol` for native/API clients. To activate it:
+
+1. Add `caloric.mati.lol` as a custom domain on the **existing backend Railway
+   service**, using the same target port. Keep the backend domain attached.
+2. Remove the old Cloudflare passkey worker's custom-domain binding for
+   `caloric.mati.lol`, and configure the CNAME and verification TXT records
+   supplied by Railway. The backend preserves the existing Apple association
+   response at `/.well-known/apple-app-site-association`.
+3. Once Railway verifies the domain and provisions HTTPS, check `/`, `/health`,
+   the association endpoint, and login on the new hostname.
+
+Keep `BETTER_AUTH_URL=https://backend.caloric.mati.lol`. The new HTTPS web origin
+is explicitly trusted by auth; no extra `WEB_ORIGINS` setting is needed because
+the bundled client uses same-origin API requests. Cookies remain host-only, so
+users sign in again on the new hostname. The backend hostname still serves the
+web app too; it is not redirected, keeping existing API requests unchanged.
+
 Base UI provides swipe-dismissable, focus-managed bottom sheets and segmented
 controls, styled to match Expo. dnd-kit provides whole-row touch sorting with the
 native 170 ms hold, cross-meal drops (including empty meals), auto-scroll and

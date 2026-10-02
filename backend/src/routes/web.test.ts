@@ -10,6 +10,19 @@ describe("backend web serving (run web:build first)", () => {
     expect(await root.text()).toContain("/web/app.js");
     expect((await app.request("/demo")).status).toBe(404);
   });
+  test("preserves the existing Apple association on the web domain", async () => {
+    const app = createWebRoutes();
+    const response = await app.request(
+      "https://caloric.mati.lol/.well-known/apple-app-site-association",
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-type")).toContain("application/json");
+    expect(await response.json()).toEqual({
+      applinks: {},
+      webcredentials: { apps: ["BQ7842UUHJ.lol.mati.caloric"] },
+      appclips: {},
+    });
+  });
   test("only public build assets are served, never sources or API fallbacks", async () => {
     const app = createWebRoutes();
     const script = await app.request("/web/app.js");
