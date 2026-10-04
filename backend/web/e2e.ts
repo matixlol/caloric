@@ -2,7 +2,14 @@ import assert from "node:assert/strict";
 import { copyFile, mkdir, mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { chromium, webkit, devices, type Page, type Locator } from "playwright";
+import {
+  chromium,
+  webkit,
+  devices,
+  type Page,
+  type Locator,
+  type Route,
+} from "playwright";
 import { createDemo, dateKey } from "./model";
 
 // Real auth + sync against the isolated preview. Never modify the seeded
@@ -52,6 +59,187 @@ async function signIn(page: Page, email: string) {
   await page.getByLabel("Password", { exact: true }).fill("CaloricPreview123!");
   await page.getByRole("button", { name: "Sign in", exact: true }).click();
   await page.getByRole("heading", { name: "Today", exact: true }).waitFor();
+}
+async function friendLoadingChecks(page: Page) {
+  const pattern = "**/social/daily-summaries?*";
+  const card = page.locator(".friends-card");
+  const rows = card.locator("button.friend-summary");
+  const skeletons = card.locator(".friend-skeleton");
+  const cacheKey = "caloric.web.queries";
+  const response = await page.request.get(
+    `${url}/social/daily-summaries?dateKey=${dateKey()}`,
+  );
+  const today = await response.json();
+  check(today.summaries.length, 2);
+  // Every request is held until the assertions have inspected its loading state.
+  let receive!: (route: Route) => void;
+  const nextRequest = () =>
+    new Promise<Route>((resolve) => {
+      receive = resolve;
+    });
+  await page.route(pattern, (route) => receive(route));
+  const height = async () => (await card.boundingBox())!.height;
+  const noEmptyState = async () =>
+    check(await card.getByText("Add friends in Settings.").count(), 0);
+  const persisted = (day: string, calories: number) =>
+    page.waitForFunction(
+      ({ key, day, calories }) =>
+        JSON.parse(
+          localStorage.getItem(key) || "null",
+        )?.clientState.queries.some(
+          (query: any) =>
+            query.queryKey[2] === "summaries" &&
+            query.queryKey[3] === day &&
+            query.state.data?.[0]?.calories === calories,
+        ),
+      { key: cacheKey, day, calories },
+    );
+  try {
+    // A cold load is unknown, not an empty friend list.
+    await page.evaluate((key) => localStorage.removeItem(key), cacheKey);
+    let pending = nextRequest();
+    await page.reload();
+    let request = await pending;
+    await skeletons.first().waitFor();
+    check(await skeletons.count(), 1);
+    await noEmptyState();
+    await request.fulfill({ json: today });
+    await rows.nth(1).waitFor();
+    const loadedHeight = await height();
+    const original = await rows.allTextContents();
+    await persisted(dateKey(), today.summaries[0].calories);
+
+    // Reload keeps the actual summaries, even when the refresh fails.
+    pending = nextRequest();
+    await page.reload();
+    request = await pending;
+    await rows.nth(1).waitFor();
+    check(await rows.allTextContents(), original);
+    check(await height(), loadedHeight);
+    await request.fulfill({ status: 503, json: { message: "Unavailable" } });
+    await card.getByRole("button", { name: "Retry" }).waitFor();
+    check(await rows.allTextContents(), original);
+    await shot(page, "caloric-friends-refresh-error");
+    pending = nextRequest();
+    await card.getByRole("button", { name: "Retry" }).click();
+    request = await pending;
+    check(await rows.allTextContents(), original);
+    await request.fulfill({ json: today });
+
+    // An unseen date uses the remembered count, never another date's calories.
+    pending = nextRequest();
+    await page
+      .getByRole("button", { name: "Previous day", exact: true })
+      .click();
+    request = await pending;
+    await skeletons.nth(1).waitFor();
+    check(await skeletons.count(), 2);
+    check(await rows.count(), 0);
+    check(
+      await card.getByRole("button", { name: "Manage friends" }).textContent(),
+      "2",
+    );
+    check(await card.getAttribute("aria-busy"), "true");
+    check(await height(), loadedHeight);
+    await noEmptyState();
+    await page.evaluate(() => scrollTo(0, 0));
+    await shot(page, "caloric-friends-loading");
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "dark";
+    });
+    await shot(page, "caloric-friends-loading-dark");
+    await page.evaluate(() => {
+      document.documentElement.dataset.theme = "light";
+    });
+    const yesterday = {
+      summaries: today.summaries.map((friend: any, i: number) => ({
+        ...friend,
+        dateKey: new URL(request.request().url()).searchParams.get("dateKey"),
+        calories: i ? 765 : 321,
+      })),
+    };
+    await request.fulfill({ json: yesterday });
+    await rows.first().locator("b").filter({ hasText: "321" }).waitFor();
+    check(await height(), loadedHeight);
+    await persisted(yesterday.summaries[0].dateKey, 321);
+
+    // On a new day after reload, persisted count alone still reserves the space.
+    await page.evaluate(
+      ({ key, day }) => {
+        const cache = JSON.parse(localStorage.getItem(key)!);
+        cache.clientState.queries = cache.clientState.queries.filter(
+          (query: any) => query.queryKey[3] !== day,
+        );
+        localStorage.setItem(key, JSON.stringify(cache));
+      },
+      { key: cacheKey, day: dateKey() },
+    );
+    pending = nextRequest();
+    await page.reload();
+    request = await pending;
+    await skeletons.nth(1).waitFor();
+    check(await skeletons.count(), 2);
+    check(await height(), loadedHeight);
+    await noEmptyState();
+    await request.fulfill({ json: today });
+    await rows.nth(1).waitFor();
+    pending = nextRequest();
+    await page
+      .getByRole("button", { name: "Previous day", exact: true })
+      .click();
+    request = await pending;
+    check((await rows.first().locator("b").textContent())?.trim(), "321");
+    await request.fulfill({ json: yesterday });
+
+    // Returning to a cached date must select that date's values immediately.
+    pending = nextRequest();
+    await page
+      .getByRole("button", { name: "Back to today", exact: true })
+      .click();
+    request = await pending;
+    check(await rows.allTextContents(), original);
+    check(await skeletons.count(), 0);
+    await request.fulfill({ json: today });
+
+    // A pending request for a different day cannot replace today's cache.
+    pending = nextRequest();
+    await page.getByRole("button", { name: "Next day", exact: true }).click();
+    const abandoned = await pending;
+    await skeletons.nth(1).waitFor();
+    pending = nextRequest();
+    await page
+      .getByRole("button", { name: "Back to today", exact: true })
+      .click();
+    request = await pending;
+    await abandoned.fulfill({ json: { summaries: [] } }).catch(() => {});
+    await request.fulfill({ json: today });
+    check(await rows.allTextContents(), original);
+
+    // A confirmed empty response is the only source of the empty-state message.
+    pending = nextRequest();
+    await page.getByRole("button", { name: "Next day", exact: true }).click();
+    request = await pending;
+    await noEmptyState();
+    await request.fulfill({ json: { summaries: [] } });
+    await card.getByText("Add friends in Settings.").waitFor();
+    const emptyHeight = await height();
+    pending = nextRequest();
+    await page.getByRole("button", { name: "Next day", exact: true }).click();
+    request = await pending;
+    await card.getByText("Loading friends…").waitFor();
+    check(await height(), emptyHeight);
+    check(await skeletons.count(), 0);
+    await noEmptyState();
+    await request.fulfill({ json: { summaries: [] } });
+    console.log(
+      `Friends loading/cache checks passed; loaded and skeleton card height: ${loadedHeight}px.`,
+    );
+  } finally {
+    await page.unroute(pattern);
+    await page.evaluate((key) => localStorage.removeItem(key), cacheKey);
+    await page.reload();
+    await rows.nth(1).waitFor();
+  }
 }
 async function saved(page: Page) {
   const response = await page.request.get(`${url}/sync/bootstrap`);
@@ -577,6 +765,7 @@ try {
     await page.request.get(`${url}/api/auth/get-session`)
   ).json();
   check(session.user.id, "web_preview_primary"); // Seeded local DB guard before writes.
+  await friendLoadingChecks(page);
   check(
     await page.evaluate(() => matchMedia("(pointer: coarse)").matches),
     true,
@@ -652,6 +841,14 @@ try {
   await page.getByRole("button", { name: "Sign out", exact: true }).tap();
   await page.getByLabel("Email", { exact: true }).waitFor();
   check((await page.request.get(`${url}/sync/bootstrap`)).status(), 401);
+  check(
+    await page.evaluate(
+      () =>
+        JSON.parse(localStorage.getItem("caloric.web.queries") || "null")
+          ?.clientState.queries.length ?? 0,
+    ),
+    0,
+  );
 
   const email = `web-e2e-${crypto.randomUUID()}@caloric.local`;
   await page.getByRole("button", { name: "Password", exact: true }).tap();

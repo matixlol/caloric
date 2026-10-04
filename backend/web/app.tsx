@@ -1,27 +1,29 @@
 import { useEffect, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { PersistQueryClientProvider } from "@tanstack/react-query-persist-client";
+import { createSyncStoragePersister } from "@tanstack/query-sync-storage-persister";
+import { type FriendDailySummary, type Meal } from "@caloric/data-model";
 import {
-  FriendDailySummariesResponseSchema,
-  type FriendDailySummary,
-  type Meal,
-} from "@caloric/data-model";
-import {
-  applyChanges,
   api,
-  bootstrap,
   calendarDate,
   dateKey,
-  label,
   makeEntry,
   orderedDay,
-  pushChanges,
   reorderEntries,
   shiftDate,
   totals,
   type Changes,
   type Entry,
-  type Snapshot,
 } from "./model";
+import {
+  cacheMaxAge,
+  queryClient,
+  sessionQuery,
+  journalQuery,
+  journalMutation,
+  friendSummariesQuery,
+} from "./queries";
 import { EntryEditor, FoodPicker, Recipes, Settings, SignIn } from "./forms";
 import { Assistant } from "./chat";
 import { FriendDay, Friends } from "./friends";
@@ -35,18 +37,54 @@ type Modal =
   | { type: "friend"; friend: FriendDailySummary }
   | { type: "settings" | "recipes" | "friends" | "chat" }
   | null;
+let storage: Storage | undefined;
 try {
+  storage = window.localStorage;
   document.documentElement.dataset.theme =
-    localStorage.getItem("caloric.web.theme") || "system";
+    storage.getItem("caloric.web.theme") || "system";
 } catch {
   /* System theme works without storage. */
 }
+const persister = createSyncStoragePersister({
+  storage,
+  key: "caloric.web.queries",
+});
 
-function App() {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const snapshotRef = useRef<Snapshot | null>(null);
-  const [signedIn, setSignedIn] = useState<boolean | null>(null);
-  const [loadError, setLoadError] = useState<string | null>(null);
+function Startup({ error, retry }: { error: Error | null; retry: () => void }) {
+  return (
+    <main className="startup-screen">
+      {error ? (
+        <>
+          <ErrorNotice message={error.message} />
+          <button className="secondary-button" onClick={retry}>
+            Try again
+          </button>
+        </>
+      ) : (
+        <p role="status">Opening your journal…</p>
+      )}
+    </main>
+  );
+}
+
+function Account() {
+  const session = useQuery(sessionQuery);
+  if (session.isPending || session.isError)
+    return (
+      <Startup error={session.error} retry={() => void session.refetch()} />
+    );
+  if (!session.data?.user)
+    return (
+      <SignIn
+        onSignedIn={() =>
+          queryClient.invalidateQueries({ queryKey: sessionQuery.queryKey })
+        }
+      />
+    );
+  return <App key={session.data.user.id} userId={session.data.user.id} />;
+}
+
+function App({ userId }: { userId: string }) {
   const [today, setToday] = useState(dateKey());
   const [day, setDay] = useState(dateKey());
   const [modal, setModal] = useState<Modal>(null);
@@ -55,14 +93,30 @@ function App() {
     null,
   );
   const [offline, setOffline] = useState(!navigator.onLine);
-  const [saving, setSaving] = useState(false);
   const writeLock = useRef(false);
-  const writeRevision = useRef(0);
-  const [friends, setFriends] = useState<FriendDailySummary[]>([]);
-  const [friendsError, setFriendsError] = useState<string | null>(null);
-  const [friendsRevision, setFriendsRevision] = useState(0);
   const dragging = useRef(false);
   const touch = useRef<{ x: number; y: number } | null>(null);
+  const canRefresh = () => !modal && !writeLock.current && !dragging.current;
+  const journal = useQuery({
+    ...journalQuery(userId),
+    refetchOnWindowFocus: canRefresh,
+    refetchOnReconnect: canRefresh,
+  });
+  const snapshot = journal.data;
+  const write = useMutation(journalMutation(userId, queryClient));
+  const saving = write.isPending;
+  const summaries = useQuery({
+    ...friendSummariesQuery(userId, day),
+    refetchOnWindowFocus: canRefresh,
+    refetchOnReconnect: canRefresh,
+  });
+  const { data: rememberedCount } = useQuery<number>({
+    queryKey: ["friends", userId, "count"],
+    enabled: false,
+  });
+  const friends = summaries.data;
+  const friendsCount = friends?.length ?? rememberedCount;
+  const friendsError = summaries.error;
   useEffect(() => {
     if (!modal) return;
     // One history entry for the whole sheet flow, including Settings → Recipes.
@@ -99,20 +153,7 @@ function App() {
       cancelAnimationFrame(frame);
     };
   }, [modal, addedId]);
-  function replace(next: Snapshot) {
-    snapshotRef.current = next;
-    setSnapshot(next);
-  }
-  async function openAccount() {
-    setLoadError(null);
-    const session = await api<{ user?: { id: string } } | null>(
-      "/api/auth/get-session",
-    );
-    setSignedIn(Boolean(session?.user));
-    if (session?.user) replace(await bootstrap());
-  }
   useEffect(() => {
-    void openAccount().catch((e) => setLoadError(e.message));
     const online = () => setOffline(!navigator.onLine);
     window.addEventListener("online", online);
     window.addEventListener("offline", online);
@@ -138,20 +179,6 @@ function App() {
       return () => clearTimeout(timeout);
     }
   }, [toast]);
-  useEffect(() => {
-    if (!snapshot) return;
-    setFriendsError(null);
-    const abort = new AbortController();
-    setFriends([]);
-    api(`/social/daily-summaries?dateKey=${day}`, undefined, abort.signal)
-      .then((result) =>
-        setFriends(FriendDailySummariesResponseSchema.parse(result).summaries),
-      )
-      .catch((e) => {
-        if (!abort.signal.aborted) setFriendsError(e.message);
-      });
-    return () => abort.abort();
-  }, [day, today, Boolean(snapshot), friendsRevision]);
   useEffect(() => {
     const key = (e: KeyboardEvent) => {
       if (
@@ -183,64 +210,18 @@ function App() {
     window.addEventListener("keydown", key);
     return () => window.removeEventListener("keydown", key);
   }, [modal, Boolean(snapshot)]);
-  useEffect(() => {
-    if (!signedIn || modal) return;
-    let cancelled = false;
-    const refresh = async () => {
-      if (
-        document.visibilityState !== "visible" ||
-        writeLock.current ||
-        dragging.current
-      )
-        return;
-      const revision = writeRevision.current;
-      try {
-        const next = await bootstrap();
-        if (
-          !cancelled &&
-          !writeLock.current &&
-          !dragging.current &&
-          revision === writeRevision.current
-        ) {
-          replace(next);
-          setLoadError(null);
-          setFriendsRevision((revision) => revision + 1);
-        }
-      } catch {
-        if (!cancelled)
-          setLoadError(
-            "Could not refresh your journal. Your displayed data may be out of date.",
-          );
-      }
-    };
-    window.addEventListener("focus", refresh);
-    return () => {
-      cancelled = true;
-      window.removeEventListener("focus", refresh);
-    };
-  }, [signedIn, modal]);
 
   async function mutate(changes: Changes, text: string | null = "Saved") {
-    if (!snapshotRef.current) throw new Error("Your journal is still loading.");
     if (writeLock.current)
       throw new Error(
         "A change is still saving. Please try again in a moment.",
       );
-    if (!navigator.onLine)
-      throw new Error(
-        "You’re offline. Reconnect before saving to your account.",
-      );
     writeLock.current = true;
-    writeRevision.current++;
-    setSaving(true);
     try {
-      const next = applyChanges(snapshotRef.current, changes);
-      await pushChanges(changes);
-      replace(next);
+      await write.mutateAsync(changes);
       if (text) setToast({ text });
     } finally {
       writeLock.current = false;
-      setSaving(false);
     }
   }
   async function addEntry(entry: Entry) {
@@ -256,7 +237,7 @@ function App() {
     setToast({ text: `${entry.data.foodName} removed`, undo: entry });
   }
   async function duplicate(entry: Entry) {
-    const current = snapshotRef.current!;
+    const current = queryClient.getQueryData(journalQuery(userId).queryKey)!;
     const copy = makeEntry(
       {
         id: entry.id,
@@ -275,31 +256,17 @@ function App() {
     await addEntry(copy);
   }
   async function reorder(id: string, meal: Meal, index: number) {
-    const entries = orderedDay(snapshotRef.current!, day);
+    const entries = orderedDay(
+      queryClient.getQueryData(journalQuery(userId).queryKey)!,
+      day,
+    );
     const changed = reorderEntries(entries, id, meal, index);
     if (changed.length) await mutate({ entries: changed }, null);
   }
   const close = () => setModal(null);
-  if (signedIn === false) return <SignIn onSignedIn={openAccount} />;
   if (!snapshot)
     return (
-      <main className="startup-screen">
-        {loadError ? (
-          <>
-            <ErrorNotice message={loadError} />
-            <button
-              className="secondary-button"
-              onClick={() =>
-                void openAccount().catch((e) => setLoadError(e.message))
-              }
-            >
-              Try again
-            </button>
-          </>
-        ) : (
-          <p role="status">Opening your journal…</p>
-        )}
-      </main>
+      <Startup error={journal.error} retry={() => void journal.refetch()} />
     );
   const entries = orderedDay(snapshot, day);
   const nutrition = totals(entries.map((row) => row.data));
@@ -364,7 +331,13 @@ function App() {
             You’re offline. Reconnect to search or save changes.
           </p>
         )}
-        <ErrorNotice message={loadError} />
+        <ErrorNotice
+          message={
+            journal.error
+              ? "Could not refresh your journal. Your displayed data may be out of date."
+              : null
+          }
+        />
         <div className="day-layout">
           <aside className="daily-sidebar">
             <Summary
@@ -372,62 +345,89 @@ function App() {
               settings={snapshot.settings}
               onGoals={() => setModal({ type: "settings" })}
             />
-            <section className="card friends-card">
+            <section
+              className="card friends-card"
+              aria-busy={!friends && !friendsError}
+            >
               <div className="section-heading">
                 <h2>Friends{day === today ? " Today" : ""}</h2>
                 <button
                   className="text-button"
+                  aria-label="Manage friends"
                   onClick={() => setModal({ type: "friends" })}
                 >
-                  {friends.length}
+                  {friendsCount ?? "…"}
                 </button>
               </div>
-              {friendsError ? (
+              {friendsError && (
                 <p className="hint">
                   Couldn’t load friends.{" "}
                   <button
                     className="text-button"
-                    onClick={() =>
-                      setFriendsRevision((revision) => revision + 1)
-                    }
+                    onClick={() => void summaries.refetch()}
                   >
                     Retry
                   </button>
                 </p>
-              ) : !friends.length ? (
-                <p className="hint">Add friends in Settings.</p>
-              ) : (
-                friends.map((friend) => (
-                  <button
-                    className="friend-summary"
-                    aria-label={`Open ${friend.displayName}'s day`}
-                    key={friend.userId}
-                    onClick={() => setModal({ type: "friend", friend })}
-                  >
-                    <span className="row-main">
-                      <span className="friend-top-row">
-                        <strong>{friend.displayName}</strong>
-                        <b>
-                          {format(friend.calories)}{" "}
-                          <Icon name="right" size={16} />
-                        </b>
-                      </span>
-                      <span className="track">
-                        <span
-                          style={{
-                            width: `${Math.min(100, (friend.calories / (friend.calorieGoal || 2500)) * 100)}%`,
-                          }}
-                        />
-                      </span>
-                      <small>
-                        {friend.lastUpdatedAt
-                          ? `Updated ${new Date(friend.lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
-                          : "No logs yet"}
-                      </small>
-                    </span>
-                  </button>
-                ))
               )}
+              {!friends && !friendsError && friendsCount === 0 && (
+                <p className="hint" role="status">
+                  Loading friends…
+                </p>
+              )}
+              {!friends && !friendsError && friendsCount !== 0 && (
+                <div role="status" aria-label="Loading friends">
+                  {Array.from({ length: friendsCount ?? 1 }, (_, index) => (
+                    <div
+                      className="friend-summary friend-skeleton"
+                      aria-hidden="true"
+                      key={index}
+                    >
+                      <span className="row-main">
+                        <span className="friend-top-row">
+                          <strong>Friend name</strong>
+                          <b>1,000</b>
+                        </span>
+                        <span className="track" />
+                        <small>Updated recently</small>
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+              {friends?.length === 0 && !friendsError && (
+                <p className="hint">Add friends in Settings.</p>
+              )}
+              {friends?.map((friend) => (
+                <button
+                  className="friend-summary"
+                  aria-label={`Open ${friend.displayName}'s day`}
+                  key={friend.userId}
+                  onClick={() => setModal({ type: "friend", friend })}
+                >
+                  <span className="row-main">
+                    <span className="friend-top-row">
+                      <strong>{friend.displayName}</strong>
+                      <b>
+                        {format(friend.calories)}{" "}
+                        <Icon name="right" size={16} />
+                      </b>
+                    </span>
+                    <span className="track">
+                      <span
+                        style={{
+                          width: `${Math.min(100, (friend.calories / (friend.calorieGoal || 2500)) * 100)}%`,
+                        }}
+                      />
+                    </span>
+                    <small>
+                      {friend.lastUpdatedAt
+                        ? `Updated ${new Date(friend.lastUpdatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`
+                        : "No logs yet"}
+                    </small>
+                  </span>
+                </button>
+              ))}
             </section>
           </aside>
           <Journal
@@ -440,6 +440,10 @@ function App() {
             onError={(text) => setToast({ text })}
             onDraggingChange={(active) => {
               dragging.current = active;
+              if (active)
+                void queryClient.cancelQueries({
+                  queryKey: journalQuery(userId).queryKey,
+                });
             }}
           />
         </div>
@@ -530,12 +534,18 @@ function App() {
           onFriends={() => setModal({ type: "friends" })}
           onSave={(settings) => mutate({ settings }, "Daily goals updated")}
           onSignOut={async () => {
+            if (writeLock.current)
+              throw new Error(
+                "A change is still saving. Please try again in a moment.",
+              );
             await api("/api/auth/sign-out", {});
-            replace({ ...snapshot, entries: [], recipes: [] });
-            setSnapshot(null);
-            snapshotRef.current = null;
-            setSignedIn(false);
-            close();
+            await queryClient.cancelQueries();
+            queryClient.removeQueries({
+              predicate: (query) => query.queryKey[0] !== "session",
+            });
+            queryClient.getMutationCache().clear();
+            queryClient.setQueryData(sessionQuery.queryKey, null);
+            persister.removeClient();
           }}
           onClose={close}
         />
@@ -555,14 +565,14 @@ function App() {
         />
       )}
       {modal?.type === "friend" && (
-        <FriendDay friend={modal.friend} day={day} onClose={close} />
-      )}
-      {modal?.type === "friends" && (
-        <Friends
-          onChanged={() => setFriendsRevision((revision) => revision + 1)}
+        <FriendDay
+          userId={userId}
+          friend={modal.friend}
+          day={day}
           onClose={close}
         />
       )}
+      {modal?.type === "friends" && <Friends userId={userId} onClose={close} />}
       <Assistant
         open={modal?.type === "chat"}
         snapshot={snapshot}
@@ -574,4 +584,20 @@ function App() {
   );
 }
 
-createRoot(document.getElementById("root")!).render(<App />);
+createRoot(document.getElementById("root")!).render(
+  <PersistQueryClientProvider
+    client={queryClient}
+    persistOptions={{
+      persister,
+      maxAge: cacheMaxAge,
+      dehydrateOptions: {
+        // Keep authentication, journal edits and mutations out of browser storage.
+        shouldDehydrateQuery: (query) =>
+          query.queryKey[0] === "friends" && query.state.data !== undefined,
+        shouldDehydrateMutation: () => false,
+      },
+    }}
+  >
+    <Account />
+  </PersistQueryClientProvider>,
+);

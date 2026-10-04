@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
+import { useInfiniteQuery, useMutation } from "@tanstack/react-query";
 import { motion, useDragControls, useReducedMotion } from "motion/react";
 import { formatMixedQuarter } from "../../mobile/src/portion";
 import {
@@ -38,28 +39,32 @@ import {
 } from "./ui";
 
 export function useOperation() {
-  const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const lock = useRef(false);
+  const mutation = useMutation({
+    mutationFn: (action: () => Promise<void>) => action(),
+  });
   async function run(action: () => Promise<void>) {
     if (lock.current) return;
     lock.current = true;
-    setBusy(true);
     setError(null);
     try {
-      await action();
-    } catch (e) {
-      setError(
-        e instanceof Error
-          ? e.message
-          : "Something went wrong. Please try again.",
-      );
+      await mutation.mutateAsync(action);
+    } catch {
+      // TanStack owns the request error; forms display it below.
     } finally {
       lock.current = false;
-      setBusy(false);
     }
   }
-  return { busy, error, setError, run };
+  return {
+    busy: mutation.isPending,
+    error: error || mutation.error?.message || null,
+    setError: (message: string | null) => {
+      mutation.reset();
+      setError(message);
+    },
+    run,
+  };
 }
 function mealOptions() {
   return meals.map((meal) => (
@@ -307,51 +312,36 @@ export function FoodPicker({
   const [tab, setTab] = useState("foods");
   const [query, setQuery] = useState("");
   const [provider, setProvider] = useState("openfoodfacts");
-  const [results, setResults] = useState<Food[]>([]);
-  const [searching, setSearching] = useState(false);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(false);
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selected, setSelected] = useState<Food | null>(null);
   const [portion, setPortion] = useState("1");
   const operation = useOperation();
+  // Only debounce input here; Query owns fetching, cancellation and pagination.
   useEffect(() => {
-    if (query.trim().length < 2 || tab !== "foods") {
-      setResults([]);
-      setSearchError(null);
-      setSearching(false);
-      setHasMore(false);
-      return;
-    }
-    const abort = new AbortController();
-    setSearching(true);
-    setSearchError(null);
-    if (page === 1) setResults([]);
-    const timer = setTimeout(async () => {
-      try {
-        const result = await api<{ foods: Food[]; hasMore: boolean }>(
-          `/search?query=${encodeURIComponent(query.trim())}&provider=${provider}&page=${page}&maxItems=20&includeDetails=true`,
-          undefined,
-          abort.signal,
-        );
-        if (!abort.signal.aborted) {
-          setResults((current) =>
-            page === 1 ? result.foods : [...current, ...result.foods],
-          );
-          setHasMore(result.hasMore);
-        }
-      } catch (e) {
-        if (!abort.signal.aborted)
-          setSearchError(e instanceof Error ? e.message : "Search failed.");
-      } finally {
-        if (!abort.signal.aborted) setSearching(false);
-      }
-    }, 250);
-    return () => {
-      clearTimeout(timer);
-      abort.abort();
-    };
-  }, [query, provider, page, tab]);
+    const timer = setTimeout(() => setDebouncedQuery(query.trim()), 250);
+    return () => clearTimeout(timer);
+  }, [query]);
+  const searchEnabled = tab === "foods" && query.trim().length >= 2;
+  const search = useInfiniteQuery({
+    queryKey: ["foods", provider, query.trim()],
+    enabled: searchEnabled && query.trim() === debouncedQuery,
+    initialPageParam: 1,
+    queryFn: ({ pageParam, signal }) =>
+      api<{ foods: Food[]; hasMore: boolean }>(
+        `/search?query=${encodeURIComponent(query.trim())}&provider=${provider}&page=${pageParam}&maxItems=20&includeDetails=true`,
+        undefined,
+        signal,
+      ),
+    getNextPageParam: (lastPage, _pages, lastPageParam) =>
+      lastPage.hasMore ? lastPageParam + 1 : undefined,
+    staleTime: 60_000,
+  });
+  const results = searchEnabled
+    ? search.data?.pages.flatMap((page) => page.foods) || []
+    : [];
+  const searching =
+    searchEnabled && (query.trim() !== debouncedQuery || search.isFetching);
+  const searchError = searchEnabled ? search.error?.message ?? null : null;
   const recipe =
     selected && snapshot.recipes.find((recipe) => recipe.id === selected.id);
   const foods =
@@ -482,7 +472,6 @@ export function FoodPicker({
                   value={query}
                   onChange={(e) => {
                     setQuery(e.target.value);
-                    setPage(1);
                   }}
                 />
                 {query && (
@@ -491,7 +480,6 @@ export function FoodPicker({
                     title="Clear search"
                     onClick={() => {
                       setQuery("");
-                      setPage(1);
                     }}
                   />
                 )}
@@ -503,7 +491,6 @@ export function FoodPicker({
                     value={provider}
                     onChange={(e) => {
                       setProvider(e.target.value);
-                      setPage(1);
                     }}
                   >
                     <option value="openfoodfacts">Open Food Facts</option>
@@ -603,10 +590,10 @@ export function FoodPicker({
                   text=""
                 />
               )}
-              {hasMore && (
+              {searchEnabled && search.hasNextPage && (
                 <button
                   className="secondary-button"
-                  onClick={() => setPage((page) => page + 1)}
+                  onClick={() => void search.fetchNextPage()}
                   disabled={searching}
                 >
                   Load more foods

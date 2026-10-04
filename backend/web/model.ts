@@ -424,8 +424,10 @@ export async function api<T>(
     );
   return payload as T;
 }
-export async function bootstrap(): Promise<Snapshot> {
-  const result = BootstrapSchema.parse(await api("/sync/bootstrap"));
+export async function bootstrap(signal?: AbortSignal): Promise<Snapshot> {
+  const result = BootstrapSchema.parse(
+    await api("/sync/bootstrap", undefined, signal),
+  );
   return {
     entries: result.foodEntries,
     recipes: result.recipes,

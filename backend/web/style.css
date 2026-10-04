@@ -357,6 +357,18 @@ input::-webkit-inner-spin-button {
   font-size: 12px;
   line-height: 15px;
 }
+.friend-skeleton .friend-top-row > *,
+.friend-skeleton .row-main small {
+  color: transparent;
+  background: var(--input);
+  border-radius: 4px;
+}
+.friend-skeleton .row-main small {
+  width: 40%;
+}
+.friend-skeleton .track {
+  background: var(--input);
+}
 .friends-card > .hint {
   padding: 10px 0 12px;
 }

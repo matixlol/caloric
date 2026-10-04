@@ -1,13 +1,14 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   DEFAULT_USER_SETTINGS,
   FriendDailyDayResponseSchema,
   SocialOverviewSchema,
   type FriendDailyDayResponse,
   type FriendDailySummary,
-  type SocialOverview,
 } from "@caloric/data-model";
 import { api, calendarDate, catalogue, label, meals, totals } from "./model";
+import { socialQuery } from "./queries";
 import { useOperation } from "./forms";
 import {
   Empty,
@@ -92,36 +93,34 @@ export function demoFriendDay(
   };
 }
 export function FriendDay({
+  userId,
   friend,
   day,
   onClose,
 }: {
+  userId: string;
   friend: FriendDailySummary;
   day: string;
   onClose: () => void;
 }) {
-  const [data, setData] = useState<FriendDailyDayResponse | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => {
-    const abort = new AbortController();
-    api(
-      `/social/friends/${encodeURIComponent(friend.userId)}/day?dateKey=${day}`,
-      undefined,
-      abort.signal,
-    )
-      .then((result) => setData(FriendDailyDayResponseSchema.parse(result)))
-      .catch((e) => {
-        if (!abort.signal.aborted) setError(e.message);
-      });
-    return () => abort.abort();
-  }, [friend.userId, day]);
+  const { data, error } = useQuery({
+    queryKey: ["friends", userId, "day", friend.userId, day],
+    queryFn: async ({ signal }) =>
+      FriendDailyDayResponseSchema.parse(
+        await api(
+          `/social/friends/${encodeURIComponent(friend.userId)}/day?dateKey=${day}`,
+          undefined,
+          signal,
+        ),
+      ),
+  });
   return (
     <Sheet
       title={`${friend.displayName.split(" ")[0]}’s journal`}
       subtitle={`${calendarDate(day).toLocaleDateString(undefined, { weekday: "long", month: "short", day: "numeric" })} · Read only`}
       onClose={onClose}
     >
-      <ErrorNotice message={error} />
+      <ErrorNotice message={error?.message ?? null} />
       {!data && !error && (
         <p className="loading-text" role="status">
           Opening journal…
@@ -171,32 +170,36 @@ export function FriendDay({
   );
 }
 export function Friends({
+  userId,
   onClose,
-  onChanged,
 }: {
+  userId: string;
   onClose: () => void;
-  onChanged: () => void;
 }) {
-  const [overview, setOverview] = useState<SocialOverview | null>(null);
-  const [name, setName] = useState("");
+  const client = useQueryClient();
+  const operation = useOperation();
+  const { data: overview, error } = useQuery({
+    ...socialQuery(userId),
+    refetchOnWindowFocus: () => !operation.busy,
+    refetchOnReconnect: () => !operation.busy,
+  });
+  const [name, setName] = useState<string | null>(null);
+  const displayName = name ?? overview?.profile.displayName ?? "";
   const [code, setCode] = useState("");
   const [notice, setNotice] = useState("");
-  const operation = useOperation();
-  useEffect(() => {
-    void operation.run(async () => {
-      const result = SocialOverviewSchema.parse(await api("/social/me"));
-      setOverview(result);
-      setName(result.profile.displayName);
-    });
-  }, []);
   async function update(path: string, body: unknown) {
-    setOverview(SocialOverviewSchema.parse(await api(path, body)));
-    onChanged();
+    await client.cancelQueries({ queryKey: ["friends", userId] });
+    const next = SocialOverviewSchema.parse(await api(path, body));
+    client.setQueryData(socialQuery(userId).queryKey, next);
+    client.setQueryData(["friends", userId, "count"], next.friends.length);
+    void client.invalidateQueries({
+      queryKey: ["friends", userId, "summaries"],
+    });
   }
   return (
     <Sheet title="Friends" onClose={onClose} busy={operation.busy}>
       <div className="stack">
-        <ErrorNotice message={operation.error} />
+        <ErrorNotice message={operation.error || error?.message || null} />
         {overview && (
           <>
             <span className="eyebrow">YOUR PROFILE</span>
@@ -206,7 +209,7 @@ export function Friends({
                 e.preventDefault();
                 void operation.run(async () => {
                   await update("/social/profile", {
-                    displayName: name.trim(),
+                    displayName: displayName.trim(),
                   });
                   setNotice("Profile saved.");
                 });
@@ -216,7 +219,7 @@ export function Friends({
                 Display name
                 <input
                   required
-                  value={name}
+                  value={displayName}
                   maxLength={50}
                   onChange={(e) => setName(e.target.value)}
                 />
