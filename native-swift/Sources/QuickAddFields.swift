@@ -1,0 +1,83 @@
+import SwiftUI
+
+struct QuickAddFields: View {
+    @Binding var calories: String
+    @Binding var protein: String
+    @Binding var carbs: String
+    @Binding var fat: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("Quick add").font(.headline)
+            field("Calories", value: $calories, placeholder: "250", large: true)
+            HStack(spacing: 8) { field("Protein", value: $protein); field("Carbs", value: $carbs); field("Fat", value: $fat) }
+        }
+    }
+    private func field(_ title: String, value: Binding<String>, placeholder: String = "g", large: Bool = false) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            TextField(placeholder, text: value).keyboardType(.decimalPad).font(large ? .title2.bold() : .body).padding(10).background(Theme.input, in: RoundedRectangle(cornerRadius: 10)).accessibilityLabel("Quick add \(title.lowercased())")
+        }.frame(maxWidth: .infinity)
+    }
+}
+
+struct HoldSlideButton: View {
+    let title: String
+    let enabled: Bool
+    var secondary = false
+    let values: [Double]
+    @Binding var selection: Double?
+    let tapped: () -> Void
+    let committed: (Double) -> Void
+    @State private var picking = false
+    @State private var endedAt = -Double.infinity
+    private var calories: Bool { (values.first ?? 0) >= 50 }
+    var body: some View {
+        Button {
+            guard enabled, ProcessInfo.processInfo.systemUptime - endedAt > 0.4 else { return }; tapped()
+        } label: {
+            Text(title).font(.system(size: 16, weight: .semibold)).frame(maxWidth: .infinity).frame(minHeight: 50).foregroundStyle(secondary ? Theme.tint : .white)
+                .background(secondary ? Theme.card : enabled ? Theme.tint : Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
+        }.buttonStyle(.plain).disabled(!enabled)
+            .simultaneousGesture(LongPressGesture(minimumDuration: 0.26, maximumDistance: 30).sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
+                .onChanged { value in
+                    guard enabled else { return }
+                    switch value {
+                    case .first(true): start()
+                    case let .second(true, drag):
+                        start(); guard let drag else { return }
+                        let next = picked(drag.translation.height)
+                        if next != selection { selection = next; if next != nil { UISelectionFeedbackGenerator().selectionChanged() } }
+                    default: break
+                    }
+                }.onEnded { value in
+                    guard picking else { return }
+                    if case let .second(true, drag?) = value { selection = picked(drag.translation.height) }
+                    let selected = selection; picking = false; selection = nil; endedAt = ProcessInfo.processInfo.systemUptime
+                    if let selected { committed(selected) }
+                })
+            .overlay(alignment: secondary ? .bottomTrailing : .bottomLeading) {
+                if picking {
+                    VStack(spacing: 3) {
+                        Text(selection.map { calories ? "\(Int($0)) kcal" : "\(Portion.mixed($0))×" } ?? "—").font(.headline).foregroundStyle(Theme.tint).padding(.bottom, 5)
+                        ForEach(values.reversed(), id: \.self) { value in
+                            HStack { Text(calories ? "\(Int(value))" : Portion.mixed(value)).font(.caption).monospacedDigit().frame(width: 45, alignment: .trailing); RoundedRectangle(cornerRadius: 4).fill(selection == value ? Theme.tint : Color(uiColor: .tertiarySystemFill)).frame(width: 20, height: !calories && value.rounded() == value ? 35 : 20) }
+                        }
+                    }.padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).shadow(radius: 12, y: 5).offset(y: -60).allowsHitTesting(false).accessibilityHidden(true)
+                }
+            }.onDisappear { picking = false; selection = nil }
+    }
+    private func start() {
+        guard !picking else { return }; picking = true; selection = nil
+        UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder), to: nil, from: nil, for: nil)
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+    private func picked(_ translation: CGFloat) -> Double? {
+        let delta = -translation - 54
+        guard delta >= 0, !values.isEmpty else { return nil }
+        if calories { return values[min(values.count - 1, Int((delta / 25).rounded()))] }
+        var offsets = [0.0]
+        for i in 1..<values.count { offsets.append(offsets[i - 1] + 25 * ((values[i - 1].rounded() == values[i - 1] ? 2.0 : 1.0) + (values[i].rounded() == values[i] ? 2.0 : 1.0)) / 2) }
+        let index = offsets.indices.min { abs(offsets[$0] - delta) < abs(offsets[$1] - delta) } ?? 0
+        return values[index]
+    }
+}
