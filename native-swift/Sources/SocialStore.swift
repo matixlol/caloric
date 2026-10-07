@@ -76,7 +76,12 @@ final class SocialStore {
         if self.day != day { summaries = [] }; self.day = day
         loadingDaily = true; dailyError = nil
         defer { if dailyGeneration == generation { loadingDaily = false } }
-        if AppConfiguration.uiTesting { return }
+        if AppConfiguration.uiTesting {
+            #if DEBUG
+            if ProcessInfo.processInfo.arguments.contains("-seed-friend") { summaries = [Self.previewSummary(day)] }
+            #endif
+            return
+        }
         do {
             let result: FriendSummaries = try await api.authenticated("social/daily-summaries", userID: userID, query: [URLQueryItem(name: "dateKey", value: day)])
             guard self.userID == userID, dailyGeneration == generation, !Task.isCancelled else { return }
@@ -96,8 +101,24 @@ final class SocialStore {
     }
     func friendDay(userID: String, dateKey: String) async throws -> FriendDay {
         guard let owner = self.userID else { throw APIError.signedOut }
+        #if DEBUG
+        if AppConfiguration.uiTesting, ProcessInfo.processInfo.arguments.contains("-seed-friend"), userID == "ui-test-friend" {
+            let entries = try (1...12).map { index in
+                let entry = FoodEntry(meal: .lunch, foodName: "Friend food \(index)", serving: "100 g", portion: 1, nutrition: Nutrition(calories: 90, protein: 5, carbs: 10, fat: 3), createdAt: 1, dateKey: dateKey, sortIndex: Double(index))
+                var json = try JSONSerialization.jsonObject(with: JSONEncoder().encode(entry)) as! [String: Any]
+                json["id"] = "friend-fixture-\(index)"; json["updatedAt"] = 1
+                return try JSONDecoder().decode(FriendFood.self, from: JSONSerialization.data(withJSONObject: json))
+            }
+            return FriendDay(summary: Self.previewSummary(dateKey), entries: entries, settings: UserSettings())
+        }
+        #endif
         let result: FriendDay = try await api.authenticated("social/friends/\(userID.addingPercentEncoding(withAllowedCharacters: .urlPathAllowed) ?? userID)/day", userID: owner, query: [URLQueryItem(name: "dateKey", value: dateKey)])
         guard self.userID == owner else { throw APIError.signedOut }
         return result
     }
+    #if DEBUG
+    private static func previewSummary(_ day: String) -> FriendSummary {
+        FriendSummary(userId: "ui-test-friend", displayName: "Avery", dateKey: day, calories: 1080, protein: 60, carbs: 120, fat: 36, calorieGoal: 2500)
+    }
+    #endif
 }

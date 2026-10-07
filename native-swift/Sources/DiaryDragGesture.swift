@@ -58,6 +58,11 @@ struct DiaryDragGesture: UIViewRepresentable {
         }
         func gestureRecognizer(_ gestureRecognizer: UIGestureRecognizer, shouldReceive touch: UITouch) -> Bool {
             guard parent.enabled, let window else { return false }
+            var touchedView = touch.view
+            while let current = touchedView {
+                if current is VoiceTouchControl.TouchControl { return false }
+                touchedView = current.superview
+            }
             let point = touch.location(in: window)
             guard let row = parent.rowFrames.first(where: { $0.value.contains(point) }) else { return false }
             sourceID = row.key

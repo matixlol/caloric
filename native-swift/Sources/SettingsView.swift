@@ -3,7 +3,6 @@ import SwiftUI
 struct SettingsView: View {
     @Environment(AppStore.self) private var store
     @Environment(NativeAuth.self) private var auth
-    @Environment(\.openURL) private var openURL
     @Environment(\.dismiss) private var dismiss
     @State private var goal = "2500"
     @State private var ratios = UserSettings()
@@ -63,14 +62,6 @@ struct SettingsView: View {
                 if let error = store.syncError { Text(error).font(.system(size: 13)).foregroundStyle(.red) }
                 sectionTitle("Friends")
                 FriendsSettingsView()
-                sectionTitle("Updates")
-                VStack(spacing: 0) {
-                    valueRow("Status", "Updates through TestFlight"); Divider()
-                    valueRow("Last checked", "Managed by TestFlight"); Divider()
-                    valueRow("Current update", "\(Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "1.0.0") (\(Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"))"); Divider()
-                    Button("Force Check") { openURL(URL(string: "itms-beta://")!) }
-                        .font(.system(size: 16)).foregroundStyle(Theme.tint).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 14)
-                }.caloricCard(padding: 14)
             }.padding(.horizontal, 16).padding(.bottom, 24)
         }.background(Theme.background).scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.large)

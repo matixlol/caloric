@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		10DF1E23F4401C351F882580 /* VoiceTouchControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 464552967884D2851AF092A0 /* VoiceTouchControl.swift */; };
 		194FFBF30144B54B8934AB3D /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = D4EE5748419E640CFBAA9C55 /* AppStore.swift */; };
 		26D50DDD9C2A09BA68821AE7 /* SQLiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7145C0172E600C6B7AACF0 /* SQLiteStore.swift */; };
 		2E48B31BD3F53801699E81DE /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C03A08F5A1843F571235149 /* Foundation.framework */; };
@@ -98,6 +99,7 @@
 		3070A4917C970E1E9A746375 /* AILogView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AILogView.swift; sourceTree = "<group>"; };
 		30DC94C68E075F1CCE85C38E /* TodayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
 		34C72A2DF7D2848E062B56C8 /* RecipeEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecipeEditorView.swift; sourceTree = "<group>"; };
+		464552967884D2851AF092A0 /* VoiceTouchControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceTouchControl.swift; sourceTree = "<group>"; };
 		488069462109500C34FA6082 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		48A4EC14360068FB64B0ECFA /* FoodSearchView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FoodSearchView.swift; sourceTree = "<group>"; };
 		4B7145C0172E600C6B7AACF0 /* SQLiteStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SQLiteStore.swift; sourceTree = "<group>"; };
@@ -273,6 +275,7 @@
 				A15A2E9B5AD6C54307BD5757 /* VoiceComposer.swift */,
 				A1881438E81157B5F7940A3C /* VoiceRecorder.swift */,
 				D9173E390E56776AB24F9065 /* WidgetSnapshot.swift */,
+				464552967884D2851AF092A0 /* VoiceTouchControl.swift */,
 			);
 			name = Sources;
 			path = Sources;
@@ -499,6 +502,7 @@
 				A65D1D063B9D155977492DE8 /* VoiceComposer.swift in Sources */,
 				9BC8F195DC1F9BF886AF221A /* VoiceRecorder.swift in Sources */,
 				E30AE244ED089B132FC724D8 /* WidgetSnapshot.swift in Sources */,
+				10DF1E23F4401C351F882580 /* VoiceTouchControl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -634,7 +638,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = Widget/CaloricWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -671,7 +675,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -697,7 +701,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
@@ -725,7 +729,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = Resources/CaloricSwift.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 7;
+				CURRENT_PROJECT_VERSION = 8;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;

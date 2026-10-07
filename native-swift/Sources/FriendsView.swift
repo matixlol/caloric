@@ -70,9 +70,9 @@ struct FriendDayView: View {
     @State private var data: FriendDay?
     @State private var error: String?
     var body: some View {
+      NavigationStack {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
-                HStack { Text(data?.summary.displayName ?? route.name).screenTitle(); Button("Done") { dismiss() } }
                 Text(route.day).font(.subheadline).foregroundStyle(.secondary)
                 if let data {
                     let records = data.entries.map(\.record)
@@ -88,7 +88,12 @@ struct FriendDayView: View {
                 } else if let error { Text(error).foregroundStyle(.red); Button("Retry") { Task { await load() } } }
                 else { ProgressView().frame(maxWidth: .infinity).padding(32) }
             }.padding(16)
-        }.background(Theme.background).task { await load() }.refreshable { await load() }
+        }.background(Theme.background).scrollBounceBehavior(.basedOnSize)
+            .accessibilityIdentifier("friend-diary")
+            .navigationTitle(data?.summary.displayName ?? route.name).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityLabel("Close friend's day") } }
+            .task { await load() }
+      }
     }
     private func load() async {
         do { data = try await social.friendDay(userID: route.id, dateKey: route.day); error = nil }

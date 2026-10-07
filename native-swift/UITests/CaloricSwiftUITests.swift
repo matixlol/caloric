@@ -114,7 +114,7 @@ final class CaloricSwiftUITests: XCTestCase {
     }
 
     func testVoiceLockCancelWithoutInstructionalHints() {
-        let app = launch(["-ui-test-voice"])
+        let app = launch(["-ui-test-voice", "-seed-long-diary"])
         XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Hold the mic to record · Release to send"].exists)
         let microphone = app.buttons["voice-microphone"]
@@ -133,6 +133,58 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Recording"].exists)
         XCTAssertFalse(app.staticTexts["Voice message"].exists)
+    }
+
+    func testQuickVoiceSlideLocksAndCancelsWhileAudioIsPreparing() {
+        let app = launch(["-ui-test-voice", "-ui-test-voice-slow-start"])
+        let microphone = app.buttons["voice-microphone"]
+        let start = microphone.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(app.staticTexts["Recording locked"].waitForExistence(timeout: 3), "A quick upward slide must lock even before the audio route is ready")
+        app.buttons["Cancel voice recording"].tap()
+        XCTAssertTrue(microphone.waitForExistence(timeout: 3))
+        let cancel = microphone.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        cancel.press(forDuration: 0.05, thenDragTo: cancel.withOffset(CGVector(dx: -110, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Recording locked"].exists)
+        XCTAssertFalse(app.buttons["Send voice message"].exists)
+    }
+
+    func testQuickAddTapOnlyOpensNumberFormAndSettingsHasNoUpdates() {
+        let app = launch()
+        app.buttons["Add food to Breakfast"].tap()
+        let quick = app.buttons["Quick add"]
+        quick.tap()
+        XCTAssertTrue(app.textFields["Quick add calories"].waitForExistence(timeout: 3))
+        XCTAssertEqual(quick.value as? String ?? "", "", "Tapping must not leave the hold-and-slide overlay open")
+        capture("Quick add tap opens only the number form", app)
+        app.buttons["Close food search"].tap()
+        app.buttons["Settings"].tap()
+        app.swipeUp()
+        XCTAssertFalse(app.staticTexts["Updates"].exists)
+        XCTAssertFalse(app.buttons["Force Check"].exists)
+        capture("Settings without Updates section", app)
+    }
+
+    func testFriendCardScrollsAndDragsDownToDismiss() {
+        let app = launch(["-seed-friend"])
+        let friend = app.buttons["Open Avery's day"]
+        XCTAssertTrue(friend.waitForExistence(timeout: 3))
+        friend.tap()
+        let diary = app.scrollViews["friend-diary"]
+        XCTAssertTrue(diary.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Friend food 1"].exists)
+        capture("Native friend diary card", app)
+        diary.swipeUp(); diary.swipeUp()
+        XCTAssertTrue(app.staticTexts["Friend food 12"].isHittable, "The diary must still scroll within the card")
+        XCTAssertTrue(app.buttons["Close friend's day"].isHittable, "Done stays available while the diary scrolls")
+        app.buttons["Close friend's day"].tap()
+        friend.tap()
+        XCTAssertTrue(diary.waitForExistence(timeout: 3))
+        let top = diary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
+        top.press(forDuration: 0.05, thenDragTo: top.withOffset(CGVector(dx: 0, dy: 480)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3), "Pulling down at the top should dismiss the card")
+        XCTAssertFalse(app.buttons["Close friend's day"].exists)
     }
 
     func testGlassComposerSwitchesControlsAndPreservesConversation() {

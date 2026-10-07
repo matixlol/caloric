@@ -13,6 +13,7 @@ final class VoiceRecorder {
     @ObservationIgnored private var timer: Task<Void, Never>?
     @ObservationIgnored private var startID: UUID?
     @ObservationIgnored private var interruptionObserver: NSObjectProtocol?
+    @ObservationIgnored private let audioQueue = DispatchQueue(label: "caloric.voice-audio")
     #if DEBUG
     @ObservationIgnored private var simulatedStart: Date?
     #endif
@@ -37,10 +38,17 @@ final class VoiceRecorder {
 
     func start() async {
         guard !recording, startID == nil else { return }
+        let id = UUID(); startID = id; starting = true; error = nil
+        defer { if startID == id { startID = nil; starting = false } }
         #if DEBUG
         if AppConfiguration.uiTesting, ProcessInfo.processInfo.arguments.contains("-ui-test-voice") {
             // UI gesture tests do not depend on an available host audio-input device.
+            if ProcessInfo.processInfo.arguments.contains("-ui-test-voice-slow-start") {
+                try? await Task.sleep(for: .milliseconds(450))
+                guard startID == id else { return }
+            }
             simulatedStart = Date(); recording = true; seconds = 0; error = nil
+            starting = false
             timer = Task { [weak self] in
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .milliseconds(65)) } catch { return }
@@ -53,19 +61,30 @@ final class VoiceRecorder {
             return
         }
         #endif
-        let id = UUID(); startID = id; starting = true; error = nil
-        defer { if startID == id { startID = nil; starting = false } }
-        let granted = await AVAudioApplication.requestRecordPermission()
+        let granted: Bool
+        switch AVAudioApplication.shared.recordPermission {
+        case .granted: granted = true
+        case .denied: granted = false
+        case .undetermined: granted = await AVAudioApplication.requestRecordPermission()
+        @unknown default: granted = false
+        }
         guard startID == id else { return }
         guard granted else { error = "Allow microphone access in Settings to log food with voice."; return }
         do {
-            let session = AVAudioSession.sharedInstance()
-            try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
-            try session.setActive(true)
-            let url = FileManager.default.temporaryDirectory.appendingPathComponent("caloric-\(UUID().uuidString).m4a")
-            recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue])
-            recorder?.isMeteringEnabled = true
-            guard recorder?.record() == true else { throw URLError(.cannotCreateFile) }
+            // Audio-route activation can be slow, especially with Bluetooth. Keep
+            // touch feedback and lock/cancel gestures responsive while it finishes.
+            let prepared: AVAudioRecorder = try await withCheckedThrowingContinuation { continuation in
+                audioQueue.async {
+                    do { continuation.resume(returning: try Self.prepareRecorder()) }
+                    catch { continuation.resume(throwing: error) }
+                }
+            }
+            guard startID == id else {
+                audioQueue.async { prepared.stop(); try? FileManager.default.removeItem(at: prepared.url) }
+                return
+            }
+            recorder = prepared
+            guard prepared.record() else { throw URLError(.cannotCreateFile) }
             recording = true; starting = false; seconds = 0; levels = Array(repeating: 0.08, count: 18); error = nil
             timer = Task { [weak self] in
                 while !Task.isCancelled {
@@ -79,9 +98,22 @@ final class VoiceRecorder {
                 }
             }
         } catch {
+            guard startID == id else { return }
             _ = stop(cancelled: true)
             self.error = "Could not start recording. \(error.localizedDescription)"
         }
+    }
+    nonisolated private static func prepareRecorder() throws -> AVAudioRecorder {
+        let session = AVAudioSession.sharedInstance()
+        try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
+        try session.setActive(true)
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("caloric-\(UUID().uuidString).m4a")
+        do {
+            let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue])
+            recorder.isMeteringEnabled = true
+            guard recorder.prepareToRecord() else { throw URLError(.cannotCreateFile) }
+            return recorder
+        } catch { try? FileManager.default.removeItem(at: url); throw error }
     }
     func stop(cancelled: Bool = false) -> URL? {
         startID = nil; starting = false; timer?.cancel(); timer = nil
@@ -91,7 +123,7 @@ final class VoiceRecorder {
         #if DEBUG
         simulatedStart = nil
         #endif
-        try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+        audioQueue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
         if cancelled || elapsed < 0.4, let url {
             try? FileManager.default.removeItem(at: url)
             if !cancelled { error = "Hold the microphone while speaking, then release to send." }

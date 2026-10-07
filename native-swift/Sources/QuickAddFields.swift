@@ -41,7 +41,6 @@ struct HoldSlideButton: View {
                 .onChanged { value in
                     guard enabled else { return }
                     switch value {
-                    case .first(true): start()
                     case let .second(true, drag):
                         start(); guard let drag else { return }
                         let next = picked(drag.translation.height)
@@ -63,7 +62,8 @@ struct HoldSlideButton: View {
                         }
                     }.padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).shadow(radius: 12, y: 5).offset(y: -60).allowsHitTesting(false).accessibilityHidden(true)
                 }
-            }.onDisappear { picking = false; selection = nil }
+            }.accessibilityValue(picking ? "Choosing \(calories ? "calories" : "portion")" : "")
+            .onDisappear { picking = false; selection = nil }
     }
     private func start() {
         guard !picking else { return }; picking = true; selection = nil

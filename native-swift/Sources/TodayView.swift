@@ -51,7 +51,6 @@ struct TodayView: View {
                 if let error = store.syncError { Text(error).font(.caption).foregroundStyle(.secondary) }
             }.padding(.horizontal, 16).padding(.bottom, 100)
         }.background(Theme.background).scrollIndicators(.hidden)
-            .refreshable { await store.synchronize(); await social.loadDaily(day) }
             .onPreferenceChange(DiaryLayoutKey.self) { layout = $0 }
             .background(DiaryDragGesture(enabled: visible && sheet == nil, rowFrames: layout.rows,
                                          began: beginDrag, moved: moveDrag, ended: endDrag))
@@ -83,7 +82,10 @@ struct TodayView: View {
                 case let .food(meal, day): FoodSearchView(meal: meal, day: day)
                 case let .entry(id): EntryDetailsView(entryID: id)
                 case .settings: SettingsView().presentationDragIndicator(.visible)
-                case let .friend(route): FriendDayView(route: route)
+                case let .friend(route):
+                    FriendDayView(route: route)
+                        .presentationDragIndicator(.visible)
+                        .presentationCornerRadius(32)
                 }
             }
             .overlay { AILogView(isPresented: sheet == nil).opacity(sheet == nil ? 1 : 0).allowsHitTesting(sheet == nil) }
@@ -205,11 +207,11 @@ private struct MealSection: View {
     let add: () -> Void
     let edit: (String) -> Void
     var body: some View {
-        HStack(spacing: 0) {
-            Color.clear.frame(width: 14).overlay {
-                Text(meal.label.uppercased()).font(.system(size: 10, weight: .bold)).tracking(1.6)
-                    .foregroundStyle(.secondary).fixedSize().rotationEffect(.degrees(-90))
-            }.accessibilityHidden(true)
+        HStack(alignment: .top, spacing: 8) {
+            Text(meal.label.uppercased()).font(.system(size: 10, weight: .bold)).tracking(1.6)
+                .foregroundStyle(.secondary).frame(width: 92, height: 16, alignment: .trailing)
+                .rotationEffect(.degrees(-90)).frame(width: 16, height: 92).padding(.top, 12)
+                .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {

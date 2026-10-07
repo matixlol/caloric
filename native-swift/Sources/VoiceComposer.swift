@@ -14,7 +14,7 @@ struct VoiceComposer: View {
     @State private var locked = false
     @State private var lockProgress: CGFloat = 0
     @State private var cancelProgress: CGFloat = 0
-    private var active: Bool { voice.recording || voice.starting }
+    private var active: Bool { holding || voice.recording || voice.starting }
     private var cancelling: Bool { cancelProgress >= 1 && !locked }
 
     var body: some View {
@@ -45,9 +45,9 @@ struct VoiceComposer: View {
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: locked)
             .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: input.isEmpty)
             .onChange(of: voice.recording) { _, recording in
-                if recording { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
-                else if !voice.starting { reset() }
+                if !recording && !voice.starting { reset() }
             }
+            .onChange(of: voice.starting) { _, starting in if !starting && !voice.recording { reset() } }
             .onChange(of: scenePhase) { _, phase in if phase != .active { finish(cancelled: true) } }
             .onDisappear { finish(cancelled: true) }
     }
@@ -55,14 +55,14 @@ struct VoiceComposer: View {
     private var recordingCard: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(spacing: 7) {
-                if voice.starting { ProgressView().controlSize(.small) }
+                if !voice.recording { ProgressView().controlSize(.small) }
                 else {
                     TimelineView(.animation(minimumInterval: 0.05, paused: reduceMotion)) { context in
                         Circle().fill(cancelling ? Color.secondary : Color.red).frame(width: 8, height: 8)
                             .opacity(reduceMotion ? 1 : 0.55 + 0.45 * abs(sin(context.date.timeIntervalSinceReferenceDate * 3)))
                     }.frame(width: 8, height: 8).accessibilityHidden(true)
                 }
-                Text(voice.starting ? "Preparing microphone…" : cancelling ? "Cancelling" : locked ? "Recording locked" : "Recording")
+                Text(!voice.recording ? "Preparing microphone…" : cancelling ? "Cancelling" : locked ? "Recording locked" : "Recording")
                     .font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
                 Text(voice.duration).font(.system(size: 14, weight: .semibold)).monospacedDigit()
@@ -115,22 +115,13 @@ struct VoiceComposer: View {
                         .transition(.opacity.combined(with: .scale)).accessibilityHidden(true)
                 }
             }
-            .contentShape(Circle()).gesture(DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                .onChanged { gesture in
-                    guard !disabled, !locked else { return }
-                    if !holding {
-                        holding = true; focus.wrappedValue = false; cancelProgress = 0; lockProgress = 0
-                        Task { guard holding else { return }; await voice.start() }
-                    }
-                    guard voice.recording else { return }
-                    cancelProgress = min(1, max(0, -gesture.translation.width / 82))
-                    lockProgress = min(1, max(0, -gesture.translation.height / 54))
-                    if lockProgress >= 1 && cancelProgress < 1 {
-                        locked = true; holding = false; cancelProgress = 0
-                        UINotificationFeedbackGenerator().notificationOccurred(.success)
-                    }
-                }
-                .onEnded { _ in holding = false; if !locked { finish(cancelled: cancelling) } })
+            .overlay {
+                VoiceTouchControl(enabled: !disabled, began: beginRecording, moved: moveRecording) { interrupted in
+                    holding = false
+                    if !locked { finish(cancelled: interrupted || cancelling) }
+                }.accessibilityHidden(true)
+            }
+            .accessibilityElement(children: .ignore)
             .accessibilityLabel("Record voice message").accessibilityIdentifier("voice-microphone")
             .accessibilityHint("Hold to record. Release to send. Slide up to lock or left to cancel.")
             .accessibilityAddTraits(.isButton).accessibilityAction {
@@ -144,6 +135,24 @@ struct VoiceComposer: View {
         Button(action: action) { Image(systemName: image).font(.system(size: 20, weight: .semibold)).frame(width: 24, height: 24) }
             .nativeActionStyle(prominent: true, shape: .circle).controlSize(.large).tint(color)
             .glassIdentity("composer-action", in: glassNamespace).accessibilityLabel(label)
+    }
+
+    private func beginRecording() {
+        guard !disabled, !locked, !active else { return }
+        holding = true; focus.wrappedValue = false; cancelProgress = 0; lockProgress = 0
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        Task { guard holding || locked else { return }; await voice.start() }
+    }
+    private func moveRecording(_ translation: CGSize) {
+        guard holding, !locked else { return }
+        cancelProgress = min(1, max(0, -translation.width / 82))
+        lockProgress = min(1, max(0, -translation.height / 54))
+        if cancelProgress >= 1 {
+            finish(cancelled: true)
+        } else if lockProgress >= 1 {
+            locked = true; holding = false; cancelProgress = 0
+            UINotificationFeedbackGenerator().notificationOccurred(.success)
+        }
     }
 
     private func finish(cancelled: Bool) {
