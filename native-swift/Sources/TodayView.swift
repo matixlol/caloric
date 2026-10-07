@@ -42,17 +42,21 @@ struct TodayView: View {
                     NutritionSummary(nutrition: Nutrition.total(store.entries(on: day)), settings: store.settings)
                 }.contentShape(Rectangle()).gesture(daySwipe)
                 FriendsCard(day: day) { friend in sheet = .friend(FriendRoute(id: friend.userId, day: day, name: friend.displayName)) }
-                ForEach(Meal.allCases) { meal in
-                    MealSection(meal: meal, entries: displayedEntries(in: meal), day: day,
-                                draggedID: drag?.row.id, targeted: drag?.meal == meal,
-                                minimumHeight: drag?.row.data.meal == meal && drag?.meal != meal ? drag?.sourceMealHeight ?? 0 : 0,
-                                addEnabled: visible && sheet == nil && drag == nil && scenePhase == .active,
-                                holding: mealAdd?.meal == meal,
-                                add: { openFood(meal) }, scan: { sheet = .barcode(meal, day) },
-                                holdBegan: { frame in
-                                    mealAdd = MealAddSession(meal: meal, day: day, frame: frame)
-                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
-                                }, holdMoved: moveMealAdd, holdEnded: endMealAdd, edit: openEntry)
+                LiquidGlassGroup {
+                    VStack(spacing: 10) {
+                        ForEach(Meal.allCases) { meal in
+                            MealSection(meal: meal, entries: displayedEntries(in: meal), day: day,
+                                        draggedID: drag?.row.id, targeted: drag?.meal == meal,
+                                        minimumHeight: drag?.row.data.meal == meal && drag?.meal != meal ? drag?.sourceMealHeight ?? 0 : 0,
+                                        addEnabled: visible && sheet == nil && drag == nil && scenePhase == .active,
+                                        holding: mealAdd?.meal == meal,
+                                        add: { openFood(meal) }, scan: { sheet = .barcode(meal, day) },
+                                        holdBegan: { frame in
+                                            mealAdd = MealAddSession(meal: meal, day: day, frame: frame)
+                                            UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                        }, holdMoved: moveMealAdd, holdEnded: endMealAdd, edit: openEntry)
+                        }
+                    }
                 }
                 if let error = store.error { Text(error).font(.caption).foregroundStyle(.secondary) }
                 if let error = store.syncError { Text(error).font(.caption).foregroundStyle(.secondary) }

@@ -27,7 +27,7 @@ app.build_configurations.each do |c|
     'INFOPLIST_FILE' => 'Resources/Info.plist', 'GENERATE_INFOPLIST_FILE' => 'NO',
     'CODE_SIGN_ENTITLEMENTS' => 'Resources/CaloricSwift.entitlements',
     'CODE_SIGN_STYLE' => 'Automatic', 'ASSETCATALOG_COMPILER_APPICON_NAME' => 'AppIcon',
-    'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '10',
+    'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '11',
     'ENABLE_USER_SCRIPT_SANDBOXING' => 'YES',
     'SWIFT_EMIT_LOC_STRINGS' => 'YES', 'SUPPORTS_MACCATALYST' => 'NO',
     'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) @executable_path/Frameworks',
@@ -53,7 +53,7 @@ widget.build_configurations.each do |c|
     'GENERATE_INFOPLIST_FILE' => 'NO', 'INFOPLIST_FILE' => 'Widget/Info.plist',
     'CODE_SIGN_ENTITLEMENTS' => 'Widget/CaloricWidget.entitlements', 'CODE_SIGN_STYLE' => 'Automatic',
     'TARGETED_DEVICE_FAMILY' => '1,2', 'APPLICATION_EXTENSION_API_ONLY' => 'YES',
-    'SKIP_INSTALL' => 'YES', 'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '10'})
+    'SKIP_INSTALL' => 'YES', 'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '11'})
   if c.name == 'Release'
     c.build_settings.merge!({
       'CODE_SIGN_STYLE[sdk=iphoneos*]' => 'Manual',

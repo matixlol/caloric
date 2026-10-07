@@ -11,9 +11,10 @@ struct MealAddButton: View {
     let moved: (CGSize) -> Void
     let ended: (Bool) -> Void
     var body: some View {
-        Text("+").font(.system(size: 22, weight: .semibold))
-            .frame(width: 32, height: 32).background(holding ? Theme.tint.opacity(0.12) : Theme.background, in: Circle())
-            .frame(width: 44, height: 44).foregroundStyle(Theme.tint)
+        Image(systemName: "plus").font(.system(size: 24, weight: .semibold)).foregroundStyle(Theme.tint)
+            .frame(width: 44, height: 44)
+            .caloricGlass(in: Circle(), tint: holding ? Theme.tint.opacity(0.12) : nil, interactive: enabled)
+            .frame(width: 48, height: 48)
             .overlay(MealAddControl(enabled: enabled, tapped: tapped, began: began, moved: moved, ended: ended).accessibilityHidden(true))
             .accessibilityElement(children: .ignore).accessibilityAddTraits(.isButton)
             .accessibilityLabel("Add food to \(meal.label)")
