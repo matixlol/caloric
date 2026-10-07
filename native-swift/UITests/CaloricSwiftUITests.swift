@@ -329,4 +329,67 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(app.textFields["Friend code"].exists)
         capture("Friends settings and account code", app)
     }
+
+    func testMealPlusHoldUpQuickAddsToEveryMeal() {
+        let app = launch()
+        for meal in ["Breakfast", "Lunch", "Dinner", "Snacks"] {
+            let add = app.buttons["Add food to \(meal)"]
+            for _ in 0..<4 where !add.isHittable || add.frame.midY > app.frame.height - 180 { app.swipeUp() }
+            XCTAssertTrue(add.isHittable, "The \(meal) + should be reachable")
+            let start = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            start.press(forDuration: 0.4, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -160)))
+            let row = app.buttons["diary-row-\(meal.lowercased())-Quick add"]
+            XCTAssertTrue(row.waitForExistence(timeout: 3), "Quick add must stay in \(meal)")
+            XCTAssertFalse(app.textFields["food-search"].exists, "Releasing a hold must not also open search")
+            row.tap()
+            XCTAssertEqual(app.textFields["Quick add calories"].value as? String, "250")
+            app.buttons["Done"].tap()
+        }
+        capture("Quick calories added using each meal plus", app)
+    }
+
+    func testMealPlusHoldDownOpensBarcodeForSelectedMeal() {
+        let app = launch()
+        let breakfast = app.buttons["Add food to Breakfast"]
+        let start = breakfast.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.4, thenDragTo: start.withOffset(CGVector(dx: 0, dy: 90)))
+        let code = app.textFields["barcode-number"]
+        XCTAssertTrue(code.waitForExistence(timeout: 5), "Sliding down should open the scanner directly")
+        capture("Barcode scanner opened from meal plus", app)
+        code.tap(); code.typeText("12345678")
+        app.buttons["Look up barcode"].tap()
+        XCTAssertEqual(app.textFields["food-search"].value as? String, "12345678")
+        XCTAssertTrue(app.buttons["Add to Breakfast"].exists)
+        app.buttons["Close food search"].tap()
+        let lunch = app.buttons["Add food to Lunch"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        lunch.press(forDuration: 0.4, thenDragTo: lunch.withOffset(CGVector(dx: 0, dy: 70)))
+        XCTAssertTrue(code.waitForExistence(timeout: 5))
+        app.buttons["Done"].tap()
+        XCTAssertTrue(app.buttons["Add to Lunch"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Edit Quick add"].exists)
+    }
+
+    func testMealPlusCancelsNeutralAndSidewaysHoldsAndUsesSelectedDate() {
+        let app = launch()
+        let add = app.buttons["Add food to Breakfast"]
+        add.press(forDuration: 0.4)
+        XCTAssertFalse(app.textFields["food-search"].exists)
+        XCTAssertFalse(app.textFields["barcode-number"].exists)
+        XCTAssertFalse(app.buttons["Edit Quick add"].exists)
+        let start = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.4, thenDragTo: start.withOffset(CGVector(dx: -150, dy: -160)))
+        XCTAssertFalse(app.buttons["Edit Quick add"].exists, "Moving away sideways cancels the selection")
+        add.tap()
+        XCTAssertTrue(app.textFields["food-search"].waitForExistence(timeout: 3), "Normal tap still opens food search")
+        XCTAssertFalse(app.textFields["barcode-number"].exists)
+        app.buttons["Close food search"].tap()
+        let heading = app.descendants(matching: .any)["diary-heading"].firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
+        heading.press(forDuration: 0.05, thenDragTo: heading.withOffset(CGVector(dx: 160, dy: 0)))
+        XCTAssertTrue(app.staticTexts["Yesterday"].waitForExistence(timeout: 3))
+        let yesterday = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        yesterday.press(forDuration: 0.4, thenDragTo: yesterday.withOffset(CGVector(dx: 0, dy: -160)))
+        XCTAssertTrue(app.buttons["diary-row-breakfast-Quick add"].waitForExistence(timeout: 3))
+        app.buttons["Back to today"].tap()
+        XCTAssertFalse(app.buttons["Edit Quick add"].exists, "Yesterday's quick add must not appear today")
+    }
 }

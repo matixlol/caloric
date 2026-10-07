@@ -7,6 +7,7 @@ struct FoodSearchView: View {
     @Environment(\.dismiss) private var dismiss
     let meal: Meal
     let day: String
+    var startWithScanner = false
     var recipeID: String? = nil
     var recipeEntryID: String? = nil
     @State private var query = ""
@@ -25,6 +26,7 @@ struct FoodSearchView: View {
     @State private var enrichment: Task<Void, Never>?
     @State private var barcode: String?
     @State private var showScanner = false
+    @State private var openedInitialScanner = false
     @State private var editingRecipe: RecipeRoute?
     @State private var quick = false
     @State private var calories = "250"
@@ -102,6 +104,9 @@ struct FoodSearchView: View {
         }.background(Theme.background).scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) { actionBar }
             .task(id: query) { await search() }
+            .task {
+                if startWithScanner && !openedInitialScanner { openedInitialScanner = true; showScanner = true }
+            }
             .sheet(isPresented: $showScanner) { BarcodeScanner { value in barcode = value; provider = "all"; query = value } }
             .sheet(item: $editingRecipe) { RecipeEditorView(recipeID: $0.id) }
             .onDisappear { enrichment?.cancel() }
@@ -136,7 +141,7 @@ struct FoodSearchView: View {
             HStack(spacing: 10) {
                 if quick { PrimaryButton(title: "Add quick", enabled: manualNutrition != nil) { addQuick(manualNutrition) } }
                 else { HoldSlideButton(title: ingredientMode ? "Add to recipe" : "Add to \(meal.label)", enabled: selected != nil || selectedRecipe != nil, values: (1...12).map { Double($0) / 4 }, selection: $portionPick, tapped: { add(portion: selectedPortion) }, committed: { add(portion: $0) }) }
-                if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: stride(from: 50.0, through: 600.0, by: 50).map { $0 }, selection: $caloriePick, tapped: { withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(Nutrition(calories: $0)) }).frame(width: 108) }
+                if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: QuickCalories.values, selection: $caloriePick, tapped: { withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(Nutrition(calories: $0)) }).frame(width: 108) }
             }
         }.padding(.horizontal, 16).padding(.vertical, 12)
       }

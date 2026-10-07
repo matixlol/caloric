@@ -12,6 +12,7 @@
 		26D50DDD9C2A09BA68821AE7 /* SQLiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B7145C0172E600C6B7AACF0 /* SQLiteStore.swift */; };
 		2E48B31BD3F53801699E81DE /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 9C03A08F5A1843F571235149 /* Foundation.framework */; };
 		352E4CB4AA57BC5BACE38E1D /* NativeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = DD76FA449FD35B75BCED2AFC /* NativeAuth.swift */; };
+		356008177A11989558E9505C /* MealAddControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 97A632BB0F15BC0D36C85AF6 /* MealAddControl.swift */; };
 		35BF3B5D8EBA6B5260E0C4F9 /* EntryDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 196D4A14FC8EEA2613605132 /* EntryDetailsView.swift */; };
 		36D7AAD4C4E0618254BD5345 /* AILogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3070A4917C970E1E9A746375 /* AILogView.swift */; };
 		3AFCB016DBE4A4340BE1949B /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79DB11C97EEC6F1E371FCDC7 /* APIClient.swift */; };
@@ -114,6 +115,7 @@
 		944DCD0A1BD527C66B9F86D9 /* SocialStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SocialStore.swift; sourceTree = "<group>"; };
 		94B9F94962CAE179BA23F268 /* CaloricWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CaloricWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
 		96381F4EA6D1F65A33D9C00B /* SignInView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
+		97A632BB0F15BC0D36C85AF6 /* MealAddControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MealAddControl.swift; sourceTree = "<group>"; };
 		98A9FD2B30B849719E8ECE36 /* QuickAddFields.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QuickAddFields.swift; sourceTree = "<group>"; };
 		997879D3150B057FA4BA0BF5 /* BarcodeScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BarcodeScanner.swift; sourceTree = "<group>"; };
 		9C03A08F5A1843F571235149 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
@@ -276,6 +278,7 @@
 				A1881438E81157B5F7940A3C /* VoiceRecorder.swift */,
 				D9173E390E56776AB24F9065 /* WidgetSnapshot.swift */,
 				464552967884D2851AF092A0 /* VoiceTouchControl.swift */,
+				97A632BB0F15BC0D36C85AF6 /* MealAddControl.swift */,
 			);
 			name = Sources;
 			path = Sources;
@@ -503,6 +506,7 @@
 				9BC8F195DC1F9BF886AF221A /* VoiceRecorder.swift in Sources */,
 				E30AE244ED089B132FC724D8 /* WidgetSnapshot.swift in Sources */,
 				10DF1E23F4401C351F882580 /* VoiceTouchControl.swift in Sources */,
+				356008177A11989558E9505C /* MealAddControl.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -638,7 +642,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = Widget/CaloricWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -675,7 +679,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -701,7 +705,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
@@ -729,7 +733,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = Resources/CaloricSwift.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 8;
+				CURRENT_PROJECT_VERSION = 9;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;

@@ -1,5 +1,32 @@
 import SwiftUI
 
+enum QuickCalories {
+    static let values = stride(from: 50.0, through: 600.0, by: 50).map { $0 }
+    static func picked(_ translation: CGFloat, values: [Double] = values) -> Double? {
+        let delta = -translation - 54
+        guard delta >= 0, !values.isEmpty else { return nil }
+        return values[min(values.count - 1, Int((delta / 25).rounded()))]
+    }
+    static func food(_ calories: Double) -> SearchFood {
+        SearchFood(id: "quick", canonicalKey: "quick", source: "manual", sourceLabel: "", name: "Quick add", serving: "Manual entry", nutrition: Nutrition(calories: calories))
+    }
+}
+
+struct SlideValuePicker: View {
+    let values: [Double]
+    let selection: Double?
+    let calories: Bool
+    var body: some View {
+        VStack(spacing: 3) {
+            Text(selection.map { calories ? "\(Int($0)) kcal" : "\(Portion.mixed($0))×" } ?? "—").font(.headline).foregroundStyle(Theme.tint).padding(.bottom, 5)
+            ForEach(values.reversed(), id: \.self) { value in
+                HStack { Text(calories ? "\(Int(value))" : Portion.mixed(value)).font(.caption).monospacedDigit().frame(width: 45, alignment: .trailing); RoundedRectangle(cornerRadius: 4).fill(selection == value ? Theme.tint : Color(uiColor: .tertiarySystemFill)).frame(width: 20, height: !calories && value.rounded() == value ? 35 : 20) }
+            }
+        }.padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).shadow(radius: 12, y: 5)
+            .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
 struct QuickAddFields: View {
     @Binding var calories: String
     @Binding var protein: String
@@ -55,12 +82,7 @@ struct HoldSlideButton: View {
                 })
             .overlay(alignment: secondary ? .bottomTrailing : .bottomLeading) {
                 if picking {
-                    VStack(spacing: 3) {
-                        Text(selection.map { calories ? "\(Int($0)) kcal" : "\(Portion.mixed($0))×" } ?? "—").font(.headline).foregroundStyle(Theme.tint).padding(.bottom, 5)
-                        ForEach(values.reversed(), id: \.self) { value in
-                            HStack { Text(calories ? "\(Int(value))" : Portion.mixed(value)).font(.caption).monospacedDigit().frame(width: 45, alignment: .trailing); RoundedRectangle(cornerRadius: 4).fill(selection == value ? Theme.tint : Color(uiColor: .tertiarySystemFill)).frame(width: 20, height: !calories && value.rounded() == value ? 35 : 20) }
-                        }
-                    }.padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).shadow(radius: 12, y: 5).offset(y: -60).allowsHitTesting(false).accessibilityHidden(true)
+                    SlideValuePicker(values: values, selection: selection, calories: calories).offset(y: -60)
                 }
             }.accessibilityValue(picking ? "Choosing \(calories ? "calories" : "portion")" : "")
             .onDisappear { picking = false; selection = nil }
@@ -73,7 +95,7 @@ struct HoldSlideButton: View {
     private func picked(_ translation: CGFloat) -> Double? {
         let delta = -translation - 54
         guard delta >= 0, !values.isEmpty else { return nil }
-        if calories { return values[min(values.count - 1, Int((delta / 25).rounded()))] }
+        if calories { return QuickCalories.picked(translation, values: values) }
         var offsets = [0.0]
         for i in 1..<values.count { offsets.append(offsets[i - 1] + 25 * ((values[i - 1].rounded() == values[i - 1] ? 2.0 : 1.0) + (values[i].rounded() == values[i] ? 2.0 : 1.0)) / 2) }
         let index = offsets.indices.min { abs(offsets[$0] - delta) < abs(offsets[$1] - delta) } ?? 0

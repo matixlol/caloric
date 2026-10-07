@@ -1,9 +1,9 @@
 import SwiftUI
 
 private enum DiarySheet: Identifiable {
-    case food(Meal, String), entry(String), settings, friend(FriendRoute)
+    case food(Meal, String), barcode(Meal, String), entry(String), settings, friend(FriendRoute)
     var id: String {
-        switch self { case let .food(meal, day): "food-\(meal.rawValue)-\(day)"; case let .entry(id): id; case .settings: "settings"; case let .friend(route): "friend-\(route.id)" }
+        switch self { case let .food(meal, day): "food-\(meal.rawValue)-\(day)"; case let .barcode(meal, day): "barcode-\(meal.rawValue)-\(day)"; case let .entry(id): id; case .settings: "settings"; case let .friend(route): "friend-\(route.id)" }
     }
 }
 
@@ -16,6 +16,7 @@ struct TodayView: View {
     @State private var sheet: DiarySheet?
     @State private var layout = DiaryLayout()
     @State private var drag: DiaryDragSession?
+    @State private var mealAdd: MealAddSession?
     @State private var lastDragEndedAt = -Double.infinity
     @State private var visible = false
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
@@ -45,7 +46,13 @@ struct TodayView: View {
                     MealSection(meal: meal, entries: displayedEntries(in: meal), day: day,
                                 draggedID: drag?.row.id, targeted: drag?.meal == meal,
                                 minimumHeight: drag?.row.data.meal == meal && drag?.meal != meal ? drag?.sourceMealHeight ?? 0 : 0,
-                                add: { sheet = .food(meal, day) }, edit: openEntry)
+                                addEnabled: visible && sheet == nil && drag == nil && scenePhase == .active,
+                                holding: mealAdd?.meal == meal,
+                                add: { openFood(meal) }, scan: { sheet = .barcode(meal, day) },
+                                holdBegan: { frame in
+                                    mealAdd = MealAddSession(meal: meal, day: day, frame: frame)
+                                    UIImpactFeedbackGenerator(style: .light).impactOccurred()
+                                }, holdMoved: moveMealAdd, holdEnded: endMealAdd, edit: openEntry)
                 }
                 if let error = store.error { Text(error).font(.caption).foregroundStyle(.secondary) }
                 if let error = store.syncError { Text(error).font(.caption).foregroundStyle(.secondary) }
@@ -70,8 +77,8 @@ struct TodayView: View {
                 }.allowsHitTesting(false)
             }
             .onAppear { visible = true }
-            .onDisappear { visible = false; drag = nil }
-            .onChange(of: day) { _, _ in drag = nil }
+            .onDisappear { visible = false; drag = nil; mealAdd = nil }
+            .onChange(of: day) { _, _ in drag = nil; mealAdd = nil }
             .task(id: day) { await social.loadDaily(day) }
             .onReceive(NotificationCenter.default.publisher(for: .NSCalendarDayChanged)) { _ in currentDate = Date(); store.updateWidget() }
             .onChange(of: scenePhase) { _, phase in if phase == .active { currentDate = Date() } }
@@ -80,6 +87,7 @@ struct TodayView: View {
             .sheet(item: $sheet) { route in
                 switch route {
                 case let .food(meal, day): FoodSearchView(meal: meal, day: day)
+                case let .barcode(meal, day): FoodSearchView(meal: meal, day: day, startWithScanner: true)
                 case let .entry(id): EntryDetailsView(entryID: id)
                 case .settings: SettingsView().presentationDragIndicator(.visible)
                 case let .friend(route):
@@ -89,6 +97,33 @@ struct TodayView: View {
                 }
             }
             .overlay { AILogView(isPresented: sheet == nil).opacity(sheet == nil ? 1 : 0).allowsHitTesting(sheet == nil) }
+            .overlay { if let mealAdd { MealAddMenu(session: mealAdd) } }
+    }
+
+    private func openFood(_ meal: Meal) {
+        guard mealAdd == nil else { return }
+        sheet = .food(meal, day)
+    }
+    private func moveMealAdd(_ translation: CGSize) {
+        guard var session = mealAdd else { return }
+        let selection = MealAddSelection.picked(translation)
+        guard selection != session.selection else { return }
+        session.selection = selection
+        mealAdd = session
+        if selection != nil { UISelectionFeedbackGenerator().selectionChanged() }
+    }
+    private func endMealAdd(cancelled: Bool) {
+        guard let session = mealAdd else { return }
+        mealAdd = nil
+        guard !cancelled else { return }
+        switch session.selection {
+        case let .calories(calories):
+            withAnimation {
+                store.perform { _ = try store.add(food: QuickCalories.food(calories), meal: session.meal, day: session.day) }
+            }
+        case .barcode: sheet = .barcode(session.meal, session.day)
+        case nil: break
+        }
     }
 
     private func displayedEntries(in meal: Meal) -> [FoodRecord] {
@@ -204,13 +239,19 @@ private struct MealSection: View {
     let draggedID: String?
     let targeted: Bool
     let minimumHeight: CGFloat
+    let addEnabled: Bool
+    let holding: Bool
     let add: () -> Void
+    let scan: () -> Void
+    let holdBegan: (CGRect) -> Void
+    let holdMoved: (CGSize) -> Void
+    let holdEnded: (Bool) -> Void
     let edit: (String) -> Void
     var body: some View {
-        HStack(alignment: .top, spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             Text(meal.label.uppercased()).font(.system(size: 10, weight: .bold)).tracking(1.6)
-                .foregroundStyle(.secondary).frame(width: 92, height: 16, alignment: .trailing)
-                .rotationEffect(.degrees(-90)).frame(width: 16, height: 92).padding(.top, 12)
+                .foregroundStyle(.secondary).frame(width: 92, height: 16)
+                .rotationEffect(.degrees(-90)).frame(width: 16, height: 92)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
                 HStack(alignment: .center) {
@@ -220,8 +261,8 @@ private struct MealSection: View {
                     }.monospacedDigit()
                     Spacer()
                     MacroBadges(nutrition: Nutrition(protein: Nutrition.total(entries).protein, carbs: Nutrition.total(entries).carbs, fat: Nutrition.total(entries).fat))
-                    Button(action: add) { Text("+").font(.system(size: 22, weight: .semibold)).frame(width: 32, height: 32).background(Theme.background, in: Circle()) }
-                        .buttonStyle(.plain).foregroundStyle(Theme.tint).accessibilityLabel("Add food to \(meal.label)")
+                    MealAddButton(meal: meal, enabled: addEnabled, holding: holding, tapped: add, scan: scan,
+                                  began: holdBegan, moved: holdMoved, ended: holdEnded)
                 }.padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)
                 if entries.isEmpty {
                     Text(meal.emptyCopy).font(.system(size: 14)).foregroundStyle(.secondary)
