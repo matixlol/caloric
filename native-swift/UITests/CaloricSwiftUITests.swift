@@ -135,6 +135,34 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertFalse(app.staticTexts["Voice message"].exists)
     }
 
+    func testGlassComposerSwitchesControlsAndPreservesConversation() {
+        let app = launch(["-seed-chat"])
+        let response = app.staticTexts["Try a chicken bowl with rice and vegetables."]
+        XCTAssertTrue(response.waitForExistence(timeout: 3))
+        capture("Liquid Glass conversation and composer", app)
+        let composer = app.textFields["ai-composer"]
+        composer.tap(); composer.typeText("Add lunch")
+        XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["voice-microphone"].exists)
+        capture("Liquid Glass composer with keyboard and send button", app)
+        composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 9))
+        XCTAssertTrue(app.buttons["voice-microphone"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Send message"].exists)
+        app.buttons["Hide the food assistant conversation"].tap()
+        XCTAssertFalse(response.exists)
+        composer.tap()
+        XCTAssertTrue(response.waitForExistence(timeout: 3), "Collapsing the glass panel must preserve its conversation")
+        app.buttons["Hide the food assistant conversation"].tap()
+        app.buttons["Edit Grilled chicken"].tap()
+        XCTAssertTrue(app.buttons["Close details"].waitForExistence(timeout: 3), "The empty area around glass controls must pass taps to the diary")
+        app.buttons["Done"].tap()
+        app.buttons["Settings"].tap()
+        XCTAssertTrue(app.buttons["Close Settings"].waitForExistence(timeout: 3))
+        capture("Native Settings navigation and toolbar", app)
+        app.buttons["Close Settings"].tap()
+        XCTAssertTrue(composer.waitForExistence(timeout: 3))
+    }
+
     func testMacroDividerDragUsesStableCoordinates() {
         let app = launch()
         app.buttons["Settings"].tap()

@@ -31,7 +31,7 @@ struct TodayView: View {
                         Text(selectedDate.formatted(.dateTime.weekday(.wide).month(.wide).day().year()))
                             .font(.system(size: 13)).foregroundStyle(.secondary)
                       }.padding(.top, 4).accessibilityIdentifier("diary-heading")
-                      Button { sheet = .settings } label: { Image(systemName: "gearshape").font(.system(size: 20)).foregroundStyle(.secondary).frame(width: 44, height: 44) }.accessibilityLabel("Settings")
+                      NativeIconButton(symbol: "gearshape", label: "Settings") { sheet = .settings }
                     }
                     if dayOffset != 0 {
                         Button("Back to today") { withAnimation { dayOffset = 0 } }

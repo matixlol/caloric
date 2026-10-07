@@ -16,16 +16,17 @@ struct SettingsView: View {
         return settings
     }
     var body: some View {
+      NavigationStack {
         ScrollView {
             VStack(alignment: .leading, spacing: 12) {
                 HStack(alignment: .center, spacing: 8) {
-                    Text("Settings").screenTitle()
+                    Text("Cloud sync").font(.subheadline).foregroundStyle(.secondary)
+                    Spacer()
                     HStack(spacing: 4) {
                         Circle().fill(syncColor).frame(width: 6, height: 6)
                         Text(store.isSyncing ? "Syncing" : store.syncError != nil ? "Sync failed" : store.dirty ? "Pending" : store.lastSyncedAt != nil ? "Synced" : "Not synced").fontWeight(.semibold)
                     }.font(.system(size: 10)).lineLimit(1).fixedSize().padding(.horizontal, 8).padding(.vertical, 6)
                         .background(syncColor.opacity(0.08), in: Capsule()).accessibilityIdentifier("sync-status")
-                    Button { dismiss() } label: { Image(systemName: "xmark").font(.system(size: 14, weight: .semibold)).frame(width: 32, height: 32).background(Theme.card, in: Circle()) }.accessibilityLabel("Close Settings")
                 }.padding(.top, 4)
                 sectionTitle("Goals")
                 HStack {
@@ -72,6 +73,8 @@ struct SettingsView: View {
                 }.caloricCard(padding: 14)
             }.padding(.horizontal, 16).padding(.bottom, 24)
         }.background(Theme.background).scrollDismissesKeyboard(.interactively)
+            .navigationTitle("Settings").navigationBarTitleDisplayMode(.large)
+            .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityLabel("Close Settings") } }
             .onAppear { load() }
             .onChange(of: store.settings) { previous, _ in if edited == previous { load() } }
             .task(id: edited) {
@@ -90,6 +93,7 @@ struct SettingsView: View {
                     }
                 }
             } message: { Text("You will need to sign in again to access your account.") }
+      }
     }
     private var syncColor: Color { store.isSyncing ? Theme.tint : store.syncError != nil ? .red : store.dirty || store.lastSyncedAt == nil ? Theme.carbs : .green }
     private func load() { goal = "\(store.settings.calorieGoal)"; ratios = store.settings }

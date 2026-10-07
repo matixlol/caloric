@@ -7,6 +7,7 @@ struct VoiceComposer: View {
     let disabled: Bool
     let sendText: () -> Void
     let sendVoice: (URL, String) -> Void
+    let glassNamespace: Namespace.ID
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var holding = false
@@ -22,8 +23,11 @@ struct VoiceComposer: View {
                 if active { recordingCard.transition(.opacity.combined(with: .move(edge: .bottom))) }
                 else {
                     TextField("Message the food assistant", text: $input, axis: .vertical)
-                        .lineLimit(1...5).font(.system(size: 16)).focused(focus).disabled(disabled)
-                        .padding(.horizontal, 14).padding(.vertical, 12).background(Theme.card, in: RoundedRectangle(cornerRadius: 18))
+                        .lineLimit(1...5).font(.body).textFieldStyle(.plain).focused(focus).disabled(disabled)
+                        .submitLabel(.send).onSubmit { if !disabled { sendText() } }
+                        .padding(.horizontal, 18).padding(.vertical, 12).frame(minHeight: 48)
+                        .caloricGlass(in: RoundedRectangle(cornerRadius: 26), interactive: true)
+                        .glassIdentity("composer", in: glassNamespace)
                         .accessibilityIdentifier("ai-composer")
                         .onChange(of: input) { _, value in if value.count > 600 { input = String(value.prefix(600)) } }
                 }
@@ -37,8 +41,9 @@ struct VoiceComposer: View {
                 Text(error).font(.system(size: 12)).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
             }
         }.padding(.horizontal, 12).padding(.vertical, 6)
-            .animation(reduceMotion ? nil : .spring(response: 0.28, dampingFraction: 0.86), value: active)
+            .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: active)
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: locked)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: input.isEmpty)
             .onChange(of: voice.recording) { _, recording in
                 if recording { UIImpactFeedbackGenerator(style: .light).impactOccurred() }
                 else if !voice.starting { reset() }
@@ -72,7 +77,7 @@ struct VoiceComposer: View {
             if locked {
                 HStack {
                     Button { finish(cancelled: true) } label: { Label("Discard", systemImage: "trash") }
-                        .font(.system(size: 13, weight: .semibold)).foregroundStyle(.red).accessibilityLabel("Cancel voice recording")
+                        .buttonStyle(.borderless).font(.subheadline.weight(.semibold)).tint(.red).accessibilityLabel("Cancel voice recording")
                     Spacer()
                 }.frame(minHeight: 24)
             } else {
@@ -83,16 +88,16 @@ struct VoiceComposer: View {
                     .offset(x: -min(cancelProgress, 1) * 8).frame(minHeight: 24)
             }
         }.padding(12).frame(maxWidth: .infinity)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: 18))
-            .overlay(RoundedRectangle(cornerRadius: 18).strokeBorder(cancelling ? Color.red.opacity(0.5) : Theme.tint.opacity(0.18), lineWidth: 1))
+            .caloricGlass(in: RoundedRectangle(cornerRadius: 26))
+            .glassIdentity("composer", in: glassNamespace)
             .accessibilityIdentifier("voice-recording-card")
     }
 
     private var microphone: some View {
         Image(systemName: active ? "mic.fill" : "mic").font(.system(size: 22))
             .frame(width: 48, height: 48).foregroundStyle(active ? .white : .primary)
-            .background(active ? Color.red : Theme.card, in: Circle())
-            .overlay(Circle().stroke(Color.red.opacity(active ? 0.18 : 0), lineWidth: active ? 8 : 0))
+            .caloricGlass(in: Circle(), tint: active ? .red : nil, interactive: true)
+            .glassIdentity("composer-action", in: glassNamespace)
             .scaleEffect(active && !reduceMotion ? 1.06 : 1)
             .offset(x: active ? -min(cancelProgress, 1) * 14 : 0, y: active ? -min(lockProgress, 1) * 8 : 0)
             .overlay(alignment: .bottom) {
@@ -105,7 +110,8 @@ struct VoiceComposer: View {
                         }
                         Image(systemName: "chevron.up").font(.system(size: 11, weight: .bold))
                     }.foregroundStyle(.red).frame(width: 54).padding(.vertical, 8)
-                        .background(.regularMaterial, in: Capsule()).offset(y: -68).allowsHitTesting(false)
+                        .caloricGlass(in: Capsule()).glassIdentity("voice-lock", in: glassNamespace)
+                        .offset(y: -68).allowsHitTesting(false)
                         .transition(.opacity.combined(with: .scale)).accessibilityHidden(true)
                 }
             }
@@ -135,8 +141,9 @@ struct VoiceComposer: View {
     }
 
     private func actionButton(_ image: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: image).font(.system(size: 20)).frame(width: 48, height: 48).foregroundStyle(.white).background(color, in: Circle()) }
-            .accessibilityLabel(label)
+        Button(action: action) { Image(systemName: image).font(.system(size: 20, weight: .semibold)).frame(width: 24, height: 24) }
+            .nativeActionStyle(prominent: true, shape: .circle).controlSize(.large).tint(color)
+            .glassIdentity("composer-action", in: glassNamespace).accessibilityLabel(label)
     }
 
     private func finish(cancelled: Bool) {

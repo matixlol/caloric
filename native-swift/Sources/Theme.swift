@@ -23,9 +23,28 @@ struct PrimaryButton: View {
     var enabled = true
     let action: () -> Void
     var body: some View {
-        Button(action: action) { Text(title).font(.system(size: 17, weight: .semibold)).frame(maxWidth: .infinity).frame(minHeight: 50) }
-            .foregroundStyle(.white).background(enabled ? Theme.tint : Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 14))
-            .disabled(!enabled).buttonStyle(.plain)
+        Button(action: action) { Text(title).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6) }
+            .nativeActionStyle(prominent: true).controlSize(.large).tint(Theme.tint).disabled(!enabled)
+    }
+}
+
+struct NativeIconButton: View {
+    let symbol: String
+    let label: String
+    let action: () -> Void
+    var body: some View {
+        Button(action: action) { Image(systemName: symbol).font(.system(size: 18, weight: .semibold)).frame(width: 20, height: 20) }
+            .nativeActionStyle(shape: .circle).controlSize(.large)
+            .frame(minWidth: 44, minHeight: 44).accessibilityLabel(label)
+    }
+}
+
+struct LiquidGlassGroup<Content: View>: View {
+    var spacing: CGFloat = 8
+    @ViewBuilder let content: () -> Content
+    var body: some View {
+        if #available(iOS 26, *) { GlassEffectContainer(spacing: spacing, content: content) }
+        else { content() }
     }
 }
 
@@ -56,9 +75,22 @@ struct CalorieMismatchBadge: View {
 }
 
 extension View {
-    @ViewBuilder func assistantGlass() -> some View {
-        if #available(iOS 26, *) { glassEffect(.regular.interactive(), in: .rect(cornerRadius: 22)) }
-        else { background(.regularMaterial, in: RoundedRectangle(cornerRadius: 22)) }
+    @ViewBuilder func caloricGlass<S: Shape>(in shape: S, tint: Color? = nil, interactive: Bool = false) -> some View {
+        if #available(iOS 26, *) { glassEffect(.regular.tint(tint).interactive(interactive), in: shape) }
+        else { background(.regularMaterial, in: shape) }
+    }
+    @ViewBuilder func glassIdentity(_ id: String, in namespace: Namespace.ID) -> some View {
+        if #available(iOS 26, *) { glassEffectID(id, in: namespace) }
+        else { self }
+    }
+    @ViewBuilder func nativeActionStyle(prominent: Bool = false, shape: ButtonBorderShape = .capsule) -> some View {
+        if #available(iOS 26, *) {
+            if prominent { buttonStyle(.glassProminent).buttonBorderShape(shape) }
+            else { buttonStyle(.glass).buttonBorderShape(shape) }
+        } else {
+            if prominent { buttonStyle(.borderedProminent).buttonBorderShape(shape) }
+            else { buttonStyle(.bordered).buttonBorderShape(shape) }
+        }
     }
 }
 

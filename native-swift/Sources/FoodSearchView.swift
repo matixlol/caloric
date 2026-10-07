@@ -52,14 +52,14 @@ struct FoodSearchView: View {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     Text("Foods").screenTitle()
-                    Button { dismiss() } label: { Image(systemName: "xmark").frame(width: 36, height: 36).background(Theme.card, in: Circle()) }.buttonStyle(.plain).accessibilityLabel("Close food search")
+                    NativeIconButton(symbol: "xmark", label: "Close food search") { dismiss() }
                 }.padding(.horizontal, 4)
                 HStack(spacing: 10) {
                     HStack {
                         TextField("Search foods (example: banana)", text: $query).font(.system(size: 16)).textInputAutocapitalization(.never).autocorrectionDisabled().submitLabel(.search).accessibilityIdentifier("food-search")
                         if !query.isEmpty { Button { query = ""; barcode = nil } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }.accessibilityLabel("Clear search") }
                     }.padding(12).frame(minHeight: 44).background(Theme.input, in: RoundedRectangle(cornerRadius: 10))
-                    Button { showScanner = true } label: { Image(systemName: "barcode.viewfinder").font(.system(size: 24)).frame(width: 44, height: 44).background(Theme.input, in: RoundedRectangle(cornerRadius: 10)) }.accessibilityLabel("Scan barcode")
+                    NativeIconButton(symbol: "barcode.viewfinder", label: "Scan barcode") { showScanner = true }
                 }.caloricCard(padding: 12)
                 if !hasQuery && !ingredientMode { recipesSection }
                 if !recents.isEmpty || !hasQuery {
@@ -76,7 +76,13 @@ struct FoodSearchView: View {
                     }
                 }
                 if hasQuery {
-                    if barcode == nil { ScrollView(.horizontal) { HStack(spacing: 8) { chip("All", "all", allFoods.count); chip("MFP", "mfp", bySource["mfp"]?.count ?? 0); chip("OFF", "openfoodfacts", bySource["openfoodfacts"]?.count ?? 0) } }.scrollIndicators(.hidden) }
+                    if barcode == nil {
+                        Picker("Food source", selection: $provider) {
+                            Text("All \(allFoods.count)").tag("all")
+                            Text("MFP \(bySource["mfp"]?.count ?? 0)").tag("mfp")
+                            Text("OFF \(bySource["openfoodfacts"]?.count ?? 0)").tag("openfoodfacts")
+                        }.pickerStyle(.segmented).accessibilityLabel("Food source")
+                    }
                     if searching { HStack { ProgressView(); Text(barcode == nil ? "Searching…" : "Looking up barcode…").foregroundStyle(.secondary) }.font(.subheadline) }
                     if let error { Text(error).font(.subheadline).foregroundStyle(.red) }
                     if !searching && error == nil && visible.isEmpty { Text(barcode == nil ? "No foods found for \"\(query)\"." : "No MFP food found for this barcode.").font(.subheadline).foregroundStyle(.secondary) }
@@ -124,6 +130,7 @@ struct FoodSearchView: View {
         }
     }
     private var actionBar: some View {
+      LiquidGlassGroup {
         VStack(spacing: 10) {
             if quick { QuickAddFields(calories: $calories, protein: $protein, carbs: $carbs, fat: $fat).caloricCard(padding: 12) }
             HStack(spacing: 10) {
@@ -131,7 +138,8 @@ struct FoodSearchView: View {
                 else { HoldSlideButton(title: ingredientMode ? "Add to recipe" : "Add to \(meal.label)", enabled: selected != nil || selectedRecipe != nil, values: (1...12).map { Double($0) / 4 }, selection: $portionPick, tapped: { add(portion: selectedPortion) }, committed: { add(portion: $0) }) }
                 if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: stride(from: 50.0, through: 600.0, by: 50).map { $0 }, selection: $caloriePick, tapped: { withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(Nutrition(calories: $0)) }).frame(width: 108) }
             }
-        }.padding(.horizontal, 16).padding(.vertical, 12).background(.regularMaterial)
+        }.padding(.horizontal, 16).padding(.vertical, 12)
+      }
     }
     private func addQuick(_ nutrition: Nutrition?) {
         guard let nutrition else { return }
@@ -153,9 +161,6 @@ struct FoodSearchView: View {
     }
     private func section(_ text: String) -> some View { Text(text).font(.system(size: 15)).foregroundStyle(.secondary).padding(.horizontal, 4) }
     private func normalize(_ value: String) -> String { value.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current).trimmingCharacters(in: .whitespacesAndNewlines) }
-    private func chip(_ label: String, _ key: String, _ count: Int) -> some View {
-        Button { provider = key } label: { HStack(spacing: 6) { Text(label).fontWeight(.semibold); Text("\(count)").font(.system(size: 12)) }.font(.system(size: 13)).padding(.horizontal, 12).padding(.vertical, 8).foregroundStyle(provider == key ? Theme.tint : Color.secondary).background(provider == key ? Theme.tint.opacity(0.1) : Theme.card, in: Capsule()) }.buttonStyle(.plain)
-    }
     private func search() async {
         let identifier = UUID(); searchID = identifier
         bySource = [:]; allFoods = []; page = 1; hasMore = [:]; searching = false; loadingMore = false; error = nil

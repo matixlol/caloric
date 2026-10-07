@@ -9,9 +9,12 @@ struct AILogView: View {
     @State private var input = ""
     @State private var expanded = Set<String>()
     @State private var panelOpen = false
+    @Namespace private var glassNamespace
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var inputFocused: Bool
     var body: some View {
       GeometryReader { geometry in
+       LiquidGlassGroup {
        VStack(spacing: 8) {
         Spacer(minLength: 0)
         if panelOpen && (!chat.messages.isEmpty || chat.streaming || chat.error != nil) {
@@ -19,7 +22,7 @@ struct AILogView: View {
           HStack {
             Label("Food assistant", systemImage: "sparkles").font(.system(size: 13, weight: .semibold)).foregroundStyle(.secondary)
             Spacer()
-            Button { withAnimation { panelOpen = false; inputFocused = false } } label: { Image(systemName: "chevron.down").frame(width: 32, height: 32) }.accessibilityLabel("Hide the food assistant conversation")
+            Button { withAnimation(reduceMotion ? nil : .smooth) { panelOpen = false; inputFocused = false } } label: { Image(systemName: "chevron.down").frame(width: 44, height: 44) }.buttonStyle(.borderless).accessibilityLabel("Hide the food assistant conversation")
           }.padding(.horizontal, 14).padding(.top, 6)
         ScrollViewReader { proxy in
             ScrollView {
@@ -34,13 +37,26 @@ struct AILogView: View {
                 .onChange(of: chat.messages.last?.text) { _, _ in proxy.scrollTo("chat-bottom", anchor: .bottom) }
                 .onChange(of: inputFocused) { _, focused in if focused { withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) } } }
         }
-         }.frame(height: min(480, max(150, geometry.size.height - 90))).assistantGlass().padding(.horizontal, 10)
+         }.frame(height: min(480, max(150, geometry.size.height - 90)))
+          .caloricGlass(in: RoundedRectangle(cornerRadius: 26)).glassIdentity("conversation", in: glassNamespace).padding(.horizontal, 12)
           .transition(.move(edge: .bottom))
         }
         composer
        }.padding(.bottom, 6)
+       }
       }
-            .onChange(of: store.userID, initial: true) { _, id in chat.reset(accountID: id); _ = voice.stop(cancelled: true) }
+            .onChange(of: store.userID, initial: true) { _, id in
+                chat.reset(accountID: id); _ = voice.stop(cancelled: true)
+                #if DEBUG
+                if AppConfiguration.uiTesting, id != nil, ProcessInfo.processInfo.arguments.contains("-seed-chat") {
+                    chat.messages = [
+                        ChatMessage(kind: "text", role: "user", text: "What can I add for lunch?"),
+                        ChatMessage(kind: "text", text: "Try a chicken bowl with rice and vegetables.")
+                    ]
+                    panelOpen = true
+                }
+                #endif
+            }
             .onChange(of: inputFocused) { _, focused in if focused { withAnimation { panelOpen = true } } }
             .onChange(of: isPresented) { _, presented in if !presented { inputFocused = false; _ = voice.stop(cancelled: true) } }
             .onChange(of: scenePhase) { _, phase in chat.setForeground(phase == .active) }
@@ -119,10 +135,10 @@ struct AILogView: View {
         }
     }
     private var composer: some View {
-        VoiceComposer(input: $input, voice: voice, focus: $inputFocused, disabled: chat.streaming, sendText: sendText) { audio, duration in
+        VoiceComposer(input: $input, voice: voice, focus: $inputFocused, disabled: chat.streaming, sendText: sendText, sendVoice: { audio, duration in
             panelOpen = true
             chat.submit("", store: store, audio: audio, duration: duration)
-        }
+        }, glassNamespace: glassNamespace)
     }
     private func waveform(color: Color) -> some View {
         HStack(spacing: 2) { ForEach(Array([8.0, 14, 10, 18, 12, 20, 9, 16, 11, 15].enumerated()), id: \.offset) { _, height in Capsule().fill(color).frame(width: 2, height: height) } }

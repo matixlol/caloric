@@ -16,6 +16,7 @@ Reference: `matixlol/caloric` main, `ded9c48` (2026-10-04). The standalone app i
 | Calorie / macro mismatch badges and meal macro totals | Implemented; unknown nutrients and aggregate totals tested |
 | Friends: profile, code, requests, removal, daily totals and read only diary | Implemented; two isolated production accounts tested request, ignore, accept, diary access and removal |
 | Streaming AI, search results, approvals and interrupted turn resume | Implemented; real production stream / background interruption / resume tested; replay deduplicates events |
+| Native Liquid Glass and iOS controls | Real iOS 26 glass composer, microphone, conversation and recording surfaces; native action buttons, sheet controls, Settings toolbar and segmented food-source picker; iOS 17–25 fallback |
 | Animated voice recording, lock and cancel | Implemented; UI gesture tests use synthetic audio; microphone / transcription requires a device |
 | Home / lock screen nutrition widgets and midnight rollover | Implemented; snapshot totals / goal ratios tested; separate widget extension and App Group |
 | Daily iCloud backups including recipes | Implemented; separate iCloud container; device iCloud verification remains |
@@ -25,6 +26,8 @@ Reference: `matixlol/caloric` main, `ded9c48` (2026-10-04). The standalone app i
 ## Verification
 
 `FinalFeatureParity.xcresult`: **54 passed, 0 failed, 0 skipped** on iPhone 17 Pro / iOS 26.5 (2026-10-07): 39 unit / mock HTTP tests, 4 native production integration tests and 11 UI tests. UI screenshots are attached to the result bundle. The two temporary verification accounts and their diary, recipe, social and AI records were removed after testing. Real user data was not changed.
+
+`LiquidGlassRegression.xcresult`: **51 passed, 0 failed, 4 skipped** on the same simulator (2026-10-07): 39 unit / mock HTTP tests and 12 UI tests. This run covers the new chat control transitions, conversation preservation, tap-through behavior and native Settings dismissal, plus voice lock/cancel, portion scrubbing, meal dragging, recipe and quick-add flows. The four opt-in production tests were not repeated for this UI-only update; their prior successful result is recorded above. Chat/recording screenshots are attached; light and dark appearance were reviewed.
 
 Simulator tests cannot verify physical camera input, actual microphone / transcription, installed widget behavior or a signed-in device's iCloud storage. Test those on TestFlight before public release. No backend schema changes or deployment were required for this port.
 

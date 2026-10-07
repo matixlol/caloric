@@ -18,7 +18,7 @@ struct EntryDetailsView: View {
                 VStack(alignment: .leading, spacing: 12) {
                     HStack(alignment: .top, spacing: 12) {
                         Text(entry.foodName).font(.system(size: 28, weight: .bold)).frame(maxWidth: .infinity, alignment: .leading)
-                        Button { commitQuick(); dismiss() } label: { Image(systemName: "xmark").foregroundStyle(.secondary).frame(width: 32, height: 32).background(Theme.card, in: Circle()) }.accessibilityLabel("Close details")
+                        NativeIconButton(symbol: "xmark", label: "Close details") { commitQuick(); dismiss() }
                     }
                     Text([entry.meal.label, entry.brand, entry.serving].compactMap { $0 }.joined(separator: " • ")).font(.system(size: 14)).foregroundStyle(.secondary)
                     if entry.isQuickAdd {

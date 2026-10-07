@@ -35,9 +35,8 @@ struct HoldSlideButton: View {
         Button {
             guard enabled, ProcessInfo.processInfo.systemUptime - endedAt > 0.4 else { return }; tapped()
         } label: {
-            Text(title).font(.system(size: 16, weight: .semibold)).frame(maxWidth: .infinity).frame(minHeight: 50).foregroundStyle(secondary ? Theme.tint : .white)
-                .background(secondary ? Theme.card : enabled ? Theme.tint : Color(uiColor: .tertiarySystemFill), in: RoundedRectangle(cornerRadius: 12))
-        }.buttonStyle(.plain).disabled(!enabled)
+            Text(title).font(.headline).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).padding(.vertical, 6)
+        }.nativeActionStyle(prominent: !secondary).controlSize(.large).tint(Theme.tint).disabled(!enabled)
             .simultaneousGesture(LongPressGesture(minimumDuration: 0.26, maximumDistance: 30).sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
                 .onChanged { value in
                     guard enabled else { return }
