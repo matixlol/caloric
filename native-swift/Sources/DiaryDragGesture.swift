@@ -39,6 +39,7 @@ struct DiaryDragGesture: UIViewRepresentable {
         private var active = false
         private var point = CGPoint.zero
         private var displayLink: CADisplayLink?
+        private var lastScrollTimestamp: CFTimeInterval = 0
         private lazy var gesture: UILongPressGestureRecognizer = {
             let gesture = UILongPressGestureRecognizer(target: self, action: #selector(handle(_:)))
             gesture.minimumPressDuration = 0.32
@@ -69,7 +70,8 @@ struct DiaryDragGesture: UIViewRepresentable {
             var view = touch.view
             scroll = nil
             while let current = view {
-                if let candidate = current as? UIScrollView { scroll = candidate; break }
+                if let candidate = current as? UITableView, candidate.isEditing { return false }
+                if let candidate = current as? UIScrollView, candidate.isScrollEnabled { scroll = candidate; break }
                 view = current.superview
             }
             return true
@@ -89,7 +91,9 @@ struct DiaryDragGesture: UIViewRepresentable {
                 wasScrollEnabled = scroll?.isScrollEnabled ?? true
                 scroll?.isScrollEnabled = false
                 parent.began(sourceID, point)
+                lastScrollTimestamp = 0
                 displayLink = CADisplayLink(target: self, selector: #selector(autoScroll))
+                displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
                 displayLink?.add(to: .main, forMode: .common)
             case .changed: if active { parent.moved(point) }
             case .ended:
@@ -100,7 +104,9 @@ struct DiaryDragGesture: UIViewRepresentable {
             }
         }
         @objc private func autoScroll() {
-            guard active, let scroll, let window else { return }
+            guard active, let scroll, let window, let displayLink else { return }
+            let elapsed = lastScrollTimestamp == 0 ? displayLink.duration : displayLink.timestamp - lastScrollTimestamp
+            lastScrollTimestamp = displayLink.timestamp
             var viewport = scroll.convert(scroll.bounds, to: window).inset(by: scroll.adjustedContentInset)
             viewport.size.height = max(0, viewport.height - parent.bottomExclusion)
             let edge: CGFloat = 70
@@ -110,7 +116,7 @@ struct DiaryDragGesture: UIViewRepresentable {
             guard delta != 0 else { return }
             let minimum = -scroll.adjustedContentInset.top
             let maximum = max(minimum, scroll.contentSize.height - scroll.bounds.height + scroll.adjustedContentInset.bottom)
-            let offset = max(minimum, min(maximum, scroll.contentOffset.y + delta))
+            let offset = max(minimum, min(maximum, scroll.contentOffset.y + delta * min(3, elapsed * 60)))
             guard abs(offset - scroll.contentOffset.y) > 0.1 else { return }
             scroll.setContentOffset(CGPoint(x: scroll.contentOffset.x, y: offset), animated: false)
             parent.moved(point)

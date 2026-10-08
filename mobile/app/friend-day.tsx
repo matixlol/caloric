@@ -1,8 +1,10 @@
+import { bentoColor, getBrandPalette } from "../src/theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../src/theme/useAppTheme";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useAuth } from "../src/auth/auth-client";
 import { useQuery } from "@tanstack/react-query";
 import { router, useLocalSearchParams } from "expo-router";
-import { Platform, PlatformColor, Pressable, StyleSheet, Text, View } from "react-native";
+import { Pressable, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   buildDayViewData,
@@ -11,16 +13,17 @@ import {
 import { useDataStoreActions, useDataStoreReady } from "../src/data/DataProvider";
 import { parseLocalDateKey } from "../src/date";
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
-const palette = {
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  return {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
   card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
-  tint: "#2563EB",
+  tint: getBrandPalette(isDark).tint,
 };
+}
 
 const DATE_SUBTITLE_FORMATTER = new Intl.DateTimeFormat(undefined, {
   weekday: "long",
@@ -40,6 +43,9 @@ function closeSheet() {
 }
 
 export default function FriendDayScreen() {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   const insets = useSafeAreaInsets();
   const { userId } = useAuth();
   const isDataReady = useDataStoreReady();
@@ -154,7 +160,9 @@ export default function FriendDayScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+    const palette = createPalette(theme.isDark);
+  return StyleSheet.create({
   list: {
     flex: 1,
   },
@@ -197,3 +205,4 @@ const styles = StyleSheet.create({
     color: palette.tint,
   },
 });
+};

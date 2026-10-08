@@ -69,8 +69,8 @@ struct AILogView: View {
                 if message.role == "user" { Spacer(minLength: 36) }
                 Text(message.role == "user" ? AttributedString(message.text) : (try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(message.text))
                     .font(.system(size: 16)).textSelection(.enabled).padding(14)
-                    .foregroundStyle(message.role == "user" ? Color.white : Color.primary)
-                    .background(message.role == "user" ? Theme.tint : Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 16))
+                    .foregroundStyle(message.role == "user" ? Theme.onTint : Theme.label)
+                    .background(message.role == "user" ? Theme.tint : Theme.input, in: RoundedRectangle(cornerRadius: 16))
                 if message.role != "user" { Spacer(minLength: 16) }
             }
         case "audio":
@@ -79,8 +79,8 @@ struct AILogView: View {
                 HStack(spacing: 12) {
                     Image(systemName: "mic.fill").frame(width: 36, height: 36).background(.white.opacity(0.15), in: Circle())
                     VStack(alignment: .leading, spacing: 3) { Text(message.text).font(.system(size: 15, weight: .semibold)); Text(message.duration ?? "0:00").font(.system(size: 12)).opacity(0.8) }
-                    waveform(color: .white)
-                }.padding(14).foregroundStyle(.white).background(Theme.tint, in: RoundedRectangle(cornerRadius: 16))
+                    waveform(color: Theme.onTint)
+                }.padding(14).foregroundStyle(Theme.onTint).background(Theme.tint, in: RoundedRectangle(cornerRadius: 16))
             }
         case "search":
             VStack(alignment: .leading, spacing: 0) {
@@ -103,7 +103,7 @@ struct AILogView: View {
                         if food.id != message.foods.last?.id { Divider() }
                     }
                 }
-            }.caloricCard().background(Color(uiColor: .secondarySystemFill), in: RoundedRectangle(cornerRadius: 16))
+            }.caloricCard().background(Theme.input, in: RoundedRectangle(cornerRadius: 16))
         case "approval":
             VStack(alignment: .leading, spacing: 12) {
                 Text("Review suggestions").font(.system(size: 16, weight: .bold))
@@ -123,12 +123,12 @@ struct AILogView: View {
                         } else {
                             HStack(spacing: 8) {
                                 Button("Approve") { chat.approve(messageID: message.id, suggestionID: suggestion.id, approved: true, store: store) }
-                                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(.white).padding(.horizontal, 16).padding(.vertical, 9).background(Theme.tint, in: RoundedRectangle(cornerRadius: 9))
+                                    .font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.onTint).padding(.horizontal, 16).padding(.vertical, 9).background(Theme.tint, in: RoundedRectangle(cornerRadius: 9))
                                 Button("Reject") { chat.approve(messageID: message.id, suggestionID: suggestion.id, approved: false, store: store) }
                                     .font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary).padding(.horizontal, 16).padding(.vertical, 9).background(Theme.background, in: RoundedRectangle(cornerRadius: 9))
                             }.disabled(chat.streaming).buttonStyle(.plain).padding(.top, 4)
                         }
-                    }.caloricCard(padding: 12).overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color(uiColor: .separator), lineWidth: 0.5))
+                    }.caloricCard(padding: 12).overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Theme.separator, lineWidth: 0.5))
                 }
             }.caloricCard()
         default: EmptyView()

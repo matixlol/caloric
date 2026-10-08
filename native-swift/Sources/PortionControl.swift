@@ -52,7 +52,7 @@ struct PortionControl: View {
             Text(label).font(.system(size: 14, weight: .semibold)).frame(maxWidth: .infinity).frame(height: 40)
                 .foregroundStyle(disabled ? Color.secondary : Theme.tint)
                 .background(Theme.background, in: RoundedRectangle(cornerRadius: 10))
-                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Color(uiColor: .separator), lineWidth: 0.5))
+                .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(Theme.separator, lineWidth: 0.5))
         }.disabled(disabled).buttonStyle(.plain).accessibilityLabel("Adjust portion \(label)")
     }
 }

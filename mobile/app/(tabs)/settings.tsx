@@ -1,3 +1,5 @@
+import { bentoColor, getBrandPalette } from "../../src/theme/brandPalette";
+import { useThemedStyles, useAppTheme, type AppTheme } from "../../src/theme/useAppTheme";
 import { authClient, useAuth } from "../../src/auth/auth-client";
 import {
   Button,
@@ -23,8 +25,7 @@ import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Alert,
   PanResponder,
-  Platform,
-  PlatformColor,
+
   StyleSheet,
   Text as RNText,
   View,
@@ -46,30 +47,26 @@ const DEFAULT_FAT_PCT = 20;
 const MIN_CALORIE_GOAL = 100;
 const MAX_CALORIE_GOAL = 10000;
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
-const palette = {
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  return {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
-  tint: "#2563EB",
+  tint: getBrandPalette(isDark).tint,
   error: iosColor("systemRed", "#DC2626"),
   macroProtein: macroColors.protein.background,
   macroCarbs: macroColors.carbs.background,
   macroFat: macroColors.fat.background,
 };
+}
 
-const uiColor = (color: string | ReturnType<typeof PlatformColor>) => color as string;
-
-const uiPalette = {
-  label: uiColor(palette.label),
-  secondaryLabel: uiColor(palette.secondaryLabel),
-  tertiaryLabel: uiColor(palette.tertiaryLabel),
-  tint: uiColor(palette.tint),
-  error: uiColor(palette.error),
-};
+const createUIPalette = (isDark: boolean) => ({
+  ...getBrandPalette(isDark),
+  error: isDark ? "#F87171" : "#DC2626",
+});
 
 const MACRO_DIVISIONS = 10;
 const compactFormModifiers = [listSectionSpacing("compact"), listSectionMargins({ length: 16, edges: "horizontal" })];
@@ -157,6 +154,8 @@ function getUpdatesStatusLabel(options: {
 }
 
 function SectionTitle({ children }: { children: string }) {
+  const uiPalette = createUIPalette(useAppTheme().isDark);
+
   return (
     <ExpoText
       textStyle={{
@@ -185,6 +184,8 @@ function FormRow({
   suffix?: string;
   maxLength: number;
 }) {
+  const uiPalette = createUIPalette(useAppTheme().isDark);
+
   const inputValue = useNativeState(value);
 
   useEffect(() => {
@@ -307,6 +308,8 @@ function SettingsTextActionRow({
 }
 
 function SocialRow({ name, meta, children }: { name: string; meta: string; children?: ReactNode }) {
+  const uiPalette = createUIPalette(useAppTheme().isDark);
+
   return (
     <Row alignment="center" spacing={10} modifiers={compactRowModifiers} style={{ height: 50 }}>
       <Column spacing={1}>
@@ -358,6 +361,9 @@ function MacroRatioEditor({
   secondHandleResponder: ReturnType<typeof PanResponder.create>;
   onTrackLayout: (width: number) => void;
 }) {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   return (
     <View style={styles.macroNativeContent}>
       <View style={styles.macroLegendRow}>
@@ -452,6 +458,10 @@ function MacroRatioEditor({
 }
 
 export default function SettingsScreen() {
+  const uiPalette = createUIPalette(useAppTheme().isDark);
+
+  const { styles } = useThemedStyles(createStyles);
+
   const { userId, email: accountEmail } = useAuth();
   const queryClient = useQueryClient();
   const isDataReady = useDataStoreReady();
@@ -1077,7 +1087,11 @@ export default function SettingsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+  const uiPalette = createUIPalette(theme.isDark);
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, theme.isDark);
+  const palette = createPalette(theme.isDark);
+  return StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: palette.background,
@@ -1197,3 +1211,4 @@ const styles = StyleSheet.create({
     color: uiPalette.tertiaryLabel,
   },
 });
+};

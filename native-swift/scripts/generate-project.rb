@@ -27,7 +27,7 @@ app.build_configurations.each do |c|
     'INFOPLIST_FILE' => 'Resources/Info.plist', 'GENERATE_INFOPLIST_FILE' => 'NO',
     'CODE_SIGN_ENTITLEMENTS' => 'Resources/CaloricSwift.entitlements',
     'CODE_SIGN_STYLE' => 'Automatic', 'ASSETCATALOG_COMPILER_APPICON_NAME' => 'AppIcon',
-    'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '11',
+    'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '13',
     'ENABLE_USER_SCRIPT_SANDBOXING' => 'YES',
     'SWIFT_EMIT_LOC_STRINGS' => 'YES', 'SUPPORTS_MACCATALYST' => 'NO',
     'LD_RUNPATH_SEARCH_PATHS' => '$(inherited) @executable_path/Frameworks',
@@ -45,6 +45,7 @@ app.add_system_library('sqlite3')
 widget = project.new_target(:app_extension, 'CaloricWidget', :ios, '17.0')
 widget_group = project.main_group.new_group('Widget', 'Widget')
 widget.source_build_phase.add_file_reference(widget_group.new_file('CaloricWidget.swift'))
+widget.source_build_phase.add_file_reference(sources.files.find { |file| file.path == 'BrandPalette.swift' })
 widget_group.new_file('Info.plist')
 widget_group.new_file('CaloricWidget.entitlements')
 widget.build_configurations.each do |c|
@@ -53,7 +54,7 @@ widget.build_configurations.each do |c|
     'GENERATE_INFOPLIST_FILE' => 'NO', 'INFOPLIST_FILE' => 'Widget/Info.plist',
     'CODE_SIGN_ENTITLEMENTS' => 'Widget/CaloricWidget.entitlements', 'CODE_SIGN_STYLE' => 'Automatic',
     'TARGETED_DEVICE_FAMILY' => '1,2', 'APPLICATION_EXTENSION_API_ONLY' => 'YES',
-    'SKIP_INSTALL' => 'YES', 'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '11'})
+    'SKIP_INSTALL' => 'YES', 'MARKETING_VERSION' => '1.0.0', 'CURRENT_PROJECT_VERSION' => '13'})
   if c.name == 'Release'
     c.build_settings.merge!({
       'CODE_SIGN_STYLE[sdk=iphoneos*]' => 'Manual',

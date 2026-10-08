@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><filter id="shadow" x="-35%" y="-35%" width="180%" height="190%"><feDropShadow dx="0" dy="24" stdDeviation="23" flood-color="#451e0d" flood-opacity=".16"/></filter></defs><rect width="1024" height="1024" fill="#EAE4DA"/>
+<g filter="url(#shadow)">
+<rect x="196" y="212" width="632" height="640" rx="88" transform="rotate(-12 512 532)" fill="#E86515"/>
+<rect x="196" y="184" width="632" height="640" rx="88" transform="rotate(9 512 504)" fill="#FFAB46"/>
+<rect x="196" y="170" width="632" height="640" rx="88" fill="#FFF8EA"/>
+</g>
+<g transform="translate(296 274) scale(1.5238632756005501) translate(0 0)"><path d="M0 283.49H283.46V170.1H163.05C151.27 170.1 141.72 160.55 141.72 148.77V134.73C141.72 122.95 151.27 113.4 163.05 113.4H283.46V0.03H0V283.49Z" fill="#FF8400"/></g>
+<rect x="296" y="740" width="128" height="14" rx="7" fill="#D5C8B3"/>
+<rect x="438" y="740" width="63" height="14" rx="7" fill="#E9DFCE"/>
+</svg>

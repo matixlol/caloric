@@ -1,11 +1,15 @@
 import SwiftUI
 
 enum Theme {
-    static let background = Color(uiColor: .systemGroupedBackground)
-    static let card = Color(uiColor: .secondarySystemGroupedBackground)
-    static let input = Color(uiColor: .tertiarySystemGroupedBackground)
-    static let tint = Color(red: 37 / 255, green: 99 / 255, blue: 235 / 255)
-    static let protein = tint
+    static let background = BrandPalette.background
+    static let card = BrandPalette.card
+    static let input = BrandPalette.inputBackground
+    static let label = BrandPalette.label
+    static let separator = BrandPalette.separator
+    static let tint = BrandPalette.tint
+    static let onTint = BrandPalette.buttonText
+    static let accent = BrandPalette.accent
+    static let protein = Color(red: 37 / 255, green: 99 / 255, blue: 235 / 255)
     static let carbs = Color(red: 245 / 255, green: 158 / 255, blue: 11 / 255)
     static let fat = Color(red: 20 / 255, green: 184 / 255, blue: 166 / 255)
 }
@@ -24,7 +28,7 @@ struct PrimaryButton: View {
     let action: () -> Void
     var body: some View {
         Button(action: action) { Text(title).font(.headline).frame(maxWidth: .infinity).padding(.vertical, 6) }
-            .nativeActionStyle(prominent: true).controlSize(.large).tint(Theme.tint).disabled(!enabled)
+            .nativeActionStyle(prominent: true).controlSize(.large).tint(Theme.tint).foregroundStyle(Theme.onTint).disabled(!enabled)
     }
 }
 
@@ -54,9 +58,9 @@ struct MacroBadges: View {
     var body: some View {
         let n = nutrition?.multiplied(by: multiplier)
         HStack(spacing: 6) {
-            if let v = n?.calories { badge("\(Int(v.rounded()).formatted()) kcal", background: Color(red: 229 / 255, green: 231 / 255, blue: 235 / 255), foreground: Color(red: 55 / 255, green: 65 / 255, blue: 81 / 255)) }
+            if let v = n?.calories { badge("\(Int(v.rounded()).formatted()) kcal", background: Theme.input, foreground: Theme.label) }
             if let v = n?.protein { badge("P \(grams(v))", background: Theme.protein, foreground: .white) }
-            if let v = n?.carbs { badge("C \(grams(v))", background: Theme.carbs, foreground: Color(red: 31 / 255, green: 41 / 255, blue: 55 / 255)) }
+            if let v = n?.carbs { badge("C \(grams(v))", background: Theme.carbs, foreground: BrandPalette.ink) }
             if let v = n?.fat { badge("F \(grams(v))", background: Theme.fat, foreground: .white) }
             if nutrition?.hasCalorieMismatch == true { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12)).foregroundStyle(Theme.carbs).accessibilityLabel("Calories and macros differ by more than 15 percent") }
         }.padding(.top, 4).minimumScaleFactor(0.8)
@@ -99,11 +103,11 @@ func grams(_ value: Double) -> String { "\(value.formatted(.number.precision(.fr
 struct ProgressTrack: View {
     var value: Double
     var goal: Double
-    var color = Theme.tint
+    var color = Theme.accent
     var height: CGFloat = 5
     var body: some View {
         GeometryReader { geometry in
-            Capsule().fill(Color(uiColor: .tertiaryLabel)).overlay(alignment: .leading) {
+            Capsule().fill(Theme.separator).overlay(alignment: .leading) {
                 Rectangle().fill(color).frame(width: geometry.size.width * max(0, min(1, goal > 0 ? value / goal : 0)))
             }.clipShape(Capsule())
         }.frame(height: height)

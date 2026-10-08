@@ -172,9 +172,9 @@ export function AIComposer() {
                 onPress={() => {
                   void cancelVoiceRecording();
                 }}
-                modifiers={[buttonStyle("glass"), controlSize("large"), tint("#8E8E93")]}
+                modifiers={[buttonStyle("glass"), controlSize("large"), tint(palette.secondaryLabel)]}
               >
-                <Image systemName="trash" size={18} color="#8E8E93" />
+                <Image systemName="trash" size={18} color={palette.secondaryLabel} />
               </Button>
             </Host>
           </Animated.View>
@@ -193,7 +193,7 @@ export function AIComposer() {
                 }}
                 modifiers={[buttonStyle("glassProminent"), controlSize("large"), tint(palette.tint)]}
               >
-                <Image systemName="arrow.up" size={20} color="#FFFFFF" />
+                <Image systemName="arrow.up" size={20} color={palette.buttonText} />
               </Button>
             </Host>
           </Animated.View>

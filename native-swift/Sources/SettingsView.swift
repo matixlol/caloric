@@ -107,7 +107,7 @@ struct MacroRatioSlider: View {
             ZStack(alignment: .leading) {
                 HStack(spacing: 0) {
                     section(first, Theme.protein, .white).frame(width: geometry.size.width * Double(first) / 100)
-                    section(settings.macroCarbsPct, Theme.carbs, Color(red: 31 / 255, green: 41 / 255, blue: 55 / 255)).frame(width: geometry.size.width * Double(settings.macroCarbsPct) / 100)
+                    section(settings.macroCarbsPct, Theme.carbs, BrandPalette.ink).frame(width: geometry.size.width * Double(settings.macroCarbsPct) / 100)
                     section(settings.macroFatPct, Theme.fat, .white).frame(width: geometry.size.width * Double(settings.macroFatPct) / 100)
                 }.clipShape(RoundedRectangle(cornerRadius: 10))
                 ForEach(1..<10, id: \.self) { tick in

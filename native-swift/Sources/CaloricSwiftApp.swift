@@ -8,7 +8,7 @@ struct CaloricSwiftApp: App {
     @State private var social = SocialStore()
     var body: some Scene {
         WindowGroup {
-            RootView().environment(auth).environment(store).environment(social).tint(Theme.tint)
+            RootView().environment(auth).environment(store).environment(social).tint(Theme.tint).foregroundStyle(Theme.label)
         }
     }
 }

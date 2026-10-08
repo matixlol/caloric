@@ -40,7 +40,7 @@ final class CaloricSwiftUITests: XCTestCase {
         app.launchArguments = ["-ui-testing", "-seed-food"]
         app.launch()
         XCTAssertTrue(app.staticTexts["Today"].firstMatch.waitForExistence(timeout: 10))
-        app.buttons["Edit Grilled chicken"].tap()
+        app.cells["Edit Grilled chicken"].tap()
         XCTAssertTrue(app.staticTexts["Portion"].waitForExistence(timeout: 3))
         app.buttons["Adjust portion +1/4"].tap()
         XCTAssertTrue(app.staticTexts["1 1/4 portions"].exists)
@@ -58,7 +58,7 @@ final class CaloricSwiftUITests: XCTestCase {
 
     func testPortionScrubbingUpdatesNutritionAndPreservesScrolling() {
         let app = launch()
-        app.buttons["Edit Grilled chicken"].tap()
+        app.cells["Edit Grilled chicken"].tap()
         let scrubber = app.descendants(matching: .any)["portion-scrubber"].firstMatch
         XCTAssertTrue(scrubber.waitForExistence(timeout: 3))
         let start = scrubber.coordinate(withNormalizedOffset: CGVector(dx: 0.4, dy: 0.5))
@@ -70,7 +70,7 @@ final class CaloricSwiftUITests: XCTestCase {
         vertical.press(forDuration: 0.05, thenDragTo: vertical.withOffset(CGVector(dx: 0, dy: -60)))
         XCTAssertEqual(scrubber.value as? String, "2 portions")
         app.buttons["Done"].tap()
-        app.buttons["Edit Grilled chicken"].tap()
+        app.cells["Edit Grilled chicken"].tap()
         XCTAssertEqual(app.descendants(matching: .any)["portion-scrubber"].firstMatch.value as? String, "2 portions")
     }
 
@@ -78,14 +78,14 @@ final class CaloricSwiftUITests: XCTestCase {
         let app = launch(["-seed-drag-foods"])
         let scroll = app.coordinate(withNormalizedOffset: CGVector(dx: 0.97, dy: 0.7))
         scroll.press(forDuration: 0.05, thenDragTo: scroll.withOffset(CGVector(dx: 0, dy: -160)))
-        let chicken = app.buttons["Edit Grilled chicken"]
+        let chicken = app.cells["Edit Grilled chicken"]
         let destination = app.staticTexts["No dinner entries yet."]
         XCTAssertTrue(destination.waitForExistence(timeout: 3))
         chicken.press(forDuration: 0.55, thenDragTo: destination)
         let dinnerChicken = app.descendants(matching: .any)["diary-row-dinner-Grilled chicken"].firstMatch
         XCTAssertTrue(dinnerChicken.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(app.buttons["Close details"].exists, "Dropping a food must not open its details")
-        let lunchRice = app.buttons["Edit Rice"]
+        let lunchRice = app.cells["Edit Rice"]
         dinnerChicken.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).press(forDuration: 0.55, thenDragTo: lunchRice.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2)))
         let lunchChicken = app.descendants(matching: .any)["diary-row-lunch-Grilled chicken"].firstMatch
         XCTAssertTrue(lunchChicken.waitForExistence(timeout: 3))
@@ -104,13 +104,43 @@ final class CaloricSwiftUITests: XCTestCase {
         app.buttons["Done"].tap()
         let swipeStart = lunchRice.coordinate(withNormalizedOffset: CGVector(dx: 0.8, dy: 0.5))
         swipeStart.press(forDuration: 0.05, thenDragTo: swipeStart.withOffset(CGVector(dx: -100, dy: 0)))
-        let delete = app.buttons["Delete Rice"]
+        let delete = app.buttons["Delete"]
         XCTAssertTrue(delete.waitForExistence(timeout: 3), "Swipe deletion still works after reordering")
         capture("Revealed delete button", app)
         delete.tap()
         capture("After tapping delete", app)
         XCTAssertFalse(lunchRice.exists)
         XCTAssertTrue(lunchChicken.exists)
+    }
+
+    func testNativeFoodSwipeCanCloseDeleteAndFullSwipe() {
+        let app = launch(["-seed-drag-foods"])
+        let chicken = app.cells["diary-row-lunch-Grilled chicken"]
+        XCTAssertTrue(chicken.waitForExistence(timeout: 3))
+        let start = chicken.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
+        start.press(forDuration: 0.05, thenDragTo: start.withOffset(CGVector(dx: -100, dy: 0)))
+        let delete = app.buttons["Delete"]
+        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Close details"].exists)
+        capture("Native trailing delete action", app)
+        let close = chicken.coordinate(withNormalizedOffset: CGVector(dx: 0.25, dy: 0.5))
+        close.press(forDuration: 0.05, thenDragTo: close.withOffset(CGVector(dx: 110, dy: 0)))
+        XCTAssertFalse(delete.exists)
+        XCTAssertTrue(chicken.exists)
+        chicken.tap()
+        XCTAssertTrue(app.buttons["Close details"].waitForExistence(timeout: 3))
+        app.buttons["Done"].tap()
+        let second = chicken.coordinate(withNormalizedOffset: CGVector(dx: 0.85, dy: 0.5))
+        second.press(forDuration: 0.05, thenDragTo: second.withOffset(CGVector(dx: -100, dy: 0)))
+        XCTAssertTrue(delete.waitForExistence(timeout: 3))
+        delete.tap()
+        XCTAssertTrue(chicken.waitForNonExistence(timeout: 3))
+        XCTAssertTrue(app.cells["diary-row-lunch-Rice"].exists)
+        let rice = app.cells["diary-row-lunch-Rice"]
+        let full = rice.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5))
+        full.press(forDuration: 0.05, thenDragTo: full.withOffset(CGVector(dx: -rice.frame.width, dy: 0)))
+        XCTAssertTrue(rice.waitForNonExistence(timeout: 3), "A full swipe uses the native destructive action")
+        capture("Diary after native swipe deletions", app)
     }
 
     func testVoiceLockCancelWithoutInstructionalHints() {
@@ -205,7 +235,7 @@ final class CaloricSwiftUITests: XCTestCase {
         composer.tap()
         XCTAssertTrue(response.waitForExistence(timeout: 3), "Collapsing the glass panel must preserve its conversation")
         app.buttons["Hide the food assistant conversation"].tap()
-        app.buttons["Edit Grilled chicken"].tap()
+        app.cells["Edit Grilled chicken"].tap()
         XCTAssertTrue(app.buttons["Close details"].waitForExistence(timeout: 3), "The empty area around glass controls must pass taps to the diary")
         app.buttons["Done"].tap()
         app.buttons["Settings"].tap()
@@ -231,11 +261,11 @@ final class CaloricSwiftUITests: XCTestCase {
 
     func testFoodDragScrollsToAnOffscreenMeal() {
         let app = launch(["-seed-long-diary"])
-        let chicken = app.buttons["Edit Grilled chicken"]
+        let chicken = app.cells["Edit Grilled chicken"]
         let source = chicken.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         let edge = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.88))
         source.press(forDuration: 0.55, thenDragTo: edge, withVelocity: .slow, thenHoldForDuration: 3)
-        let moved = app.buttons["diary-row-snacks-Grilled chicken"]
+        let moved = app.cells["diary-row-snacks-Grilled chicken"]
         XCTAssertTrue(moved.waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertFalse(app.buttons["Close details"].exists)
         capture("Food moved to initially offscreen Snacks", app)
@@ -255,12 +285,12 @@ final class CaloricSwiftUITests: XCTestCase {
         replace(app.textFields["Quick add calories"], with: "400")
         app.textFields["Quick add protein"].tap(); app.textFields["Quick add protein"].typeText("20")
         app.buttons["Add quick"].tap()
-        XCTAssertTrue(app.buttons["Edit Quick add"].waitForExistence(timeout: 3))
-        app.buttons["Edit Quick add"].tap()
+        XCTAssertTrue(app.cells["Edit Quick add"].waitForExistence(timeout: 3))
+        app.cells["Edit Quick add"].tap()
         XCTAssertEqual(app.textFields["Quick add calories"].value as? String, "400")
         replace(app.textFields["Quick add calories"], with: "450")
         app.buttons["Done"].tap()
-        app.buttons["Edit Quick add"].tap()
+        app.cells["Edit Quick add"].tap()
         XCTAssertEqual(app.textFields["Quick add calories"].value as? String, "450")
         XCTAssertFalse(app.staticTexts["Portion"].exists)
         capture("Quick add editing", app)
@@ -282,13 +312,13 @@ final class CaloricSwiftUITests: XCTestCase {
         app.buttons["Done"].tap()
         app.buttons.matching(NSPredicate(format: "label CONTAINS %@ AND label CONTAINS %@", "Chicken bowl copy", "ingredients")).firstMatch.tap()
         app.buttons["Add to Breakfast"].tap()
-        XCTAssertTrue(app.buttons["Edit Chicken bowl copy"].waitForExistence(timeout: 3))
-        app.buttons["Edit Chicken bowl copy"].tap()
+        XCTAssertTrue(app.cells["Edit Chicken bowl copy"].waitForExistence(timeout: 3))
+        app.cells["Edit Chicken bowl copy"].tap()
         XCTAssertTrue(app.staticTexts["Ingredients"].exists)
         app.buttons["Edit ingredient Grilled chicken"].tap()
         app.buttons.matching(identifier: "Adjust portion +1/4").allElementsBoundByIndex.last!.tap()
         app.buttons["Done"].tap()
-        app.buttons["Edit Chicken bowl copy"].tap()
+        app.cells["Edit Chicken bowl copy"].tap()
         XCTAssertTrue(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH %@", "1 1/4 portions")).firstMatch.exists)
         capture("Logged recipe with editable ingredient snapshot", app)
     }
@@ -299,8 +329,8 @@ final class CaloricSwiftUITests: XCTestCase {
         let quick = app.buttons["Quick add"]
         let start = quick.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.55, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -160)))
-        XCTAssertTrue(app.buttons["Edit Quick add"].waitForExistence(timeout: 3))
-        app.buttons["Edit Quick add"].tap()
+        XCTAssertTrue(app.cells["Edit Quick add"].waitForExistence(timeout: 3))
+        app.cells["Edit Quick add"].tap()
         XCTAssertEqual(app.textFields["Quick add calories"].value as? String, "250")
         app.buttons["Done"].tap()
         app.buttons["Add food to Breakfast"].tap()
@@ -308,8 +338,8 @@ final class CaloricSwiftUITests: XCTestCase {
         let add = app.buttons["Add to Breakfast"]
         let portion = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         portion.press(forDuration: 0.55, thenDragTo: portion.withOffset(CGVector(dx: 0, dy: -145)))
-        XCTAssertTrue(app.buttons["diary-row-breakfast-Grilled chicken"].waitForExistence(timeout: 3))
-        app.buttons["diary-row-breakfast-Grilled chicken"].tap()
+        XCTAssertTrue(app.cells["diary-row-breakfast-Grilled chicken"].waitForExistence(timeout: 3))
+        app.cells["diary-row-breakfast-Grilled chicken"].tap()
         XCTAssertEqual(app.descendants(matching: .any)["portion-scrubber"].firstMatch.value as? String, "1 portion")
         capture("Food added using hold and slide portion picker", app)
     }
@@ -338,7 +368,7 @@ final class CaloricSwiftUITests: XCTestCase {
             XCTAssertTrue(add.isHittable, "The \(meal) + should be reachable")
             let start = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             start.press(forDuration: 0.4, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -160)))
-            let row = app.buttons["diary-row-\(meal.lowercased())-Quick add"]
+            let row = app.cells["diary-row-\(meal.lowercased())-Quick add"]
             XCTAssertTrue(row.waitForExistence(timeout: 3), "Quick add must stay in \(meal)")
             XCTAssertFalse(app.textFields["food-search"].exists, "Releasing a hold must not also open search")
             row.tap()
@@ -366,7 +396,7 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(code.waitForExistence(timeout: 5))
         app.buttons["Done"].tap()
         XCTAssertTrue(app.buttons["Add to Lunch"].waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["Edit Quick add"].exists)
+        XCTAssertFalse(app.cells["Edit Quick add"].exists)
     }
 
     func testMealPlusCancelsNeutralAndSidewaysHoldsAndUsesSelectedDate() {
@@ -375,10 +405,10 @@ final class CaloricSwiftUITests: XCTestCase {
         add.press(forDuration: 0.4)
         XCTAssertFalse(app.textFields["food-search"].exists)
         XCTAssertFalse(app.textFields["barcode-number"].exists)
-        XCTAssertFalse(app.buttons["Edit Quick add"].exists)
+        XCTAssertFalse(app.cells["Edit Quick add"].exists)
         let start = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.4, thenDragTo: start.withOffset(CGVector(dx: -150, dy: -160)))
-        XCTAssertFalse(app.buttons["Edit Quick add"].exists, "Moving away sideways cancels the selection")
+        XCTAssertFalse(app.cells["Edit Quick add"].exists, "Moving away sideways cancels the selection")
         add.tap()
         XCTAssertTrue(app.textFields["food-search"].waitForExistence(timeout: 3), "Normal tap still opens food search")
         XCTAssertFalse(app.textFields["barcode-number"].exists)
@@ -388,8 +418,8 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Yesterday"].waitForExistence(timeout: 3))
         let yesterday = add.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         yesterday.press(forDuration: 0.4, thenDragTo: yesterday.withOffset(CGVector(dx: 0, dy: -160)))
-        XCTAssertTrue(app.buttons["diary-row-breakfast-Quick add"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.cells["diary-row-breakfast-Quick add"].waitForExistence(timeout: 3))
         app.buttons["Back to today"].tap()
-        XCTAssertFalse(app.buttons["Edit Quick add"].exists, "Yesterday's quick add must not appear today")
+        XCTAssertFalse(app.cells["Edit Quick add"].exists, "Yesterday's quick add must not appear today")
     }
 }

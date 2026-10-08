@@ -1,9 +1,10 @@
+import { bentoColor, getBrandPalette } from "../theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../theme/useAppTheme";
 import { type ReactNode, useState } from "react";
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
-  PlatformColor,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -18,8 +19,6 @@ type AuthGateProps = {
   children: ReactNode;
 };
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
 type Method = "code" | "password";
 
@@ -28,6 +27,9 @@ function errorMessage(error: { message?: string } | null | undefined, fallback: 
 }
 
 function SignInScreen() {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+
   const [method, setMethod] = useState<Method>("code");
   const [isSignUp, setIsSignUp] = useState(false);
   const [email, setEmail] = useState("");
@@ -269,6 +271,9 @@ function SignInScreen() {
 }
 
 function SegmentButton({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
+  const theme = useThemedStyles(createStyles);
+  const { styles } = theme;
+
   return (
     <Pressable
       onPress={onPress}
@@ -290,6 +295,9 @@ function PrimaryButton({
   busy: boolean;
   onPress: () => void;
 }) {
+  const theme = useThemedStyles(createStyles);
+  const { styles } = theme;
+
   return (
     <Pressable
       onPress={onPress}
@@ -297,7 +305,7 @@ function PrimaryButton({
       style={[styles.primaryButton, disabled ? styles.primaryButtonDisabled : null]}
     >
       {busy ? (
-        <ActivityIndicator color="#FFFFFF" />
+        <ActivityIndicator color={getBrandPalette(theme.isDark).buttonText} />
       ) : (
         <Text style={styles.primaryButtonText}>{label}</Text>
       )}
@@ -306,6 +314,9 @@ function PrimaryButton({
 }
 
 export function AuthGate({ children }: AuthGateProps) {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+
   const { isLoaded, isSignedIn } = useAuth();
   const lastKnownUserId = useLastKnownUserId();
 
@@ -331,7 +342,10 @@ export function AuthGate({ children }: AuthGateProps) {
   return <>{children}</>;
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, theme.isDark);
+
+  return StyleSheet.create({
   flex: {
     flex: 1,
     backgroundColor: iosColor("systemGroupedBackground", "#F3F4F6"),
@@ -421,7 +435,7 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   primaryButtonText: {
-    color: "#FFFFFF",
+    color: getBrandPalette(theme.isDark).buttonText,
     fontSize: 17,
     fontWeight: "600",
   },
@@ -442,3 +456,4 @@ const styles = StyleSheet.create({
     color: iosColor("systemRed", "#DC2626"),
   },
 });
+};

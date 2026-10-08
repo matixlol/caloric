@@ -1,3 +1,4 @@
+import { useThemedStyles, type AppTheme } from "../src/theme/useAppTheme";
 import { Ionicons } from "@expo/vector-icons";
 import { CameraView, type BarcodeScanningResult, useCameraPermissions } from "expo-camera";
 import { useLocalSearchParams, useRouter } from "expo-router";
@@ -10,6 +11,7 @@ function first(value: string | string[] | undefined) {
 }
 
 export default function ScanBarcodeScreen() {
+  const { styles, palette } = useThemedStyles(createStyles);
   const router = useRouter();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{
@@ -23,7 +25,7 @@ export default function ScanBarcodeScreen() {
   const hasScanned = useRef(false);
 
   const close = () => router.back();
-  const handleScan = useCallback(({ data, type }: BarcodeScanningResult) => {
+  const handleScan = useCallback(({ data, type }: Pick<BarcodeScanningResult, "data" | "type">) => {
     if (hasScanned.current) return;
     let barcode = data.replace(/\D/g, "");
     if (type === "upc_a" && barcode.length === 12) barcode = `0${barcode}`;
@@ -56,7 +58,7 @@ export default function ScanBarcodeScreen() {
   if (!permission.granted) {
     return (
       <View style={[styles.permissionScreen, { paddingTop: insets.top + 24, paddingBottom: insets.bottom + 24 }]}>
-        <Ionicons name="barcode-outline" size={58} color="#2563EB" />
+        <Ionicons name="barcode-outline" size={58} color={palette.tint} />
         <Text style={styles.permissionTitle}>Scan a food barcode</Text>
         <Text style={styles.permissionText}>Camera access is needed to read the barcode on a package.</Text>
         <Pressable accessibilityRole="button" onPress={() => void requestPermission()} style={styles.primaryButton}>
@@ -90,21 +92,21 @@ export default function ScanBarcodeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = ({ palette }: AppTheme) => StyleSheet.create({
   screen: { flex: 1, backgroundColor: "#000000" },
   permissionScreen: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     paddingHorizontal: 28,
-    backgroundColor: "#F3F4F6",
+    backgroundColor: palette.background,
   },
-  permissionTitle: { marginTop: 18, fontSize: 24, lineHeight: 30, fontWeight: "700", color: "#111827" },
-  permissionText: { marginTop: 8, marginBottom: 24, textAlign: "center", fontSize: 16, lineHeight: 22, color: "#6B7280" },
-  primaryButton: { width: "100%", minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: "#2563EB" },
-  primaryButtonText: { fontSize: 17, fontWeight: "700", color: "#FFFFFF" },
+  permissionTitle: { marginTop: 18, fontSize: 24, lineHeight: 30, fontWeight: "700", color: palette.label },
+  permissionText: { marginTop: 8, marginBottom: 24, textAlign: "center", fontSize: 16, lineHeight: 22, color: palette.secondaryLabel },
+  primaryButton: { width: "100%", minHeight: 50, alignItems: "center", justifyContent: "center", borderRadius: 12, backgroundColor: palette.tint },
+  primaryButtonText: { fontSize: 17, fontWeight: "700", color: palette.buttonText },
   secondaryButton: { marginTop: 10, minHeight: 44, justifyContent: "center", paddingHorizontal: 20 },
-  secondaryButtonText: { fontSize: 17, color: "#2563EB" },
+  secondaryButtonText: { fontSize: 17, color: palette.tint },
   topBar: { position: "absolute", top: 0, left: 0, right: 0, paddingHorizontal: 18 },
   closeButton: { width: 44, height: 44, alignItems: "center", justifyContent: "center", borderRadius: 22, backgroundColor: "rgba(0,0,0,0.55)" },
   overlay: { ...StyleSheet.absoluteFill, alignItems: "center", justifyContent: "center" },

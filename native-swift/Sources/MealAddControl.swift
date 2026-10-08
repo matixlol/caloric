@@ -136,7 +136,7 @@ struct MealAddMenu: View {
                 .fixedSize()
                 .position(x: min(geometry.size.width - 60, frame.midX - 24), y: max(174, frame.midY - 54 - 162))
             Label("Scan barcode", systemImage: "barcode.viewfinder")
-                .font(.subheadline.weight(.semibold)).foregroundStyle(session.selection == .barcode ? Color.white : Theme.tint)
+                .font(.subheadline.weight(.semibold)).foregroundStyle(session.selection == .barcode ? Theme.onTint : Theme.tint)
                 .padding(.horizontal, 16).frame(height: 44)
                 .background(session.selection == .barcode ? Theme.tint : Theme.card, in: Capsule())
                 .shadow(color: .black.opacity(0.15), radius: 10, y: 4)

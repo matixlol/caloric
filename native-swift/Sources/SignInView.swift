@@ -65,8 +65,8 @@ struct SignInView: View {
     }
     private func primaryButton(_ title: String, enabled: Bool, action: @escaping @MainActor () async throws -> Void) -> some View {
         Button { run(action) } label: {
-            HStack { Spacer(); if busy { ProgressView().tint(.white) } else { Text(title).fontWeight(.semibold) }; Spacer() }.padding(.vertical, 14)
-        }.buttonStyle(.plain).foregroundStyle(.white).background(Theme.tint, in: RoundedRectangle(cornerRadius: 10))
+            HStack { Spacer(); if busy { ProgressView().tint(Theme.onTint) } else { Text(title).fontWeight(.semibold) }; Spacer() }.padding(.vertical, 14)
+        }.buttonStyle(.plain).foregroundStyle(Theme.onTint).background(Theme.tint, in: RoundedRectangle(cornerRadius: 10))
             .disabled(busy || !enabled).opacity(busy || !enabled ? 0.5 : 1)
     }
     private func run(_ action: @escaping @MainActor () async throws -> Void) {

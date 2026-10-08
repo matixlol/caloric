@@ -132,7 +132,7 @@ struct VoiceComposer: View {
     }
 
     private func actionButton(_ image: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
-        Button(action: action) { Image(systemName: image).font(.system(size: 20, weight: .semibold)).frame(width: 24, height: 24) }
+        Button(action: action) { Image(systemName: image).font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.onTint).frame(width: 24, height: 24) }
             .nativeActionStyle(prominent: true, shape: .circle).controlSize(.large).tint(color)
             .glassIdentity("composer-action", in: glassNamespace).accessibilityLabel(label)
     }

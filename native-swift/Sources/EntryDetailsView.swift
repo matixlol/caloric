@@ -45,7 +45,7 @@ struct EntryDetailsView: View {
                             let shares = Self.macroShares(calories)
                             HStack(spacing: 0) {
                                 segment(values[0], calories[0], Theme.protein, .white).frame(width: geometry.size.width * shares[0])
-                                segment(values[1], calories[1], Theme.carbs, Color(red: 31 / 255, green: 41 / 255, blue: 55 / 255)).frame(width: geometry.size.width * shares[1])
+                                segment(values[1], calories[1], Theme.carbs, BrandPalette.ink).frame(width: geometry.size.width * shares[1])
                                 segment(values[2], calories[2], Theme.fat, .white).frame(width: geometry.size.width * shares[2])
                             }.clipShape(RoundedRectangle(cornerRadius: 10))
                         }.frame(height: 76)

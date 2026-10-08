@@ -1,3 +1,5 @@
+import { bentoColor, getBrandPalette } from "../src/theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../src/theme/useAppTheme";
 import { GlassView, isGlassEffectAPIAvailable, isLiquidGlassAvailable } from "expo-glass-effect";
 import { Ionicons } from "@expo/vector-icons";
 import { useQuery } from "@tanstack/react-query";
@@ -9,7 +11,6 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
   Platform,
-  PlatformColor,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -49,25 +50,26 @@ import {
   parseOptionalMacroInput,
 } from "../src/quickAdd";
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
-const palette = {
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  return {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
   card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: "#2563EB",
-  tintDisabled: "#D1D5DB",
+  tint: getBrandPalette(isDark).tint,
+  tintDisabled: getBrandPalette(isDark).tintDisabled,
   badgeBackground: iosColor("quaternarySystemFill", "#E5E7EB"),
-  badgeSelectedBackground: "#E8EEFF",
-  badgeSelectedBorder: "#BDD0FF",
+  badgeSelectedBackground: getBrandPalette(isDark).tintSoft,
+  badgeSelectedBorder: getBrandPalette(isDark).tint,
   badgeText: iosColor("tertiaryLabel", "#6B7280"),
-  buttonText: "#FFFFFF",
+  buttonText: getBrandPalette(isDark).buttonText,
   searchInputBackground: iosColor("tertiarySystemGroupedBackground", "#F3F4F6"),
   error: "#B91C1C",
 };
+}
 
 const SEARCH_DEBOUNCE_MS = 350;
 const RECENT_ITEMS_LIMIT = 50;
@@ -291,6 +293,8 @@ function FoodRow({
   isLast: boolean;
   onPress: () => void;
 }) {
+  const { styles } = useThemedStyles(createStyles);
+
   return (
     <Pressable
       accessibilityRole="button"
@@ -320,6 +324,9 @@ function FoodRow({
 }
 
 export default function LogFoodScreen() {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{
@@ -1521,7 +1528,9 @@ export default function LogFoodScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+    const palette = createPalette(theme.isDark);
+  return StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: palette.background,
@@ -1938,3 +1947,4 @@ const styles = StyleSheet.create({
     color: palette.buttonText,
   },
 });
+};

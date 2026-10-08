@@ -236,6 +236,8 @@ struct NutritionSummary: View {
 }
 
 private struct MealSection: View {
+    @State private var rowFrames: [String: CGRect] = [:]
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppStore.self) private var store
     let meal: Meal
     let entries: [FoodRecord]
@@ -272,24 +274,16 @@ private struct MealSection: View {
                     Text(meal.emptyCopy).font(.system(size: 14)).foregroundStyle(.secondary)
                         .padding(.horizontal, 12).padding(.vertical, 18)
                 } else {
-                    ForEach(entries) { row in
-                        SwipeFoodRow(row: row, identifier: "diary-row-\(meal.rawValue)-\(row.data.foodName)", isReordering: draggedID != nil, edit: { edit(row.id) }, delete: { store.perform { try store.delete(id: row.id) } })
-                            .opacity(row.id == draggedID ? 0 : 1)
-                            .background {
-                                if row.id == draggedID { RoundedRectangle(cornerRadius: 8).fill(Theme.tint.opacity(0.08)).padding(.horizontal, 6).padding(.vertical, 3) }
-                            }
-                            .background(GeometryReader { geometry in
-                                Color.clear.preference(key: DiaryLayoutKey.self, value: DiaryLayout(rows: [row.id: geometry.frame(in: .global)]))
-                            })
-                            .accessibilityHidden(row.id == draggedID)
-                            .accessibilityAction(named: "Delete") { store.perform { try store.delete(id: row.id) } }
-                            .accessibilityActions {
-                                ForEach(Meal.allCases.filter { $0 != meal }) { destination in
-                                    Button("Move to \(destination.label)") { store.perform { try store.move(id: row.id, to: destination, day: day) } }
-                                }
-                            }
-                        if row.id != entries.last?.id { Divider().padding(.horizontal, 12) }
-                    }
+                    NativeFoodList(rows: entries, meal: meal, draggedID: draggedID,
+                                   edit: edit,
+                                   delete: { id in
+                                       withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
+                                           store.perform { try store.delete(id: id) }
+                                       }
+                                   },
+                                   move: { id, destination in store.perform { try store.move(id: id, to: destination, day: day) } },
+                                   framesChanged: { rowFrames = $0 })
+                        .preference(key: DiaryLayoutKey.self, value: DiaryLayout(rows: rowFrames))
                 }
             }.frame(minHeight: minimumHeight, alignment: .top)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).clipShape(RoundedRectangle(cornerRadius: 14))
@@ -301,44 +295,7 @@ private struct MealSection: View {
     }
 }
 
-private struct SwipeFoodRow: View {
-    let row: FoodRecord
-    let identifier: String
-    let isReordering: Bool
-    let edit: () -> Void
-    let delete: () -> Void
-    @State private var offset: CGFloat = 0
-    @State private var horizontal = false
-    @State private var lastSwipeEndedAt = -Double.infinity
-    var body: some View {
-        ZStack(alignment: .trailing) {
-            Button(action: delete) { Image(systemName: "trash").foregroundStyle(.white).frame(width: 64).frame(maxHeight: .infinity).contentShape(Rectangle()) }
-                .buttonStyle(.plain).background(.red).accessibilityLabel("Delete \(row.data.foodName)")
-                .opacity(offset < 0 ? 1 : 0).allowsHitTesting(offset < 0 && !isReordering).accessibilityHidden(offset >= 0)
-                .zIndex(1)
-            Button {
-                guard !isReordering, !horizontal,
-                      ProcessInfo.processInfo.systemUptime - lastSwipeEndedAt > 0.35 else { return }
-                if offset < 0 { withAnimation { offset = 0 } } else { edit() }
-            } label: { FoodRowContent(row: row).background(Theme.card) }
-                .buttonStyle(.plain).accessibilityLabel("Edit \(row.data.foodName)").accessibilityIdentifier(identifier).offset(x: offset)
-                .simultaneousGesture(DragGesture(minimumDistance: 20, coordinateSpace: .global).onChanged { value in
-                    guard !isReordering else { return }
-                    guard abs(value.translation.width) > abs(value.translation.height) else { return }
-                    horizontal = true
-                    offset = max(-64, min(0, value.translation.width))
-                }.onEnded { value in
-                    if horizontal {
-                        lastSwipeEndedAt = ProcessInfo.processInfo.systemUptime
-                        if !isReordering { withAnimation(.easeOut(duration: 0.18)) { offset = value.translation.width < -30 ? -64 : 0 } }
-                    }
-                    horizontal = false
-                })
-        }.clipped().onChange(of: isReordering) { _, active in if active { offset = 0; horizontal = false } }
-    }
-}
-
-private struct FoodRowContent: View {
+struct FoodRowContent: View {
     let row: FoodRecord
     var body: some View {
         HStack(spacing: 12) {

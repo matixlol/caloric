@@ -1,55 +1,61 @@
-/* Sizes and hierarchy mirror mobile/app/(tabs)/index.tsx and DayReadOnlyView. */
+/* Bento colors match design/brand/palette.json. Macro/status colors are semantic. */
 :root {
   font-family:
     -apple-system, BlinkMacSystemFont, "Helvetica Neue", Arial, sans-serif;
   font-synthesis: none;
   -webkit-font-smoothing: antialiased;
-  --bg: #f2f2f7;
-  --card: #fff;
-  --text: #111827;
-  --secondary: #6b7280;
-  --tertiary: #9ca3af;
-  --line: #d1d5db;
-  --input: #e9e9ee;
-  --tint: #2563eb;
-  --tint-soft: #eaf0ff;
+  --bg: #F2F2F7;
+  --card: #FFFFFF;
+  --text: #000000;
+  --secondary: #636366;
+  --tertiary: #8E8E93;
+  --line: #C6C6C8;
+  --input: #E5E5EA;
+  --tint: #AD4D00;
+  --tint-soft: #FFE2BE;
+  --on-tint: #FFFFFF;
+  --ring-track: #C6C6C8;
+  --glass: #F2F2F7EB;
+  --accent: #FF8400;
+  --danger: #dc2626;
   --protein: #2563eb;
   --carbs: #f59e0b;
   --fat: #14b8a6;
-  --danger: #dc2626;
-  --glass: #ffffffd9;
-  --ring-track: #d1d5db;
   color-scheme: light;
 }
 :root[data-theme="dark"] {
-  --bg: #09090b;
-  --card: #18181b;
-  --text: #fafafa;
-  --secondary: #a1a1aa;
-  --tertiary: #71717a;
-  --line: #27272a;
-  --input: #27272a;
-  --tint: #3b82f6;
-  --tint-soft: #17243c;
+  --bg: #000000;
+  --card: #1C1C1E;
+  --text: #FFFFFF;
+  --secondary: #AEAEB2;
+  --tertiary: #8E8E93;
+  --line: #38383A;
+  --input: #2C2C2E;
+  --tint: #FFA536;
+  --tint-soft: #49321E;
+  --on-tint: #22231D;
+  --ring-track: #38383A;
+  --glass: #000000EB;
+  --accent: #FF8400;
   --danger: #f87171;
-  --glass: #18181bdd;
-  --ring-track: #71717a;
   color-scheme: dark;
 }
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]):not([data-theme="dark"]) {
-    --bg: #09090b;
-    --card: #18181b;
-    --text: #fafafa;
-    --secondary: #a1a1aa;
-    --tertiary: #71717a;
-    --line: #27272a;
-    --input: #27272a;
-    --tint: #3b82f6;
-    --tint-soft: #17243c;
+    --bg: #000000;
+    --card: #1C1C1E;
+    --text: #FFFFFF;
+    --secondary: #AEAEB2;
+    --tertiary: #8E8E93;
+    --line: #38383A;
+    --input: #2C2C2E;
+    --tint: #FFA536;
+    --tint-soft: #49321E;
+    --on-tint: #22231D;
+    --ring-track: #38383A;
+    --glass: #000000EB;
+    --accent: #FF8400;
     --danger: #f87171;
-    --glass: #18181bdd;
-    --ring-track: #71717a;
     color-scheme: dark;
   }
 }
@@ -798,7 +804,7 @@ input::-webkit-inner-spin-button {
 }
 .primary-button {
   background: var(--tint);
-  color: white;
+  color: var(--on-tint);
 }
 .secondary-button {
   background: var(--card);
@@ -1373,8 +1379,8 @@ input::-webkit-inner-spin-button {
 }
 .chat-message.user {
   align-self: flex-end;
-  background: #2563eb;
-  color: white;
+  background: var(--tint);
+  color: var(--on-tint);
   max-width: 88%;
 }
 .chat-role {
@@ -1455,7 +1461,7 @@ input::-webkit-inner-spin-button {
   min-width: 40px;
   height: 40px;
   border-radius: 50%;
-  color: white;
+  color: var(--on-tint);
   background: var(--tint);
 }
 @media (min-width: 600px) {

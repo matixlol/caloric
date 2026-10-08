@@ -1,0 +1,43 @@
+{
+  "brand_reference": "The three Caloric SVG wordmarks provided in Archive.zip.",
+  "method": "SVG-native concept artwork; exact glyph paths reused where appropriate. No raster image generation or API used.",
+  "canvas": "1024 \u00d7 1024; opaque, square artwork. Rounded corners are only a presentation mask.",
+  "concepts": [
+    {
+      "id": "01",
+      "name": "The Stamp",
+      "file": "01-the-stamp.svg",
+      "description": "The exact C, oversized in ink on the original orange. Bold and immediate."
+    },
+    {
+      "id": "02",
+      "name": "Bento",
+      "file": "02-bento.svg",
+      "description": "The C becomes a meal tray, with three blocks and a little food tucked inside."
+    },
+    {
+      "id": "03",
+      "name": "One Bite",
+      "file": "03-one-bite.svg",
+      "description": "A little nibble turns the geometric letter into something edible and playful."
+    },
+    {
+      "id": "04",
+      "name": "Daily Stack",
+      "file": "04-daily-stack.svg",
+      "description": "Meal logs as a tactile stack of cards. Warm, useful, and a little collectible."
+    },
+    {
+      "id": "05",
+      "name": "Amber Glass",
+      "file": "05-amber-glass.svg",
+      "description": "A sculptural, glossy C with amber depth. The most iOS-inspired treatment."
+    },
+    {
+      "id": "06",
+      "name": "Four Blocks",
+      "file": "06-four-blocks.svg",
+      "description": "The first four letters of the supplied wordmark become a compact poster-like mark."
+    }
+  ]
+}

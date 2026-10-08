@@ -20,7 +20,7 @@ struct SlideValuePicker: View {
         VStack(spacing: 3) {
             Text(selection.map { calories ? "\(Int($0)) kcal" : "\(Portion.mixed($0))×" } ?? "—").font(.headline).foregroundStyle(Theme.tint).padding(.bottom, 5)
             ForEach(values.reversed(), id: \.self) { value in
-                HStack { Text(calories ? "\(Int(value))" : Portion.mixed(value)).font(.caption).monospacedDigit().frame(width: 45, alignment: .trailing); RoundedRectangle(cornerRadius: 4).fill(selection == value ? Theme.tint : Color(uiColor: .tertiarySystemFill)).frame(width: 20, height: !calories && value.rounded() == value ? 35 : 20) }
+                HStack { Text(calories ? "\(Int(value))" : Portion.mixed(value)).font(.caption).monospacedDigit().frame(width: 45, alignment: .trailing); RoundedRectangle(cornerRadius: 4).fill(selection == value ? Theme.tint : Theme.input).frame(width: 20, height: !calories && value.rounded() == value ? 35 : 20) }
             }
         }.padding(12).background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).shadow(radius: 12, y: 5)
             .allowsHitTesting(false).accessibilityHidden(true)
@@ -63,7 +63,7 @@ struct HoldSlideButton: View {
             guard enabled, ProcessInfo.processInfo.systemUptime - endedAt > 0.4 else { return }; tapped()
         } label: {
             Text(title).font(.headline).lineLimit(1).minimumScaleFactor(0.8).frame(maxWidth: .infinity).padding(.vertical, 6)
-        }.nativeActionStyle(prominent: !secondary).controlSize(.large).tint(Theme.tint).disabled(!enabled)
+        }.nativeActionStyle(prominent: !secondary).controlSize(.large).tint(Theme.tint).foregroundStyle(secondary ? Theme.tint : Theme.onTint).disabled(!enabled)
             .simultaneousGesture(LongPressGesture(minimumDuration: 0.26, maximumDistance: 30).sequenced(before: DragGesture(minimumDistance: 0, coordinateSpace: .global))
                 .onChanged { value in
                     guard enabled else { return }

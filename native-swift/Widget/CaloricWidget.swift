@@ -225,6 +225,8 @@ struct CaloricWidgetEntryView: View {
 
   var body: some View {
     content
+      .tint(BrandPalette.tint)
+      .foregroundStyle(BrandPalette.label)
       .widgetBackgroundCompat()
   }
 
@@ -247,7 +249,7 @@ private extension View {
   @ViewBuilder
   func widgetBackgroundCompat() -> some View {
     if #available(iOS 17.0, *) {
-      self.containerBackground(.fill.tertiary, for: .widget)
+      self.containerBackground(BrandPalette.card, for: .widget)
     } else {
       self.padding()
     }

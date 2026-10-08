@@ -48,7 +48,7 @@ module.exports = {
       package: bundleIdentifier,
       permissions: ["RECORD_AUDIO"],
       adaptiveIcon: {
-        backgroundColor: "#E6F4FE",
+        backgroundColor: "#22231D",
         foregroundImage: "./assets/images/android-icon-foreground.png",
         backgroundImage: "./assets/images/android-icon-background.png",
         monochromeImage: "./assets/images/android-icon-monochrome.png",
@@ -85,7 +85,7 @@ module.exports = {
           image: "./assets/images/splash-icon.png",
           imageWidth: 200,
           resizeMode: "contain",
-          backgroundColor: "#ffffff",
+          backgroundColor: "#F2F2F7",
           dark: {
             backgroundColor: "#000000",
           },
