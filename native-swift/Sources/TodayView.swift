@@ -256,19 +256,21 @@ private struct MealSection: View {
     let holdEnded: (Bool) -> Void
     let edit: (String) -> Void
     var body: some View {
+        let total = Nutrition.total(entries)
         HStack(alignment: .center, spacing: 8) {
             Text(meal.label.uppercased()).font(.system(size: 10, weight: .bold)).tracking(1.6)
                 .foregroundStyle(.secondary).frame(width: 92, height: 16)
                 .rotationEffect(.degrees(-90)).frame(width: 16, height: 92)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .center) {
+                HStack(alignment: .center, spacing: 6) {
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text(Int((Nutrition.total(entries).calories ?? 0).rounded()).formatted()).font(.system(size: 28, weight: .bold))
+                        Text(Int((total.calories ?? 0).rounded()).formatted()).font(.system(size: 28, weight: .bold)).lineLimit(1).minimumScaleFactor(0.8)
                         Text("KCAL").font(.system(size: 11, weight: .semibold)).foregroundStyle(.secondary)
                     }.monospacedDigit()
-                    Spacer()
-                    MacroBadges(nutrition: Nutrition(protein: Nutrition.total(entries).protein, carbs: Nutrition.total(entries).carbs, fat: Nutrition.total(entries).fat))
+                    Spacer(minLength: 4)
+                    MacroBadges(nutrition: Nutrition(protein: total.protein, carbs: total.carbs, fat: total.fat), wholeGrams: true)
+                        .fixedSize(horizontal: true, vertical: false)
                     MealAddButton(meal: meal, enabled: addEnabled, holding: holding, tapped: add, scan: scan,
                                   began: holdBegan, moved: holdMoved, ended: holdEnded)
                 }.padding(.horizontal, 12).padding(.top, 12).padding(.bottom, 8)

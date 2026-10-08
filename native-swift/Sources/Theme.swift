@@ -55,13 +55,14 @@ struct LiquidGlassGroup<Content: View>: View {
 struct MacroBadges: View {
     var nutrition: Nutrition?
     var multiplier: Double = 1
+    var wholeGrams = false
     var body: some View {
         let n = nutrition?.multiplied(by: multiplier)
         HStack(spacing: 6) {
             if let v = n?.calories { badge("\(Int(v.rounded()).formatted()) kcal", background: Theme.input, foreground: Theme.label) }
-            if let v = n?.protein { badge("P \(grams(v))", background: Theme.protein, foreground: .white) }
-            if let v = n?.carbs { badge("C \(grams(v))", background: Theme.carbs, foreground: BrandPalette.ink) }
-            if let v = n?.fat { badge("F \(grams(v))", background: Theme.fat, foreground: .white) }
+            if let v = n?.protein { badge("P \(grams(v, whole: wholeGrams))", background: Theme.protein, foreground: .white) }
+            if let v = n?.carbs { badge("C \(grams(v, whole: wholeGrams))", background: Theme.carbs, foreground: BrandPalette.ink) }
+            if let v = n?.fat { badge("F \(grams(v, whole: wholeGrams))", background: Theme.fat, foreground: .white) }
             if nutrition?.hasCalorieMismatch == true { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12)).foregroundStyle(Theme.carbs).accessibilityLabel("Calories and macros differ by more than 15 percent") }
         }.padding(.top, 4).minimumScaleFactor(0.8)
     }
@@ -98,7 +99,7 @@ extension View {
     }
 }
 
-func grams(_ value: Double) -> String { "\(value.formatted(.number.precision(.fractionLength(0...1))))g" }
+func grams(_ value: Double, whole: Bool = false) -> String { "\((whole ? value.rounded() : value).formatted(.number.precision(.fractionLength(0...1))))g" }
 
 struct ProgressTrack: View {
     var value: Double

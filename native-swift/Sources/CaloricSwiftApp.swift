@@ -50,6 +50,11 @@ struct RootView: View {
                             store.perform { try store.add(food: SearchFood(id: "fixture-\(index)", canonicalKey: "fixture-\(index)", source: "mfp", sourceLabel: "MFP", name: "Dinner food \(index)", nutrition: Nutrition(calories: 100)), meal: .dinner) }
                         }
                     }
+                    if ProcessInfo.processInfo.arguments.contains("-seed-macro-badges") {
+                        for (meal, calories, protein, carbs, fat) in [(Meal.breakfast, 373.0, 17.6, 52.6, 8.8), (.dinner, 836.0, 38.4, 122.3, 22.2), (.snacks, 204.0, 15.4, 12.4, 5.1)] {
+                            store.perform { try store.add(food: SearchFood(id: "macro-\(meal.rawValue)", canonicalKey: "macro-\(meal.rawValue)", source: "manual", sourceLabel: "", name: "Macro layout fixture", nutrition: Nutrition(calories: calories, protein: protein, carbs: carbs, fat: fat)), meal: meal) }
+                        }
+                    }
                 }
                 #endif
             }
