@@ -102,6 +102,7 @@ struct TodayView: View {
             }
             .overlay { AILogView(isPresented: sheet == nil).opacity(sheet == nil ? 1 : 0).allowsHitTesting(sheet == nil) }
             .overlay { if let mealAdd { MealAddMenu(session: mealAdd) } }
+            .holdFocusOverlay()
     }
 
     private func openFood(_ meal: Meal) {

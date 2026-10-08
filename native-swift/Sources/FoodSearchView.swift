@@ -103,6 +103,7 @@ struct FoodSearchView: View {
             }.padding(.horizontal, 16).padding(.top, 12).padding(.bottom, 24)
         }.background(Theme.background).scrollDismissesKeyboard(.interactively)
             .safeAreaInset(edge: .bottom, spacing: 0) { actionBar }
+            .holdFocusOverlay()
             .task(id: query) { await search() }
             .task {
                 if startWithScanner && !openedInitialScanner { openedInitialScanner = true; showScanner = true }

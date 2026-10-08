@@ -14,7 +14,7 @@
             buildForAnalyzing = "YES">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "8EC817E45CE3C09A02406AEB"
+               BlueprintIdentifier = "4A34A43AF258A31D789CCBE7"
                BuildableName = "CaloricSwift.app"
                BlueprintName = "CaloricSwift"
                ReferencedContainer = "container:CaloricSwift.xcodeproj">
@@ -30,7 +30,7 @@
       <MacroExpansion>
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "8EC817E45CE3C09A02406AEB"
+            BlueprintIdentifier = "4A34A43AF258A31D789CCBE7"
             BuildableName = "CaloricSwift.app"
             BlueprintName = "CaloricSwift"
             ReferencedContainer = "container:CaloricSwift.xcodeproj">
@@ -41,7 +41,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "4D9608E17E2C1BF3F528AB53"
+               BlueprintIdentifier = "A3EBC62572E75B717418A655"
                BuildableName = "CaloricSwiftTests.xctest"
                BlueprintName = "CaloricSwiftTests"
                ReferencedContainer = "container:CaloricSwift.xcodeproj">
@@ -51,7 +51,7 @@
             skipped = "NO">
             <BuildableReference
                BuildableIdentifier = "primary"
-               BlueprintIdentifier = "CF753AE078490ED1C10CF6BA"
+               BlueprintIdentifier = "5B53A92C775057D44C054282"
                BuildableName = "CaloricSwiftUITests.xctest"
                BlueprintName = "CaloricSwiftUITests"
                ReferencedContainer = "container:CaloricSwift.xcodeproj">
@@ -73,7 +73,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "8EC817E45CE3C09A02406AEB"
+            BlueprintIdentifier = "4A34A43AF258A31D789CCBE7"
             BuildableName = "CaloricSwift.app"
             BlueprintName = "CaloricSwift"
             ReferencedContainer = "container:CaloricSwift.xcodeproj">
@@ -90,7 +90,7 @@
          runnableDebuggingMode = "0">
          <BuildableReference
             BuildableIdentifier = "primary"
-            BlueprintIdentifier = "8EC817E45CE3C09A02406AEB"
+            BlueprintIdentifier = "4A34A43AF258A31D789CCBE7"
             BuildableName = "CaloricSwift.app"
             BlueprintName = "CaloricSwift"
             ReferencedContainer = "container:CaloricSwift.xcodeproj">

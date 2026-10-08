@@ -55,6 +55,7 @@ struct HoldSlideButton: View {
     @Binding var selection: Double?
     let tapped: () -> Void
     let committed: (Double) -> Void
+    @Environment(\.scenePhase) private var scenePhase
     @State private var picking = false
     @State private var endedAt = -Double.infinity
     private var calories: Bool { (values.first ?? 0) >= 50 }
@@ -82,9 +83,11 @@ struct HoldSlideButton: View {
                 })
             .overlay(alignment: secondary ? .bottomTrailing : .bottomLeading) {
                 if picking {
-                    SlideValuePicker(values: values, selection: selection, calories: calories).offset(y: -60)
+                    SlideValuePicker(values: values, selection: selection, calories: calories).holdFocus().offset(y: -60)
                 }
-            }.accessibilityValue(picking ? "Choosing \(calories ? "calories" : "portion")" : "")
+            }.holdFocus(picking, cornerRadius: 24).accessibilityValue(picking ? "Choosing \(calories ? "calories" : "portion")" : "")
+            .onChange(of: scenePhase) { _, phase in if phase != .active { picking = false; selection = nil } }
+            .onChange(of: enabled) { _, enabled in if !enabled { picking = false; selection = nil } }
             .onDisappear { picking = false; selection = nil }
     }
     private func start() {

@@ -40,7 +40,8 @@ struct VoiceComposer: View {
             if let error = voice.error {
                 Text(error).font(.system(size: 12)).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
             }
-        }.padding(.horizontal, 12).padding(.vertical, 6)
+        }
+            .padding(.horizontal, 12).padding(.vertical, 6)
             .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: active)
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: locked)
             .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: input.isEmpty)
@@ -90,6 +91,7 @@ struct VoiceComposer: View {
         }.padding(12).frame(maxWidth: .infinity)
             .caloricGlass(in: RoundedRectangle(cornerRadius: 26))
             .glassIdentity("composer", in: glassNamespace)
+            .holdFocus(active, cornerRadius: 26)
             .accessibilityIdentifier("voice-recording-card")
     }
 
@@ -98,6 +100,7 @@ struct VoiceComposer: View {
             .frame(width: 48, height: 48).foregroundStyle(active ? .white : .primary)
             .caloricGlass(in: Circle(), tint: active ? .red : nil, interactive: true)
             .glassIdentity("composer-action", in: glassNamespace)
+            .holdFocus(active, cornerRadius: 24)
             .scaleEffect(active && !reduceMotion ? 1.06 : 1)
             .offset(x: active ? -min(cancelProgress, 1) * 14 : 0, y: active ? -min(lockProgress, 1) * 8 : 0)
             .overlay(alignment: .bottom) {
@@ -111,6 +114,7 @@ struct VoiceComposer: View {
                         Image(systemName: "chevron.up").font(.system(size: 11, weight: .bold))
                     }.foregroundStyle(.red).frame(width: 54).padding(.vertical, 8)
                         .caloricGlass(in: Capsule()).glassIdentity("voice-lock", in: glassNamespace)
+                        .holdFocus(cornerRadius: 27)
                         .offset(y: -68).allowsHitTesting(false)
                         .transition(.opacity.combined(with: .scale)).accessibilityHidden(true)
                 }
@@ -135,6 +139,7 @@ struct VoiceComposer: View {
         Button(action: action) { Image(systemName: image).font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.onTint).frame(width: 24, height: 24) }
             .nativeActionStyle(prominent: true, shape: .circle).controlSize(.large).tint(color)
             .glassIdentity("composer-action", in: glassNamespace).accessibilityLabel(label)
+            .holdFocus(active, cornerRadius: 26)
     }
 
     private func beginRecording() {
