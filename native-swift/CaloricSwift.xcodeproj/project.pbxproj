@@ -1,0 +1,879 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 46;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		06570C55AB70C85E76F23F86 /* BrandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A881C7D66EF4AC290868078 /* BrandPalette.swift */; };
+		0767015FDFDFC4637A37EEB5 /* HoldFocusOverlay.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFEE65DA8416B60BCC80EE0F /* HoldFocusOverlay.swift */; };
+		164B7368F36D7A6A8B21E8CC /* CaloricSwiftApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90B2327D3BB68C12DB6F54AE /* CaloricSwiftApp.swift */; };
+		1A5BD2160E2CBD335721A9A5 /* AILogView.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB2134D902DEC95682374070 /* AILogView.swift */; };
+		1D44CB603872B3BA474C7326 /* DiaryDragGesture.swift in Sources */ = {isa = PBXBuildFile; fileRef = B4E605C0A4323A3431C0C2BB /* DiaryDragGesture.swift */; };
+		25D2C957304A41009EF9039F /* FriendsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 248BF1E0D0D4042C2718DB95 /* FriendsView.swift */; };
+		29121E452386CAEE39916CE7 /* CaloricWidget.appex in Embed App Extensions */ = {isa = PBXBuildFile; fileRef = A5BE8A4325E1D2C3B3E7E7B6 /* CaloricWidget.appex */; settings = {ATTRIBUTES = (RemoveHeadersOnCopy, ); }; };
+		2BC2ACB3C99A7DF867F08E95 /* AuthTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F82F3A45039C673ADD81C25F /* AuthTests.swift */; };
+		46C58FAB657916E18372E812 /* libsqlite3.dylib in Frameworks */ = {isa = PBXBuildFile; fileRef = 1FEEDD39C4D64DDD5D7C9FDC /* libsqlite3.dylib */; };
+		497A224A1B742869EB6CE529 /* Theme.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6362BC64B3067575A15037F /* Theme.swift */; };
+		4BBBD34D767B2752F5F3D649 /* FoodSearchView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EB247633B991182BB5258176 /* FoodSearchView.swift */; };
+		544975AD976F3140AFABDCDA /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1430C021132C4E4088B1D7C1 /* Foundation.framework */; };
+		593C624A48156A2CF22B8601 /* CloudBackup.swift in Sources */ = {isa = PBXBuildFile; fileRef = F8E037989294BF7110CFA7E2 /* CloudBackup.swift */; };
+		5EF199BAE62F79E7486AED51 /* CaloricWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1687FB371A270B29A86CE267 /* CaloricWidget.swift */; };
+		637A041BBAE57BAB4B6BC331 /* SQLiteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 70099453EF9C64CBA3CA472D /* SQLiteStore.swift */; };
+		65D3CCC4583BD1CFE02297A6 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F2C4D4FE157B97347E70B /* SignInView.swift */; };
+		69A5D3D5D03462F654400DE7 /* BarcodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D5ECB24F30F1B2C955FE595 /* BarcodeScanner.swift */; };
+		6E39695E4AE57ECF7DD3E784 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523734D5CC7C6C037BC1E838 /* TodayView.swift */; };
+		75740A3E6D3340A182338E4A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 28990BB76C4B762F326E2ADB /* PrivacyInfo.xcprivacy */; };
+		77A84A7D4DBF5003C7C85C11 /* NativeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B9581207B7E730C5DDE2C4 /* NativeAuth.swift */; };
+		79455E1F44CDB9BF11D01B73 /* BrandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A881C7D66EF4AC290868078 /* BrandPalette.swift */; };
+		7E1639D4E398A83D94DFCA87 /* MealAddControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5780F37C1497882EAA98C6CB /* MealAddControl.swift */; };
+		80B630BD71AC3161CA473661 /* PortionControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = C6B587581121AE9A2825753F /* PortionControl.swift */; };
+		837AA8CF43B2AE4E59462B4B /* NativeFoodList.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7E2BAEA6A1DD4E1EED38C4A5 /* NativeFoodList.swift */; };
+		89E9E15A619D3D1E2D4EC0D6 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = CECB24B6DFCE5EB585E766D1 /* SettingsView.swift */; };
+		9259F462B470BFA4ADD7FD56 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8FD3EFE6BADD16EA52229422 /* Models.swift */; };
+		97AA8AD5E972EAA527E88E91 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1430C021132C4E4088B1D7C1 /* Foundation.framework */; };
+		97B5EF149BD28382585E3B2B /* QuickAddFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F350C5DE125CE15CB693F00 /* QuickAddFields.swift */; };
+		9CB1EF4D94C7A48E471ECFD9 /* AILogService.swift in Sources */ = {isa = PBXBuildFile; fileRef = F466F2759C9B8CC979817805 /* AILogService.swift */; };
+		9E38B02C5175E9FCDEC55DFB /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1430C021132C4E4088B1D7C1 /* Foundation.framework */; };
+		A1EB5C2EAEE7BFC0C229899A /* VoiceComposer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9F52AE8E0F4C13EADF6215BE /* VoiceComposer.swift */; };
+		A48CBEB44C9941BA67FFAE08 /* WidgetSnapshot.swift in Sources */ = {isa = PBXBuildFile; fileRef = 111F9125D67306FF424C7098 /* WidgetSnapshot.swift */; };
+		A5AFAA6713EF2A8D186A1A43 /* APIClient.swift in Sources */ = {isa = PBXBuildFile; fileRef = 12E62D8170B97AF34C4C628A /* APIClient.swift */; };
+		A8B95C63BD38552FBA0B355E /* CaloricSwiftUITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 34EB1CA291F0A10096E54754 /* CaloricSwiftUITests.swift */; };
+		BD640A2CC327006C60523F62 /* Foundation.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 1430C021132C4E4088B1D7C1 /* Foundation.framework */; };
+		BF4F245F3664813A4B4EAF57 /* AppStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A71F998590948F6A9D12611C /* AppStore.swift */; };
+		D23D2E883941ACE3A6BA50C0 /* VoiceRecorder.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0704F18258EFD580C6059F4 /* VoiceRecorder.swift */; };
+		D5AFB8C417BF68DFF49A675D /* FeatureParityTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 775F2927BF17931158E6E96C /* FeatureParityTests.swift */; };
+		D85085F56C60226FD53B358E /* EntryDetailsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C5F4BF41FF0DF0D02892AC9E /* EntryDetailsView.swift */; };
+		D98F67912AEFC9FC7D6FDF18 /* SocialStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6270C41F7FD51F5B7D6E2528 /* SocialStore.swift */; };
+		D9D29F734AC0A3EA1870C4F5 /* VoiceTouchControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = C18EF70F5263BD920C6A9A97 /* VoiceTouchControl.swift */; };
+		DE470F8696DB83E341E792D4 /* CaloricSwiftTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C83221A65E16F0BB489C0181 /* CaloricSwiftTests.swift */; };
+		DF72F16A25E23C35A9ACD423 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 8635F6917B5849905B678F8A /* Assets.xcassets */; };
+		E3EC68DCD0BF646D6E8745DE /* LiveSyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = F3AB4EB4488D2B109DB6F35C /* LiveSyncTests.swift */; };
+		ED87E8FBA1C35FFCE94BC27B /* RecipeEditorView.swift in Sources */ = {isa = PBXBuildFile; fileRef = B34BD813F872198681F13201 /* RecipeEditorView.swift */; };
+		F4B3D0E5763A18B665EBBD10 /* SyncTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 841B9F8B67B4B8A3D2874C4B /* SyncTests.swift */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXContainerItemProxy section */
+		108A8ACE218C92AAD7C1B2A0 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0321739435AF3B63646C47FF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 7DD2D35A115EC937D5E5F102;
+			remoteInfo = CaloricWidget;
+		};
+		55A8B35195E23F0FEBC789D7 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0321739435AF3B63646C47FF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DE4BCFD40654CE45D9FBB601;
+			remoteInfo = CaloricSwift;
+		};
+		CAF9EC75CA069D45E0DF3340 /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 0321739435AF3B63646C47FF /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = DE4BCFD40654CE45D9FBB601;
+			remoteInfo = CaloricSwift;
+		};
+/* End PBXContainerItemProxy section */
+
+/* Begin PBXCopyFilesBuildPhase section */
+		99F452927EC24B65B3665879 /* Embed App Extensions */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 13;
+			files = (
+				29121E452386CAEE39916CE7 /* CaloricWidget.appex in Embed App Extensions */,
+			);
+			name = "Embed App Extensions";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
+/* Begin PBXFileReference section */
+		0A881C7D66EF4AC290868078 /* BrandPalette.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BrandPalette.swift; sourceTree = "<group>"; };
+		111F9125D67306FF424C7098 /* WidgetSnapshot.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = WidgetSnapshot.swift; sourceTree = "<group>"; };
+		12E62D8170B97AF34C4C628A /* APIClient.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = APIClient.swift; sourceTree = "<group>"; };
+		1430C021132C4E4088B1D7C1 /* Foundation.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Foundation.framework; path = Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS26.0.sdk/System/Library/Frameworks/Foundation.framework; sourceTree = DEVELOPER_DIR; };
+		1687FB371A270B29A86CE267 /* CaloricWidget.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaloricWidget.swift; sourceTree = "<group>"; };
+		1FEEDD39C4D64DDD5D7C9FDC /* libsqlite3.dylib */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = "compiled.mach-o.dylib"; name = libsqlite3.dylib; path = usr/lib/libsqlite3.dylib; sourceTree = SDKROOT; };
+		248BF1E0D0D4042C2718DB95 /* FriendsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FriendsView.swift; sourceTree = "<group>"; };
+		28990BB76C4B762F326E2ADB /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; includeInIndex = 1; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		34EB1CA291F0A10096E54754 /* CaloricSwiftUITests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaloricSwiftUITests.swift; sourceTree = "<group>"; };
+		35EF2D15EB8BC47475DF2869 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		3A1175FE999CD6E622CA5E00 /* CaloricSwift.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = CaloricSwift.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		523734D5CC7C6C037BC1E838 /* TodayView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = TodayView.swift; sourceTree = "<group>"; };
+		5780F37C1497882EAA98C6CB /* MealAddControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = MealAddControl.swift; sourceTree = "<group>"; };
+		5F350C5DE125CE15CB693F00 /* QuickAddFields.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = QuickAddFields.swift; sourceTree = "<group>"; };
+		6270C41F7FD51F5B7D6E2528 /* SocialStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SocialStore.swift; sourceTree = "<group>"; };
+		69AE722B576512DA65768662 /* CaloricSwiftUITests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CaloricSwiftUITests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		70099453EF9C64CBA3CA472D /* SQLiteStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SQLiteStore.swift; sourceTree = "<group>"; };
+		74A34E2D707B21B1E3FF7145 /* CaloricWidget.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = CaloricWidget.entitlements; sourceTree = "<group>"; };
+		775F2927BF17931158E6E96C /* FeatureParityTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FeatureParityTests.swift; sourceTree = "<group>"; };
+		7E2BAEA6A1DD4E1EED38C4A5 /* NativeFoodList.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeFoodList.swift; sourceTree = "<group>"; };
+		841B9F8B67B4B8A3D2874C4B /* SyncTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SyncTests.swift; sourceTree = "<group>"; };
+		8635F6917B5849905B678F8A /* Assets.xcassets */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+		89083A8B2BB0D8D37D8513E9 /* CaloricSwiftTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = CaloricSwiftTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
+		8D5ECB24F30F1B2C955FE595 /* BarcodeScanner.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = BarcodeScanner.swift; sourceTree = "<group>"; };
+		8FD3EFE6BADD16EA52229422 /* Models.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Models.swift; sourceTree = "<group>"; };
+		90B2327D3BB68C12DB6F54AE /* CaloricSwiftApp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaloricSwiftApp.swift; sourceTree = "<group>"; };
+		9F52AE8E0F4C13EADF6215BE /* VoiceComposer.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceComposer.swift; sourceTree = "<group>"; };
+		A5BE8A4325E1D2C3B3E7E7B6 /* CaloricWidget.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = CaloricWidget.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A71F998590948F6A9D12611C /* AppStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AppStore.swift; sourceTree = "<group>"; };
+		B0704F18258EFD580C6059F4 /* VoiceRecorder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceRecorder.swift; sourceTree = "<group>"; };
+		B34BD813F872198681F13201 /* RecipeEditorView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = RecipeEditorView.swift; sourceTree = "<group>"; };
+		B4E605C0A4323A3431C0C2BB /* DiaryDragGesture.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DiaryDragGesture.swift; sourceTree = "<group>"; };
+		BB2134D902DEC95682374070 /* AILogView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AILogView.swift; sourceTree = "<group>"; };
+		C0C44319AE2DB9687C97B511 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		C18EF70F5263BD920C6A9A97 /* VoiceTouchControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceTouchControl.swift; sourceTree = "<group>"; };
+		C251B5E7DF9E7617A2659E31 /* CaloricSwift.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = CaloricSwift.entitlements; sourceTree = "<group>"; };
+		C5F4BF41FF0DF0D02892AC9E /* EntryDetailsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EntryDetailsView.swift; sourceTree = "<group>"; };
+		C6B587581121AE9A2825753F /* PortionControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortionControl.swift; sourceTree = "<group>"; };
+		C83221A65E16F0BB489C0181 /* CaloricSwiftTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaloricSwiftTests.swift; sourceTree = "<group>"; };
+		CECB24B6DFCE5EB585E766D1 /* SettingsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
+		D52EF1DFC2531DF85C9F0164 /* Default.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; path = Default.xcconfig; sourceTree = "<group>"; };
+		D6B9581207B7E730C5DDE2C4 /* NativeAuth.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = NativeAuth.swift; sourceTree = "<group>"; };
+		E25F2C4D4FE157B97347E70B /* SignInView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
+		E6362BC64B3067575A15037F /* Theme.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Theme.swift; sourceTree = "<group>"; };
+		EB247633B991182BB5258176 /* FoodSearchView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FoodSearchView.swift; sourceTree = "<group>"; };
+		EFEE65DA8416B60BCC80EE0F /* HoldFocusOverlay.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = HoldFocusOverlay.swift; sourceTree = "<group>"; };
+		F3AB4EB4488D2B109DB6F35C /* LiveSyncTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LiveSyncTests.swift; sourceTree = "<group>"; };
+		F466F2759C9B8CC979817805 /* AILogService.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AILogService.swift; sourceTree = "<group>"; };
+		F82F3A45039C673ADD81C25F /* AuthTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AuthTests.swift; sourceTree = "<group>"; };
+		F8E037989294BF7110CFA7E2 /* CloudBackup.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CloudBackup.swift; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		45E86F0AC7723F85EA7F81A3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9E38B02C5175E9FCDEC55DFB /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		50BDDF9C107E2EFAC72C2A9F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				97AA8AD5E972EAA527E88E91 /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		7B51DBEBC600EE81CEF41EF3 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				544975AD976F3140AFABDCDA /* Foundation.framework in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		BAB0DEA7EB5EEF16A893E30C /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				BD640A2CC327006C60523F62 /* Foundation.framework in Frameworks */,
+				46C58FAB657916E18372E812 /* libsqlite3.dylib in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		2C1E07DCDE5BDFC6881090CC /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+				5262E48749139414C7850622 /* iOS */,
+				1FEEDD39C4D64DDD5D7C9FDC /* libsqlite3.dylib */,
+			);
+			name = Frameworks;
+			sourceTree = "<group>";
+		};
+		2E44C5A9DBAC11253F1BBC2B /* Tests */ = {
+			isa = PBXGroup;
+			children = (
+				F82F3A45039C673ADD81C25F /* AuthTests.swift */,
+				C83221A65E16F0BB489C0181 /* CaloricSwiftTests.swift */,
+				775F2927BF17931158E6E96C /* FeatureParityTests.swift */,
+				F3AB4EB4488D2B109DB6F35C /* LiveSyncTests.swift */,
+				841B9F8B67B4B8A3D2874C4B /* SyncTests.swift */,
+			);
+			name = Tests;
+			path = Tests;
+			sourceTree = "<group>";
+		};
+		3614009A7A1F6FDFF661D8F0 = {
+			isa = PBXGroup;
+			children = (
+				DEC1E36C2803C11FA1EEFA00 /* Products */,
+				2C1E07DCDE5BDFC6881090CC /* Frameworks */,
+				54D400931231F00396D10C35 /* Sources */,
+				BFAD109DA46F9143F9B2E33C /* Resources */,
+				803682CBC3BE5D0E35089696 /* Config */,
+				8872CAEA0478B00BD645EC09 /* Widget */,
+				2E44C5A9DBAC11253F1BBC2B /* Tests */,
+				D8EA61C4F5780668C6C4066B /* UITests */,
+			);
+			sourceTree = "<group>";
+		};
+		5262E48749139414C7850622 /* iOS */ = {
+			isa = PBXGroup;
+			children = (
+				1430C021132C4E4088B1D7C1 /* Foundation.framework */,
+			);
+			name = iOS;
+			sourceTree = "<group>";
+		};
+		54D400931231F00396D10C35 /* Sources */ = {
+			isa = PBXGroup;
+			children = (
+				F466F2759C9B8CC979817805 /* AILogService.swift */,
+				BB2134D902DEC95682374070 /* AILogView.swift */,
+				12E62D8170B97AF34C4C628A /* APIClient.swift */,
+				A71F998590948F6A9D12611C /* AppStore.swift */,
+				8D5ECB24F30F1B2C955FE595 /* BarcodeScanner.swift */,
+				0A881C7D66EF4AC290868078 /* BrandPalette.swift */,
+				90B2327D3BB68C12DB6F54AE /* CaloricSwiftApp.swift */,
+				F8E037989294BF7110CFA7E2 /* CloudBackup.swift */,
+				B4E605C0A4323A3431C0C2BB /* DiaryDragGesture.swift */,
+				C5F4BF41FF0DF0D02892AC9E /* EntryDetailsView.swift */,
+				EB247633B991182BB5258176 /* FoodSearchView.swift */,
+				248BF1E0D0D4042C2718DB95 /* FriendsView.swift */,
+				EFEE65DA8416B60BCC80EE0F /* HoldFocusOverlay.swift */,
+				5780F37C1497882EAA98C6CB /* MealAddControl.swift */,
+				8FD3EFE6BADD16EA52229422 /* Models.swift */,
+				D6B9581207B7E730C5DDE2C4 /* NativeAuth.swift */,
+				7E2BAEA6A1DD4E1EED38C4A5 /* NativeFoodList.swift */,
+				C6B587581121AE9A2825753F /* PortionControl.swift */,
+				5F350C5DE125CE15CB693F00 /* QuickAddFields.swift */,
+				B34BD813F872198681F13201 /* RecipeEditorView.swift */,
+				70099453EF9C64CBA3CA472D /* SQLiteStore.swift */,
+				CECB24B6DFCE5EB585E766D1 /* SettingsView.swift */,
+				E25F2C4D4FE157B97347E70B /* SignInView.swift */,
+				6270C41F7FD51F5B7D6E2528 /* SocialStore.swift */,
+				E6362BC64B3067575A15037F /* Theme.swift */,
+				523734D5CC7C6C037BC1E838 /* TodayView.swift */,
+				9F52AE8E0F4C13EADF6215BE /* VoiceComposer.swift */,
+				B0704F18258EFD580C6059F4 /* VoiceRecorder.swift */,
+				C18EF70F5263BD920C6A9A97 /* VoiceTouchControl.swift */,
+				111F9125D67306FF424C7098 /* WidgetSnapshot.swift */,
+			);
+			name = Sources;
+			path = Sources;
+			sourceTree = "<group>";
+		};
+		803682CBC3BE5D0E35089696 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				D52EF1DFC2531DF85C9F0164 /* Default.xcconfig */,
+			);
+			name = Config;
+			path = Config;
+			sourceTree = "<group>";
+		};
+		8872CAEA0478B00BD645EC09 /* Widget */ = {
+			isa = PBXGroup;
+			children = (
+				1687FB371A270B29A86CE267 /* CaloricWidget.swift */,
+				C0C44319AE2DB9687C97B511 /* Info.plist */,
+				74A34E2D707B21B1E3FF7145 /* CaloricWidget.entitlements */,
+			);
+			name = Widget;
+			path = Widget;
+			sourceTree = "<group>";
+		};
+		BFAD109DA46F9143F9B2E33C /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				8635F6917B5849905B678F8A /* Assets.xcassets */,
+				C251B5E7DF9E7617A2659E31 /* CaloricSwift.entitlements */,
+				35EF2D15EB8BC47475DF2869 /* Info.plist */,
+				28990BB76C4B762F326E2ADB /* PrivacyInfo.xcprivacy */,
+			);
+			name = Resources;
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		D8EA61C4F5780668C6C4066B /* UITests */ = {
+			isa = PBXGroup;
+			children = (
+				34EB1CA291F0A10096E54754 /* CaloricSwiftUITests.swift */,
+			);
+			name = UITests;
+			path = UITests;
+			sourceTree = "<group>";
+		};
+		DEC1E36C2803C11FA1EEFA00 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				3A1175FE999CD6E622CA5E00 /* CaloricSwift.app */,
+				A5BE8A4325E1D2C3B3E7E7B6 /* CaloricWidget.appex */,
+				89083A8B2BB0D8D37D8513E9 /* CaloricSwiftTests.xctest */,
+				69AE722B576512DA65768662 /* CaloricSwiftUITests.xctest */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		62D405B4FEA365ED92C1862D /* CaloricSwiftUITests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 7BF4C4B1867B24281154936F /* Build configuration list for PBXNativeTarget "CaloricSwiftUITests" */;
+			buildPhases = (
+				06458068543C335EC45F6BA6 /* Sources */,
+				45E86F0AC7723F85EA7F81A3 /* Frameworks */,
+				2FC476C77D591051C0925D35 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				7CBC4E94E514A0AA20739C20 /* PBXTargetDependency */,
+			);
+			name = CaloricSwiftUITests;
+			productName = CaloricSwiftUITests;
+			productReference = 69AE722B576512DA65768662 /* CaloricSwiftUITests.xctest */;
+			productType = "com.apple.product-type.bundle.ui-testing";
+		};
+		7DD2D35A115EC937D5E5F102 /* CaloricWidget */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 630E8E93B2261407A0B90FB3 /* Build configuration list for PBXNativeTarget "CaloricWidget" */;
+			buildPhases = (
+				05FA82E011A2AFFC3C5511B3 /* Sources */,
+				7B51DBEBC600EE81CEF41EF3 /* Frameworks */,
+				DD3CDD74D2FCC0867E5F28B9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = CaloricWidget;
+			productName = CaloricWidget;
+			productReference = A5BE8A4325E1D2C3B3E7E7B6 /* CaloricWidget.appex */;
+			productType = "com.apple.product-type.app-extension";
+		};
+		B0A49E4A87DD54F0F0E724AD /* CaloricSwiftTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 0E5162F9C6917F931B49177D /* Build configuration list for PBXNativeTarget "CaloricSwiftTests" */;
+			buildPhases = (
+				732BBCBF0B0AB56645A3E762 /* Sources */,
+				50BDDF9C107E2EFAC72C2A9F /* Frameworks */,
+				C94EC7769D154594A5B943E9 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				B57A3CC5E134AFD9772E63BA /* PBXTargetDependency */,
+			);
+			name = CaloricSwiftTests;
+			productName = CaloricSwiftTests;
+			productReference = 89083A8B2BB0D8D37D8513E9 /* CaloricSwiftTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
+		DE4BCFD40654CE45D9FBB601 /* CaloricSwift */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = B126C3E5B0125C48971614F9 /* Build configuration list for PBXNativeTarget "CaloricSwift" */;
+			buildPhases = (
+				199C71599F9DC21F14496C03 /* Sources */,
+				BAB0DEA7EB5EEF16A893E30C /* Frameworks */,
+				9BF21303B5689C641D41C138 /* Resources */,
+				99F452927EC24B65B3665879 /* Embed App Extensions */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				58F569C85AEABE36FE16A3FE /* PBXTargetDependency */,
+			);
+			name = CaloricSwift;
+			productName = CaloricSwift;
+			productReference = 3A1175FE999CD6E622CA5E00 /* CaloricSwift.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		0321739435AF3B63646C47FF /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				LastSwiftUpdateCheck = 1600;
+				LastUpgradeCheck = 2660;
+			};
+			buildConfigurationList = 4696394AC6D5756C6642AAD2 /* Build configuration list for PBXProject "CaloricSwift" */;
+			compatibilityVersion = "Xcode 3.2";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 3614009A7A1F6FDFF661D8F0;
+			minimizedProjectReferenceProxies = 0;
+			preferredProjectObjectVersion = 100;
+			productRefGroup = DEC1E36C2803C11FA1EEFA00 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				DE4BCFD40654CE45D9FBB601 /* CaloricSwift */,
+				7DD2D35A115EC937D5E5F102 /* CaloricWidget */,
+				B0A49E4A87DD54F0F0E724AD /* CaloricSwiftTests */,
+				62D405B4FEA365ED92C1862D /* CaloricSwiftUITests */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		2FC476C77D591051C0925D35 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		9BF21303B5689C641D41C138 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				DF72F16A25E23C35A9ACD423 /* Assets.xcassets in Resources */,
+				75740A3E6D3340A182338E4A /* PrivacyInfo.xcprivacy in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		C94EC7769D154594A5B943E9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD3CDD74D2FCC0867E5F28B9 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		05FA82E011A2AFFC3C5511B3 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5EF199BAE62F79E7486AED51 /* CaloricWidget.swift in Sources */,
+				06570C55AB70C85E76F23F86 /* BrandPalette.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		06458068543C335EC45F6BA6 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A8B95C63BD38552FBA0B355E /* CaloricSwiftUITests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		199C71599F9DC21F14496C03 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				9CB1EF4D94C7A48E471ECFD9 /* AILogService.swift in Sources */,
+				1A5BD2160E2CBD335721A9A5 /* AILogView.swift in Sources */,
+				A5AFAA6713EF2A8D186A1A43 /* APIClient.swift in Sources */,
+				BF4F245F3664813A4B4EAF57 /* AppStore.swift in Sources */,
+				69A5D3D5D03462F654400DE7 /* BarcodeScanner.swift in Sources */,
+				79455E1F44CDB9BF11D01B73 /* BrandPalette.swift in Sources */,
+				164B7368F36D7A6A8B21E8CC /* CaloricSwiftApp.swift in Sources */,
+				593C624A48156A2CF22B8601 /* CloudBackup.swift in Sources */,
+				1D44CB603872B3BA474C7326 /* DiaryDragGesture.swift in Sources */,
+				D85085F56C60226FD53B358E /* EntryDetailsView.swift in Sources */,
+				4BBBD34D767B2752F5F3D649 /* FoodSearchView.swift in Sources */,
+				25D2C957304A41009EF9039F /* FriendsView.swift in Sources */,
+				0767015FDFDFC4637A37EEB5 /* HoldFocusOverlay.swift in Sources */,
+				7E1639D4E398A83D94DFCA87 /* MealAddControl.swift in Sources */,
+				9259F462B470BFA4ADD7FD56 /* Models.swift in Sources */,
+				77A84A7D4DBF5003C7C85C11 /* NativeAuth.swift in Sources */,
+				837AA8CF43B2AE4E59462B4B /* NativeFoodList.swift in Sources */,
+				80B630BD71AC3161CA473661 /* PortionControl.swift in Sources */,
+				97B5EF149BD28382585E3B2B /* QuickAddFields.swift in Sources */,
+				ED87E8FBA1C35FFCE94BC27B /* RecipeEditorView.swift in Sources */,
+				637A041BBAE57BAB4B6BC331 /* SQLiteStore.swift in Sources */,
+				89E9E15A619D3D1E2D4EC0D6 /* SettingsView.swift in Sources */,
+				65D3CCC4583BD1CFE02297A6 /* SignInView.swift in Sources */,
+				D98F67912AEFC9FC7D6FDF18 /* SocialStore.swift in Sources */,
+				497A224A1B742869EB6CE529 /* Theme.swift in Sources */,
+				6E39695E4AE57ECF7DD3E784 /* TodayView.swift in Sources */,
+				A1EB5C2EAEE7BFC0C229899A /* VoiceComposer.swift in Sources */,
+				D23D2E883941ACE3A6BA50C0 /* VoiceRecorder.swift in Sources */,
+				D9D29F734AC0A3EA1870C4F5 /* VoiceTouchControl.swift in Sources */,
+				A48CBEB44C9941BA67FFAE08 /* WidgetSnapshot.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		732BBCBF0B0AB56645A3E762 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				2BC2ACB3C99A7DF867F08E95 /* AuthTests.swift in Sources */,
+				DE470F8696DB83E341E792D4 /* CaloricSwiftTests.swift in Sources */,
+				D5AFB8C417BF68DFF49A675D /* FeatureParityTests.swift in Sources */,
+				E3EC68DCD0BF646D6E8745DE /* LiveSyncTests.swift in Sources */,
+				F4B3D0E5763A18B665EBBD10 /* SyncTests.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		58F569C85AEABE36FE16A3FE /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = CaloricWidget;
+			target = 7DD2D35A115EC937D5E5F102 /* CaloricWidget */;
+			targetProxy = 108A8ACE218C92AAD7C1B2A0 /* PBXContainerItemProxy */;
+		};
+		7CBC4E94E514A0AA20739C20 /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = CaloricSwift;
+			target = DE4BCFD40654CE45D9FBB601 /* CaloricSwift */;
+			targetProxy = CAF9EC75CA069D45E0DF3340 /* PBXContainerItemProxy */;
+		};
+		B57A3CC5E134AFD9772E63BA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			name = CaloricSwift;
+			target = DE4BCFD40654CE45D9FBB601 /* CaloricSwift */;
+			targetProxy = 55A8B35195E23F0FEBC789D7 /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin XCBuildConfiguration section */
+		02B8B7029BFFB9C37E4E9E9C /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = D52EF1DFC2531DF85C9F0164 /* Default.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = Resources/CaloricSwift.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 16;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift;
+				PRODUCT_NAME = CaloricSwift;
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		09817038B58DB10692539CE0 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = D52EF1DFC2531DF85C9F0164 /* Default.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = Widget/CaloricWidget.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				CURRENT_PROJECT_VERSION = 16;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift.CaloricWidget;
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+			};
+			name = Debug;
+		};
+		27A034D03A1AE263965FB0C2 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = D52EF1DFC2531DF85C9F0164 /* Default.xcconfig */;
+			buildSettings = {
+				APPLICATION_EXTENSION_API_ONLY = YES;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = Widget/CaloricWidget.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
+				CURRENT_PROJECT_VERSION = 16;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Widget/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift.CaloricWidget;
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "$(CALORIC_WIDGET_PROFILE_UUID)";
+				SDKROOT = iphoneos;
+				SKIP_INSTALL = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		47B07C62B111507DDE9C531E /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = D52EF1DFC2531DF85C9F0164 /* Default.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				CODE_SIGN_ENTITLEMENTS = Resources/CaloricSwift.entitlements;
+				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
+				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
+				CURRENT_PROJECT_VERSION = 16;
+				ENABLE_USER_SCRIPT_SANDBOXING = YES;
+				GENERATE_INFOPLIST_FILE = NO;
+				INFOPLIST_FILE = Resources/Info.plist;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				LD_RUNPATH_SEARCH_PATHS = "$(inherited) @executable_path/Frameworks";
+				MARKETING_VERSION = 1.0.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift;
+				PRODUCT_NAME = CaloricSwift;
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "$(CALORIC_APP_PROFILE_UUID)";
+				SDKROOT = iphoneos;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		7F8B1C3BE5ECAF8DD4257741 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CaloricSwift;
+			};
+			name = Debug;
+		};
+		9262FEB20BF8FF55937B6433 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CaloricSwift.app/CaloricSwift";
+			};
+			name = Debug;
+		};
+		9DFC93DB278E27F61D092A61 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				ENABLE_TESTABILITY = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_DYNAMIC_NO_PIC = NO;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				GCC_PREPROCESSOR_DEFINITIONS = (
+					"DEBUG=1",
+					"$(inherited)",
+				);
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
+				MTL_FAST_MATH = YES;
+				ONLY_ACTIVE_ARCH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = DEBUG;
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		B2F8590F6FD6F69A702C4F65 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift.tests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/CaloricSwift.app/CaloricSwift";
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+		DC0C09B53B77807A9D7577F7 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ALWAYS_SEARCH_USER_PATHS = NO;
+				CLANG_ANALYZER_NONNULL = YES;
+				CLANG_ANALYZER_NUMBER_OBJECT_CONVERSION = YES_AGGRESSIVE;
+				CLANG_CXX_LANGUAGE_STANDARD = "gnu++14";
+				CLANG_CXX_LIBRARY = "libc++";
+				CLANG_ENABLE_MODULES = YES;
+				CLANG_ENABLE_OBJC_ARC = YES;
+				CLANG_ENABLE_OBJC_WEAK = YES;
+				CLANG_WARN_BLOCK_CAPTURE_AUTORELEASING = YES;
+				CLANG_WARN_BOOL_CONVERSION = YES;
+				CLANG_WARN_COMMA = YES;
+				CLANG_WARN_CONSTANT_CONVERSION = YES;
+				CLANG_WARN_DEPRECATED_OBJC_IMPLEMENTATIONS = YES;
+				CLANG_WARN_DIRECT_OBJC_ISA_USAGE = YES_ERROR;
+				CLANG_WARN_DOCUMENTATION_COMMENTS = YES;
+				CLANG_WARN_EMPTY_BODY = YES;
+				CLANG_WARN_ENUM_CONVERSION = YES;
+				CLANG_WARN_INFINITE_RECURSION = YES;
+				CLANG_WARN_INT_CONVERSION = YES;
+				CLANG_WARN_NON_LITERAL_NULL_CONVERSION = YES;
+				CLANG_WARN_OBJC_IMPLICIT_RETAIN_SELF = YES;
+				CLANG_WARN_OBJC_LITERAL_CONVERSION = YES;
+				CLANG_WARN_OBJC_ROOT_CLASS = YES_ERROR;
+				CLANG_WARN_QUOTED_INCLUDE_IN_FRAMEWORK_HEADER = YES;
+				CLANG_WARN_RANGE_LOOP_ANALYSIS = YES;
+				CLANG_WARN_STRICT_PROTOTYPES = YES;
+				CLANG_WARN_SUSPICIOUS_MOVE = YES;
+				CLANG_WARN_UNGUARDED_AVAILABILITY = YES_AGGRESSIVE;
+				CLANG_WARN_UNREACHABLE_CODE = YES;
+				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
+				COPY_PHASE_STRIP = NO;
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				ENABLE_NS_ASSERTIONS = NO;
+				ENABLE_STRICT_OBJC_MSGSEND = YES;
+				GCC_C_LANGUAGE_STANDARD = gnu11;
+				GCC_NO_COMMON_BLOCKS = YES;
+				GCC_WARN_64_TO_32_BIT_CONVERSION = YES;
+				GCC_WARN_ABOUT_RETURN_TYPE = YES_ERROR;
+				GCC_WARN_UNDECLARED_SELECTOR = YES;
+				GCC_WARN_UNINITIALIZED_AUTOS = YES_AGGRESSIVE;
+				GCC_WARN_UNUSED_FUNCTION = YES;
+				GCC_WARN_UNUSED_VARIABLE = YES;
+				MTL_ENABLE_DEBUG_INFO = NO;
+				MTL_FAST_MATH = YES;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_COMPILATION_MODE = wholemodule;
+				SWIFT_OPTIMIZATION_LEVEL = "-O";
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
+		E102DF4CC2709D452F7F6650 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				CLANG_ENABLE_OBJC_WEAK = NO;
+				GENERATE_INFOPLIST_FILE = YES;
+				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
+				PRODUCT_BUNDLE_IDENTIFIER = lol.mati.caloric.swift.uitests;
+				SDKROOT = iphoneos;
+				SWIFT_VERSION = 5.0;
+				TARGETED_DEVICE_FAMILY = "1,2";
+				TEST_TARGET_NAME = CaloricSwift;
+				VALIDATE_PRODUCT = YES;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		0E5162F9C6917F931B49177D /* Build configuration list for PBXNativeTarget "CaloricSwiftTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				B2F8590F6FD6F69A702C4F65 /* Release */,
+				9262FEB20BF8FF55937B6433 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		4696394AC6D5756C6642AAD2 /* Build configuration list for PBXProject "CaloricSwift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				9DFC93DB278E27F61D092A61 /* Debug */,
+				DC0C09B53B77807A9D7577F7 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		630E8E93B2261407A0B90FB3 /* Build configuration list for PBXNativeTarget "CaloricWidget" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				27A034D03A1AE263965FB0C2 /* Release */,
+				09817038B58DB10692539CE0 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		7BF4C4B1867B24281154936F /* Build configuration list for PBXNativeTarget "CaloricSwiftUITests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				E102DF4CC2709D452F7F6650 /* Release */,
+				7F8B1C3BE5ECAF8DD4257741 /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		B126C3E5B0125C48971614F9 /* Build configuration list for PBXNativeTarget "CaloricSwift" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				47B07C62B111507DDE9C531E /* Release */,
+				02B8B7029BFFB9C37E4E9E9C /* Debug */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 0321739435AF3B63646C47FF /* Project object */;
+}

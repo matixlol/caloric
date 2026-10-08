@@ -1,3 +1,5 @@
+import { bentoColor } from "./brandPalette";
+
 export const macroColors = {
   protein: {
     background: "#2563EB",
@@ -12,7 +14,7 @@ export const macroColors = {
     text: "#FFFFFF",
   },
   calories: {
-    background: "#E5E7EB",
-    text: "#374151",
+    background: bentoColor("tertiarySystemGroupedBackground", "#E3D6C2"),
+    text: bentoColor("label", "#22231D"),
   },
 } as const;

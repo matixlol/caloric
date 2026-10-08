@@ -1,9 +1,10 @@
+import { bentoColor } from "../src/theme/brandPalette";
 import { isRunningInExpoGo } from "expo";
 import { DarkTheme, DefaultTheme, ThemeProvider, type Theme } from "expo-router/react-navigation";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Stack, useNavigationContainerRef } from "expo-router";
 import { useEffect, useMemo } from "react";
-import { Platform, PlatformColor, StyleSheet } from "react-native";
+import { StyleSheet } from "react-native";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { AIChatProvider } from "../src/ai/AIChatProvider";
 import { AuthGate } from "../src/auth/AuthGate";
@@ -59,13 +60,14 @@ logStartupMilestone("sentry.initialized", {
   "startup.duration_ms": sentryInitDurationMs,
 });
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 const navigationColor = (value: unknown, fallback: unknown) =>
   typeof value === "string" ? value : typeof fallback === "string" ? fallback : "#000000";
 const queryClient = new QueryClient();
 
 function AppNavigator() {
+  const { isDark } = useAppTheme();
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+
   return (
     <Stack screenOptions={{ headerShown: false }}>
       <Stack.Screen name="(tabs)" />

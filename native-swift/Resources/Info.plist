@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+<key>CFBundleDisplayName</key><string>Caloric Swift</string>
+<key>CFBundleExecutable</key><string>$(EXECUTABLE_NAME)</string>
+<key>CFBundleIdentifier</key><string>$(PRODUCT_BUNDLE_IDENTIFIER)</string>
+<key>CFBundleName</key><string>$(PRODUCT_NAME)</string>
+<key>CFBundlePackageType</key><string>APPL</string>
+<key>CFBundleShortVersionString</key><string>$(MARKETING_VERSION)</string>
+<key>CFBundleVersion</key><string>$(CURRENT_PROJECT_VERSION)</string>
+<key>LSRequiresIPhoneOS</key><true/>
+<key>CADisableMinimumFrameDurationOnPhone</key><true/>
+<key>UILaunchScreen</key><dict/>
+<key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
+<key>UISupportedInterfaceOrientations~ipad</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
+<key>NSMicrophoneUsageDescription</key><string>Caloric uses your microphone so you can log food with voice.</string>
+<key>NSCameraUsageDescription</key><string>Caloric scans barcodes on food packaging to find nutrition information.</string>
+<key>ITSAppUsesNonExemptEncryption</key><false/>
+<key>CaloricBackendURL</key><string>$(CALORIC_BACKEND_URL)</string>
+<key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>caloric-swift</string><string>lol.mati.caloric.swift</string></array></dict></array>
+<key>LSSupportsOpeningDocumentsInPlace</key><true/>
+<key>NSUbiquitousContainers</key><dict><key>iCloud.lol.mati.caloric.swift</key><dict>
+<key>NSUbiquitousContainerIsDocumentScopePublic</key><true/>
+<key>NSUbiquitousContainerName</key><string>Caloric Swift</string>
+<key>NSUbiquitousContainerSupportedFolderLevels</key><string>Any</string>
+</dict></dict>
+</dict></plist>

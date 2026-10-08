@@ -8,7 +8,12 @@ This project uses [Better Auth](https://www.better-auth.com/) for auth (email-co
 ## Repo Layout
 
 - `mobile/`: Expo app
+- `native-swift/`: independent SwiftUI iOS app, Caloric Swift ([setup and TestFlight instructions](native-swift/README.md))
 - `backend/`: Bun runtime service with `pnpm` for package management
+
+### Repository source
+
+The canonical source is `https://github.com/matixlol/caloric.git`. Run `python3 native-swift/scripts/setup-repository.py` to configure `origin` and `main` for that repository; the `poasterbot/caloric` fork is kept separately for pushes. `git pull` rebases local commits onto canonical main. Compare the native port with the current Expo screens before each release.
 
 ### Local env
 

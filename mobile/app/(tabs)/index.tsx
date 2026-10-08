@@ -1,12 +1,12 @@
+import { bentoColor, getBrandPalette } from "../../src/theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../../src/theme/useAppTheme";
 import { useAuth } from "../../src/auth/auth-client";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useRouter } from "expo-router";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  FlatList,
   type LayoutChangeEvent,
-  Platform,
-  PlatformColor,
+
   Pressable,
   StyleSheet,
   Text,
@@ -43,23 +43,24 @@ import { finishStartupBreakdownTrace, logStartupMilestone } from "../../src/perf
 import { CalorieMismatchBadge } from "../../src/components/CalorieMismatchBadge";
 import { MacroBadges } from "../../src/components/MacroBadges";
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
-const palette = {
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  return {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
   card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: "#2563EB",
+  tint: getBrandPalette(isDark).tint,
   macroProtein: macroColors.protein.background,
   macroCarbs: macroColors.carbs.background,
   macroFat: macroColors.fat.background,
   destructive: iosColor("systemRed", "#DC2626"),
   destructiveText: "#FFFFFF",
 };
+}
 
 const HEADER_HEIGHT_ESTIMATE = 74;
 const ENTRY_HEIGHT_ESTIMATE = 54;
@@ -152,6 +153,9 @@ function MealRow({
   onDelete: (id: string) => void;
   onPress: (id: string) => void;
 }) {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   return (
     <Swipeable
       containerStyle={styles.rowSwipeContainer}
@@ -200,6 +204,9 @@ function FriendSummaryRow({
   index: number;
   onPress: (friend: FriendDailySummary) => void;
 }) {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   const progress = friend.calorieGoal
     ? clampPercent((friend.calories / Math.max(friend.calorieGoal, 1)) * 100)
     : 0;
@@ -234,6 +241,9 @@ function FriendSummaryRow({
 }
 
 export default function HomeScreen() {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const { userId } = useAuth();
@@ -836,7 +846,9 @@ export default function HomeScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+    const palette = createPalette(theme.isDark);
+  return StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: palette.background,
@@ -1266,3 +1278,4 @@ const styles = StyleSheet.create({
     color: palette.secondaryLabel,
   },
 });
+};

@@ -1,16 +1,24 @@
+import { bentoColor, getBrandPalette } from "../src/theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../src/theme/useAppTheme";
 import { Ionicons } from "@expo/vector-icons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useEffect, useState } from "react";
-import { Alert, Platform, PlatformColor, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
+import { Alert, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { MacroBadges } from "../src/components/MacroBadges";
 import { useDataStoreActions, useRecipe } from "../src/data/DataProvider";
 import { PORTION_DELTAS, formatPortionLabel, sanitizePortion } from "../src/portion";
 import { aggregateRecipeNutrition, duplicateRecipeInput } from "../src/recipes";
-const color = (name: string, fallback: string) => Platform.OS === "ios" ? PlatformColor(name) : fallback;
-const p = { bg: color("systemGroupedBackground", "#F3F4F6"), card: color("secondarySystemGroupedBackground", "#FFF"), label: color("label", "#111827"), secondary: color("secondaryLabel", "#6B7280"), separator: color("separator", "#E5E7EB"), tint: "#2563EB", danger: "#DC2626" };
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  const color = iosColor;
+  return { bg: color("systemGroupedBackground", "#F3F4F6"), card: color("secondarySystemGroupedBackground", "#FFF"), label: color("label", "#111827"), secondary: color("secondaryLabel", "#6B7280"), separator: color("separator", "#E5E7EB"), tint: getBrandPalette(isDark).tint, danger: "#DC2626" };
+}
 const first = (value: string | string[] | undefined) => Array.isArray(value) ? value[0] : value;
 export default function RecipeEditorScreen() {
+  const { styles: s, isDark } = useThemedStyles(createStyles);
+  const p = createPalette(isDark);
+
   const router = useRouter(); const insets = useSafeAreaInsets(); const id = first(useLocalSearchParams<{ recipeId?: string | string[] }>().recipeId);
   const { data: recipe, isLoading } = useRecipe(id); const { updateRecipe, createRecipe, deleteRecipe } = useDataStoreActions();
   const [name, setName] = useState(""); const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -28,4 +36,7 @@ export default function RecipeEditorScreen() {
     <Pressable style={s.secondaryButton} onPress={()=>Alert.alert("Delete recipe?","Logged diary entries will not be changed.",[{text:"Cancel",style:"cancel"},{text:"Delete",style:"destructive",onPress:()=>void deleteRecipe(recipe.id).then(()=>router.back())}])}><Text style={s.remove}>Delete recipe</Text></Pressable>
   </ScrollView></View>;
 }
-const s=StyleSheet.create({screen:{flex:1,backgroundColor:p.bg},center:{flex:1,alignItems:"center",justifyContent:"center",gap:16,backgroundColor:p.bg},header:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingBottom:12},headerTitle:{fontSize:20,fontWeight:"700",color:p.label},done:{fontSize:17,fontWeight:"600",color:p.tint},content:{padding:16,gap:14},title:{fontSize:20,fontWeight:"700"},link:{fontSize:17,color:p.tint},nameInput:{fontSize:28,fontWeight:"700",color:p.label,backgroundColor:p.card,borderRadius:14,padding:16},card:{backgroundColor:p.card,borderRadius:14,paddingHorizontal:14},count:{fontSize:15,color:p.secondary,paddingTop:14},section:{fontSize:15,color:p.secondary,marginTop:4,paddingHorizontal:4},flex:{flex:1},itemRow:{minHeight:72,flexDirection:"row",alignItems:"center",gap:8,paddingVertical:12},itemName:{fontSize:17,color:p.label},meta:{fontSize:13,color:p.secondary,marginVertical:2},divider:{borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:p.separator},editor:{paddingBottom:14,gap:12},portions:{flexDirection:"row",gap:8},portionButton:{flex:1,alignItems:"center",paddingVertical:9,borderRadius:9,backgroundColor:p.bg},portionText:{color:p.tint,fontWeight:"700"},remove:{color:p.danger,fontSize:16,textAlign:"center"},empty:{paddingVertical:20,textAlign:"center",color:p.secondary},add:{minHeight:50,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:6,borderRadius:14,backgroundColor:p.card},addText:{fontSize:17,fontWeight:"600",color:p.tint},secondaryButton:{minHeight:50,alignItems:"center",justifyContent:"center",borderRadius:14,backgroundColor:p.card},secondaryText:{fontSize:16,color:p.tint}});
+const createStyles = (theme: AppTheme) => {
+  const p = createPalette(theme.isDark);
+  return StyleSheet.create({screen:{flex:1,backgroundColor:p.bg},center:{flex:1,alignItems:"center",justifyContent:"center",gap:16,backgroundColor:p.bg},header:{flexDirection:"row",alignItems:"center",justifyContent:"space-between",paddingHorizontal:20,paddingBottom:12},headerTitle:{fontSize:20,fontWeight:"700",color:p.label},done:{fontSize:17,fontWeight:"600",color:p.tint},content:{padding:16,gap:14},title:{fontSize:20,fontWeight:"700"},link:{fontSize:17,color:p.tint},nameInput:{fontSize:28,fontWeight:"700",color:p.label,backgroundColor:p.card,borderRadius:14,padding:16},card:{backgroundColor:p.card,borderRadius:14,paddingHorizontal:14},count:{fontSize:15,color:p.secondary,paddingTop:14},section:{fontSize:15,color:p.secondary,marginTop:4,paddingHorizontal:4},flex:{flex:1},itemRow:{minHeight:72,flexDirection:"row",alignItems:"center",gap:8,paddingVertical:12},itemName:{fontSize:17,color:p.label},meta:{fontSize:13,color:p.secondary,marginVertical:2},divider:{borderTopWidth:StyleSheet.hairlineWidth,borderTopColor:p.separator},editor:{paddingBottom:14,gap:12},portions:{flexDirection:"row",gap:8},portionButton:{flex:1,alignItems:"center",paddingVertical:9,borderRadius:9,backgroundColor:p.bg},portionText:{color:p.tint,fontWeight:"700"},remove:{color:p.danger,fontSize:16,textAlign:"center"},empty:{paddingVertical:20,textAlign:"center",color:p.secondary},add:{minHeight:50,flexDirection:"row",alignItems:"center",justifyContent:"center",gap:6,borderRadius:14,backgroundColor:p.card},addText:{fontSize:17,fontWeight:"600",color:p.tint},secondaryButton:{minHeight:50,alignItems:"center",justifyContent:"center",borderRadius:14,backgroundColor:p.card},secondaryText:{fontSize:16,color:p.tint}});
+};

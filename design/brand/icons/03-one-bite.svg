@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+<defs><mask id="bite"><rect width="1024" height="1024" fill="white"/><circle cx="800" cy="225" r="64" fill="black"/><circle cx="780" cy="286" r="48" fill="black"/></mask></defs><rect width="1024" height="1024" fill="#FAF1E2"/>
+<g mask="url(#bite)"><g transform="translate(190 218) scale(2.1517513845285547) translate(0 0)"><path d="M0 283.49H283.46V170.1H163.05C151.27 170.1 141.72 160.55 141.72 148.77V134.73C141.72 122.95 151.27 113.4 163.05 113.4H283.46V0.03H0V283.49Z" fill="#FF8400"/></g></g>
+<rect x="828" y="210" width="55" height="55" rx="15" transform="rotate(18 855 237)" fill="#FF8400"/>
+<rect x="860" y="310" width="30" height="30" rx="8" transform="rotate(-14 875 325)" fill="#E76618"/>
+</svg>

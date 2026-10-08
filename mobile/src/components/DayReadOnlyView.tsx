@@ -1,4 +1,6 @@
-import { Platform, PlatformColor, ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
+import { bentoColor, getBrandPalette } from "../theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../theme/useAppTheme";
+import { ScrollView, StyleSheet, Text, View, type StyleProp, type ViewStyle } from "react-native";
 import type { FoodEntry, UserSettings } from "@caloric/data-model";
 import { MEAL_TIMES, type MealKey, normalizeMeal } from "../meals";
 import { formatPortionLabel, sanitizePortion } from "../portion";
@@ -8,21 +10,22 @@ import { hasCalorieMacroMismatch } from "../nutritionConsistency";
 import { CalorieMismatchBadge } from "./CalorieMismatchBadge";
 import { MacroBadges } from "./MacroBadges";
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
-const palette = {
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  return {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
   card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: "#2563EB",
+  tint: getBrandPalette(isDark).tint,
   macroProtein: macroColors.protein.background,
   macroCarbs: macroColors.carbs.background,
   macroFat: macroColors.fat.background,
 };
+}
 
 export type DayMealEntry = {
   id: string;
@@ -173,6 +176,8 @@ export function buildDayViewData({
 }
 
 export function DaySummaryCard({ view }: { view: DayViewData }) {
+  const { styles } = useThemedStyles(createStyles);
+
   return (
     <View style={styles.summaryCard}>
       <Text style={styles.summaryLabel}>Calories</Text>
@@ -253,6 +258,8 @@ export function ReadOnlyDayView({
   topInset?: number;
   bottomInset?: number;
 }) {
+  const { styles } = useThemedStyles(createStyles);
+
   const header = (
     <View style={styles.listHeaderOuter}>
       <View style={styles.listHeader}>
@@ -348,7 +355,9 @@ export function ReadOnlyDayView({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+    const palette = createPalette(theme.isDark);
+  return StyleSheet.create({
   contentContainer: {
     paddingHorizontal: 16,
   },
@@ -619,3 +628,4 @@ const styles = StyleSheet.create({
     color: palette.secondaryLabel,
   },
 });
+};

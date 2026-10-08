@@ -1,0 +1,4 @@
+CALORIC_BACKEND_URL = https:/$()/backend.caloric.mati.lol
+DEVELOPMENT_TEAM =
+#include? "Local.xcconfig"
+#include? "Signing.xcconfig"

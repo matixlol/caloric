@@ -1,9 +1,9 @@
+import { bentoColor, brandInk, getBrandPalette } from "../src/theme/brandPalette";
+import { useThemedStyles, type AppTheme } from "../src/theme/useAppTheme";
 import Ionicons from "@expo/vector-icons/Ionicons";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { useState } from "react";
 import {
-  Platform,
-  PlatformColor,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -30,21 +30,22 @@ import { macroColors } from "../src/theme/macroColors";
 import { MacroBadges } from "../src/components/MacroBadges";
 import { aggregateRecipeNutrition } from "../src/recipes";
 
-const iosColor = (name: string, fallback: string) =>
-  Platform.OS === "ios" ? PlatformColor(name) : fallback;
 
-const palette = {
+function createPalette(isDark: boolean) {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, isDark);
+  return {
   background: iosColor("systemGroupedBackground", "#F3F4F6"),
   card: iosColor("secondarySystemGroupedBackground", "#FFFFFF"),
   label: iosColor("label", "#111827"),
   secondaryLabel: iosColor("secondaryLabel", "#6B7280"),
   tertiaryLabel: iosColor("tertiaryLabel", "#9CA3AF"),
   separator: iosColor("separator", "#E5E7EB"),
-  tint: "#2563EB",
+  tint: getBrandPalette(isDark).tint,
   macroProtein: macroColors.protein.background,
   macroCarbs: macroColors.carbs.background,
   macroFat: macroColors.fat.background,
 };
+}
 
 const MIN_MACRO_SECTION_SHARE = 0.2;
 
@@ -126,6 +127,9 @@ type QuickAddEditorProps = {
 };
 
 function QuickAddEditor({ entry, onUpdateNutrition }: QuickAddEditorProps) {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   const [caloriesText, setCaloriesText] = useState(() =>
     formatCaloriesInput(entry.nutrition?.calories),
   );
@@ -240,6 +244,9 @@ function QuickAddEditor({ entry, onUpdateNutrition }: QuickAddEditorProps) {
 }
 
 export default function EntryDetailsScreen() {
+  const { styles, isDark } = useThemedStyles(createStyles);
+  const palette = createPalette(isDark);
+
   const insets = useSafeAreaInsets();
   const router = useRouter();
   const params = useLocalSearchParams<{ entryId?: string | string[] }>();
@@ -518,7 +525,10 @@ export default function EntryDetailsScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (theme: AppTheme) => {
+  const iosColor = (name: string, fallback: string) => bentoColor(name, fallback, theme.isDark);
+  const palette = createPalette(theme.isDark);
+  return StyleSheet.create({
   screen: {
     flex: 1,
     backgroundColor: palette.background,
@@ -748,7 +758,7 @@ const styles = StyleSheet.create({
     color: "#FFFFFF",
   },
   macroSectionTextDark: {
-    color: "#111827",
+    color: brandInk,
   },
   macroSectionSubTextLight: {
     color: "rgba(255,255,255,0.86)",
@@ -768,7 +778,7 @@ const styles = StyleSheet.create({
     fontSize: 17,
     lineHeight: 22,
     fontWeight: "600",
-    color: "#FFFFFF",
+    color: getBrandPalette(theme.isDark).buttonText,
   },
   errorContainer: {
     flex: 1,
@@ -788,3 +798,4 @@ const styles = StyleSheet.create({
     color: palette.secondaryLabel,
   },
 });
+};
