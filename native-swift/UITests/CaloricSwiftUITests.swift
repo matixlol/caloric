@@ -35,6 +35,18 @@ final class CaloricSwiftUITests: XCTestCase {
         add(attachment)
     }
 
+    func testHomeScrollPerformance() {
+        let app = launch(["-seed-long-diary"])
+        let options = XCTMeasureOptions()
+        options.iterationCount = 5
+        measure(metrics: [XCTCPUMetric(application: app), XCTOSSignpostMetric.scrollingAndDecelerationMetric], options: options) {
+            let start = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.72))
+            let end = app.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.25))
+            start.press(forDuration: 0.01, thenDragTo: end, withVelocity: .fast, thenHoldForDuration: 0)
+            end.press(forDuration: 0.01, thenDragTo: start, withVelocity: .fast, thenHoldForDuration: 0)
+        }
+    }
+
     func testDiaryPortionEditingSearchAndCurrentNavigation() {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing", "-seed-food"]

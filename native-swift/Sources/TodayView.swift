@@ -14,7 +14,7 @@ struct TodayView: View {
     @State private var currentDate = Date()
     @Environment(\.scenePhase) private var scenePhase
     @State private var sheet: DiarySheet?
-    @State private var layout = DiaryLayout()
+    @State private var geometry = DiaryGeometry()
     @State private var drag: DiaryDragSession?
     @State private var mealAdd: MealAddSession?
     @State private var lastDragEndedAt = -Double.infinity
@@ -45,7 +45,7 @@ struct TodayView: View {
                 LiquidGlassGroup {
                     VStack(spacing: 10) {
                         ForEach(Meal.allCases) { meal in
-                            MealSection(meal: meal, entries: displayedEntries(in: meal), day: day,
+                            MealSection(meal: meal, entries: displayedEntries(in: meal), day: day, geometry: geometry,
                                         draggedID: drag?.row.id, targeted: drag?.meal == meal,
                                         minimumHeight: drag?.row.data.meal == meal && drag?.meal != meal ? drag?.sourceMealHeight ?? 0 : 0,
                                         addEnabled: visible && sheet == nil && drag == nil && scenePhase == .active,
@@ -62,8 +62,7 @@ struct TodayView: View {
                 if let error = store.syncError { Text(error).font(.caption).foregroundStyle(.secondary) }
             }.padding(.horizontal, 16).padding(.bottom, 100)
         }.background(Theme.background).scrollIndicators(.hidden)
-            .onPreferenceChange(DiaryLayoutKey.self) { layout = $0 }
-            .background(DiaryDragGesture(enabled: visible && sheet == nil, rowFrames: layout.rows,
+            .background(DiaryDragGesture(enabled: visible && sheet == nil, layout: { geometry.snapshot() },
                                          began: beginDrag, moved: moveDrag, ended: endDrag))
             .overlay {
                 GeometryReader { geometry in
@@ -147,6 +146,7 @@ struct TodayView: View {
         sheet = .entry(id)
     }
     private func beginDrag(id: String, point: CGPoint) {
+        let layout = geometry.snapshot()
         guard let row = store.entries.first(where: { $0.id == id && $0.data.dateKey == day }),
               let frame = layout.rows[id] else { return }
         let entries = store.entries(on: day, meal: row.data.meal)
@@ -159,6 +159,7 @@ struct TodayView: View {
     }
     private func moveDrag(point: CGPoint) {
         guard var session = drag else { return }
+        let layout = geometry.snapshot()
         session.point = point
         let meal = Meal.allCases.min { a, b in
             distance(point.y, to: layout.meals[a]) < distance(point.y, to: layout.meals[b])
@@ -237,12 +238,12 @@ struct NutritionSummary: View {
 }
 
 private struct MealSection: View {
-    @State private var rowFrames: [String: CGRect] = [:]
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(AppStore.self) private var store
     let meal: Meal
     let entries: [FoodRecord]
     let day: String
+    let geometry: DiaryGeometry
     let draggedID: String?
     let targeted: Bool
     let minimumHeight: CGFloat
@@ -275,23 +276,19 @@ private struct MealSection: View {
                     Text(meal.emptyCopy).font(.system(size: 14)).foregroundStyle(.secondary)
                         .padding(.horizontal, 12).padding(.vertical, 18)
                 } else {
-                    NativeFoodList(rows: entries, meal: meal, draggedID: draggedID,
+                    NativeFoodList(rows: entries, meal: meal, draggedID: draggedID, geometry: geometry,
                                    edit: edit,
                                    delete: { id in
                                        withAnimation(reduceMotion ? nil : .easeInOut(duration: 0.25)) {
                                            store.perform { try store.delete(id: id) }
                                        }
                                    },
-                                   move: { id, destination in store.perform { try store.move(id: id, to: destination, day: day) } },
-                                   framesChanged: { rowFrames = $0 })
-                        .preference(key: DiaryLayoutKey.self, value: DiaryLayout(rows: rowFrames))
+                                   move: { id, destination in store.perform { try store.move(id: id, to: destination, day: day) } })
                 }
             }.frame(minHeight: minimumHeight, alignment: .top)
                 .background(Theme.card, in: RoundedRectangle(cornerRadius: 14)).clipShape(RoundedRectangle(cornerRadius: 14))
                 .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(targeted ? Theme.tint.opacity(0.4) : .clear, lineWidth: 2))
-                .background(GeometryReader { geometry in
-                    Color.clear.preference(key: DiaryLayoutKey.self, value: DiaryLayout(meals: [meal: geometry.frame(in: .global)]))
-                })
+                .background(DiaryMealGeometry(meal: meal, geometry: geometry))
         }
     }
 }

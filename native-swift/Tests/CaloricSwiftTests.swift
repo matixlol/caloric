@@ -1,4 +1,5 @@
 import XCTest
+import UIKit
 @testable import CaloricSwift
 
 @MainActor
@@ -20,6 +21,42 @@ final class CaloricSwiftTests: XCTestCase {
         XCTAssertEqual(UserSettings().proteinGoal, 188)
         XCTAssertEqual(UserSettings().fatGoal, 56)
         XCTAssertFalse(UserSettings(calorieGoal: 2500, macroProteinPct: 20, macroCarbsPct: 50, macroFatPct: 20).isValid)
+    }
+
+    func testDragGeometryReadsCurrentScrollPositionAndRowOrderOnDemand() throws {
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 320, height: 640))
+        let scroll = UIScrollView(frame: window.bounds)
+        scroll.contentSize = CGSize(width: 320, height: 1200)
+        window.addSubview(scroll)
+        let meal = UIView(frame: CGRect(x: 20, y: 400, width: 280, height: 200))
+        scroll.addSubview(meal)
+        let table = UITableView(frame: CGRect(x: 0, y: 60, width: 280, height: 100), style: .plain)
+        let source = GeometryTableSource()
+        table.dataSource = source
+        table.rowHeight = 50
+        table.isScrollEnabled = false
+        meal.addSubview(table)
+        table.reloadData(); table.layoutIfNeeded()
+        let geometry = DiaryGeometry()
+        geometry.registerMeal(.lunch, view: meal)
+        geometry.registerRows(meal: .lunch, table: table, ids: ["first", "second"])
+        let before = geometry.snapshot()
+        scroll.contentOffset.y = 125
+        let after = geometry.snapshot()
+        XCTAssertEqual(try XCTUnwrap(after.rows["first"]).minY, try XCTUnwrap(before.rows["first"]).minY - 125, accuracy: 0.1)
+        XCTAssertEqual(try XCTUnwrap(after.meals[.lunch]).minY, try XCTUnwrap(before.meals[.lunch]).minY - 125, accuracy: 0.1)
+        geometry.registerRows(meal: .lunch, table: table, ids: ["second", "first"])
+        let reordered = geometry.snapshot()
+        XCTAssertEqual(reordered.rows["second"], after.rows["first"])
+        XCTAssertEqual(reordered.rows["first"], after.rows["second"])
+        geometry.removeRows(meal: .lunch, table: table)
+        geometry.removeMeal(.lunch, view: meal)
+        XCTAssertEqual(geometry.snapshot(), DiaryLayout())
+    }
+
+    private final class GeometryTableSource: NSObject, UITableViewDataSource {
+        func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { 2 }
+        func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell { UITableViewCell() }
     }
     func testBackendPayloadDoesNotIncludeLocalDirtyFlag() throws {
         let entry = FoodEntry(meal: .lunch, foodName: "Chicken", portion: 1, nutrition: food().nutrition, createdAt: 1, dateKey: "2026-10-07", sortIndex: 0)

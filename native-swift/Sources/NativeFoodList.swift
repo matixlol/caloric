@@ -6,14 +6,14 @@ struct NativeFoodList: UIViewRepresentable {
     let rows: [FoodRecord]
     let meal: Meal
     let draggedID: String?
+    let geometry: DiaryGeometry
     let edit: (String) -> Void
     let delete: (String) -> Void
     let move: (String, Meal) -> Void
-    let framesChanged: ([String: CGRect]) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(parent: self) }
-    func makeUIView(context: Context) -> FoodTableView {
-        let table = FoodTableView(frame: .zero, style: .plain)
+    func makeUIView(context: Context) -> UITableView {
+        let table = UITableView(frame: .zero, style: .plain)
         table.backgroundColor = .clear
         table.isScrollEnabled = false
         table.showsVerticalScrollIndicator = false
@@ -25,11 +25,10 @@ struct NativeFoodList: UIViewRepresentable {
         table.register(UITableViewCell.self, forCellReuseIdentifier: "food")
         table.delegate = context.coordinator
         table.dataSource = context.coordinator
-        table.layoutChanged = { [weak coordinator = context.coordinator] in coordinator?.reportFrames() }
-        context.coordinator.table = table
+        geometry.registerRows(meal: meal, table: table, ids: rows.map(\.id))
         return table
     }
-    func updateUIView(_ table: FoodTableView, context: Context) {
+    func updateUIView(_ table: UITableView, context: Context) {
         let coordinator = context.coordinator
         let previous = coordinator.parent.rows
         let appearanceChanged = coordinator.parent.draggedID != draggedID || coordinator.parent.meal != meal
@@ -54,29 +53,19 @@ struct NativeFoodList: UIViewRepresentable {
             }
         }
         if appearanceChanged || previous != rows { table.setNeedsLayout() }
+        geometry.registerRows(meal: meal, table: table, ids: rows.map(\.id))
     }
-    func sizeThatFits(_ proposal: ProposedViewSize, uiView: FoodTableView, context: Context) -> CGSize? {
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView: UITableView, context: Context) -> CGSize? {
         guard let width = proposal.width, width > 0 else { return nil }
         let height = rows.reduce(CGFloat.zero) { $0 + context.coordinator.height(for: $1, width: width) }
         return CGSize(width: width, height: height)
     }
-    static func dismantleUIView(_ table: FoodTableView, coordinator: Coordinator) {
-        coordinator.scrollObservation = nil
-        table.layoutChanged = nil
-    }
-
-    final class FoodTableView: UITableView {
-        var layoutChanged: (() -> Void)?
-        override func layoutSubviews() { super.layoutSubviews(); layoutChanged?() }
-        override func didMoveToWindow() { super.didMoveToWindow(); layoutChanged?() }
+    static func dismantleUIView(_ table: UITableView, coordinator: Coordinator) {
+        coordinator.parent.geometry.removeRows(meal: coordinator.parent.meal, table: table)
     }
 
     final class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate {
         var parent: NativeFoodList
-        weak var table: FoodTableView?
-        var scrollObservation: NSKeyValueObservation?
-        private weak var observedScroll: UIScrollView?
-        private var lastFrames: [String: CGRect] = [:]
         private var heightCache: [String: (FoodRecord, CGFloat, CGFloat)] = [:]
         init(parent: NativeFoodList) { self.parent = parent }
         func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { parent.rows.count }
@@ -138,29 +127,6 @@ struct NativeFoodList: UIViewRepresentable {
             let actions = UISwipeActionsConfiguration(actions: [delete])
             actions.performsFirstActionWithFullSwipe = true
             return actions
-        }
-        func reportFrames() {
-            guard let table, let window = table.window else { return }
-            // The outer scroll view changes global row positions without relaying out cells.
-            var ancestor = table.superview
-            var outer: UIScrollView?
-            while let view = ancestor {
-                if let scroll = view as? UIScrollView { outer = scroll; break }
-                ancestor = view.superview
-            }
-            if observedScroll !== outer {
-                observedScroll = outer
-                scrollObservation = outer?.observe(\.contentOffset, options: [.new]) { [weak self] _, _ in self?.reportFrames() }
-            }
-            let frames = Dictionary(uniqueKeysWithValues: parent.rows.enumerated().map { index, row in
-                (row.id, table.convert(table.rectForRow(at: IndexPath(row: index, section: 0)), to: window))
-            })
-            guard frames != lastFrames else { return }
-            lastFrames = frames
-            DispatchQueue.main.async { [weak self] in
-                guard let self, self.lastFrames == frames else { return }
-                self.parent.framesChanged(frames)
-            }
         }
     }
 }

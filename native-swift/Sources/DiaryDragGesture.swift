@@ -5,7 +5,7 @@ import UIKit
 /// It never starts an iOS text/link drag session or creates a system drag preview.
 struct DiaryDragGesture: UIViewRepresentable {
     var enabled: Bool
-    var rowFrames: [String: CGRect]
+    var layout: () -> DiaryLayout
     var bottomExclusion: CGFloat = 76
     var began: (String, CGPoint) -> Void
     var moved: (CGPoint) -> Void
@@ -65,7 +65,7 @@ struct DiaryDragGesture: UIViewRepresentable {
                 touchedView = current.superview
             }
             let point = touch.location(in: window)
-            guard let row = parent.rowFrames.first(where: { $0.value.contains(point) }) else { return false }
+            guard let row = parent.layout().rows.first(where: { $0.value.contains(point) }) else { return false }
             sourceID = row.key
             var view = touch.view
             scroll = nil
@@ -93,7 +93,8 @@ struct DiaryDragGesture: UIViewRepresentable {
                 parent.began(sourceID, point)
                 lastScrollTimestamp = 0
                 displayLink = CADisplayLink(target: self, selector: #selector(autoScroll))
-                displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: 30, maximum: 60, preferred: 60)
+                let maximumFPS = Float(window.screen.maximumFramesPerSecond)
+                displayLink?.preferredFrameRateRange = CAFrameRateRange(minimum: min(60, maximumFPS), maximum: maximumFPS, preferred: maximumFPS)
                 displayLink?.add(to: .main, forMode: .common)
             case .changed: if active { parent.moved(point) }
             case .ended:
@@ -138,11 +139,47 @@ struct DiaryLayout: Equatable {
     var meals: [Meal: CGRect] = [:]
 }
 
-struct DiaryLayoutKey: PreferenceKey {
-    static var defaultValue = DiaryLayout()
-    static func reduce(value: inout DiaryLayout, nextValue: () -> DiaryLayout) {
-        let next = nextValue()
-        value.rows.merge(next.rows) { _, new in new }
-        value.meals.merge(next.meals) { _, new in new }
+/// Read native geometry only when a drag needs it. Scrolling never publishes
+/// coordinates into SwiftUI state or triggers a diary layout / body update.
+final class DiaryGeometry {
+    private struct MealView { weak var view: UIView? }
+    private struct RowsView { weak var table: UITableView?; let ids: [String] }
+    private var meals: [Meal: MealView] = [:]
+    private var rows: [Meal: RowsView] = [:]
+
+    func registerMeal(_ meal: Meal, view: UIView) { meals[meal] = MealView(view: view) }
+    func removeMeal(_ meal: Meal, view: UIView) { if meals[meal]?.view === view { meals[meal] = nil } }
+    func registerRows(meal: Meal, table: UITableView, ids: [String]) { rows[meal] = RowsView(table: table, ids: ids) }
+    func removeRows(meal: Meal, table: UITableView) { if rows[meal]?.table === table { rows[meal] = nil } }
+
+    func snapshot() -> DiaryLayout {
+        var result = DiaryLayout()
+        for (meal, reference) in meals {
+            guard let view = reference.view, let window = view.window else { continue }
+            result.meals[meal] = view.convert(view.bounds, to: window)
+        }
+        for reference in rows.values {
+            guard let table = reference.table, let window = table.window else { continue }
+            for (index, id) in reference.ids.enumerated() where index < table.numberOfRows(inSection: 0) {
+                result.rows[id] = table.convert(table.rectForRow(at: IndexPath(row: index, section: 0)), to: window)
+            }
+        }
+        return result
     }
+}
+
+struct DiaryMealGeometry: UIViewRepresentable {
+    let meal: Meal
+    let geometry: DiaryGeometry
+    func makeUIView(context: Context) -> UIView {
+        let view = UIView()
+        view.isUserInteractionEnabled = false
+        view.accessibilityElementsHidden = true
+        geometry.registerMeal(meal, view: view)
+        return view
+    }
+    func updateUIView(_ view: UIView, context: Context) { geometry.registerMeal(meal, view: view) }
+    func makeCoordinator() -> Coordinator { Coordinator(meal: meal, geometry: geometry) }
+    static func dismantleUIView(_ view: UIView, coordinator: Coordinator) { coordinator.geometry.removeMeal(coordinator.meal, view: view) }
+    struct Coordinator { let meal: Meal; let geometry: DiaryGeometry }
 }
