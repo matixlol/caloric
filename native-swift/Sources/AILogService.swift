@@ -1,6 +1,5 @@
 import Foundation
 import Observation
-import UIKit
 
 struct ApprovalOutput: Codable, Equatable { var approved: Bool; var reason: String? }
 struct FoodSuggestion: Codable, Identifiable, Equatable {
@@ -97,14 +96,44 @@ final class AILogService {
     private var terminal = false
     private var foreground = true
     @ObservationIgnored private var task: Task<Void, Never>?
+    @ObservationIgnored private var timeoutTask: Task<Void, Never>?
+    @ObservationIgnored private var operationID: UUID?
+    @ObservationIgnored private let requestTimeout: Duration
     @ObservationIgnored private let api: APIClient
     @ObservationIgnored private let session: URLSession
-    init(api: APIClient? = nil, session: URLSession? = nil) { self.api = api ?? APIClient(); self.session = session ?? NativeAuth.makeSession() }
+    init(api: APIClient? = nil, session: URLSession? = nil, requestTimeout: Duration = .seconds(210)) {
+        self.api = api ?? APIClient(); self.session = session ?? NativeAuth.makeSession(); self.requestTimeout = requestTimeout
+    }
+
+    // URLSession's idle timeout can be kept alive by SSE heartbeats. Bound the
+    // whole operation as well, including authentication, session creation and resume.
+    private func beginOperation() -> UUID {
+        let id = UUID()
+        operationID = id
+        timeoutTask?.cancel()
+        timeoutTask = Task { [weak self, requestTimeout] in
+            do { try await Task.sleep(for: requestTimeout) } catch { return }
+            guard let self, operationID == id else { return }
+            operationID = nil
+            task?.cancel(); task = nil; timeoutTask = nil
+            activeTurnID = nil; streaming = false
+            error = "The AI response took too long. Please try again."
+        }
+        return id
+    }
+
+    private func finishOperation(_ id: UUID) {
+        guard operationID == id else { return }
+        timeoutTask?.cancel(); timeoutTask = nil; operationID = nil
+        streaming = activeTurnID != nil; task = nil
+        if Task.isCancelled, foreground, activeTurnID != nil { setForeground(true) }
+    }
 
     func reset(accountID: String?) {
         guard self.accountID != accountID else { return }
+        operationID = nil; timeoutTask?.cancel(); timeoutTask = nil
         task?.cancel(); task = nil; self.accountID = accountID; sessionID = nil; messages = []; streaming = false; error = nil
-        activeTurnID = nil; appliedSequence = -1; activeAssistantID = nil; activeUserMessageID = nil
+        activeTurnID = nil; appliedSequence = -1; activeAssistantID = nil; activeUserMessageID = nil; terminal = false
     }
     func submit(_ text: String, store: AppStore, audio: URL? = nil, duration: String? = nil) {
         guard !streaming, accountID != nil else { return }
@@ -112,12 +141,10 @@ final class AILogService {
         messages.append(message); streaming = true; error = nil
         activeTurnID = nil; appliedSequence = -1; activeAssistantID = nil; activeUserMessageID = message.id; terminal = false
         let activeAccount = accountID
+        let operation = beginOperation()
         task = Task {
             defer {
-                if accountID == activeAccount {
-                    streaming = activeTurnID != nil; task = nil
-                    if Task.isCancelled, foreground, activeTurnID != nil { setForeground(true) }
-                }
+                finishOperation(operation)
                 if let audio { try? FileManager.default.removeItem(at: audio) }
             }
             do {
@@ -134,7 +161,7 @@ final class AILogService {
                     let request = try await api.request("ai/session", method: "POST", body: JSONEncoder().encode(Context(recentLogs: hints)), expectedUserID: activeAccount)
                     let response: Session = try await api.send(request)
                     try Task.checkCancellation()
-                    guard accountID == activeAccount else { return }
+                    guard accountID == activeAccount, operationID == operation else { return }
                     sessionID = response.sessionId
                 }
                 guard let sessionID else { return }
@@ -155,10 +182,10 @@ final class AILogService {
                     request = try await api.request("ai/turn", method: "POST", body: JSONEncoder().encode(Turn(sessionId: sessionID, action: .init(message: text))), expectedUserID: activeAccount)
                 }
                 request.setValue("text/event-stream", forHTTPHeaderField: "Accept")
-                try await consumeWithResume(original: request, userMessageID: message.id, account: activeAccount)
+                try await consumeWithResume(original: request, userMessageID: message.id, account: activeAccount, operation: operation)
             } catch is CancellationError { }
             catch {
-                if accountID == activeAccount { activeTurnID = nil; self.error = "Could not complete the AI request. \(error.localizedDescription)" }
+                if !Task.isCancelled, accountID == activeAccount, operationID == operation { activeTurnID = nil; self.error = "Could not complete the AI request. \(error.localizedDescription)" }
             }
         }
     }
@@ -169,6 +196,7 @@ final class AILogService {
         switch payload.type {
         case "turn": activeTurnID = payload.turnId
         case "status": if payload.status == "ready" { terminal = true; activeTurnID = nil }
+        case "done": terminal = true; activeTurnID = nil
         case "event": if let event = payload.event { apply(event) }
         case "resolved-user-message":
             if let text = payload.resolvedUserMessage, let i = messages.firstIndex(where: { $0.id == userMessageID }) {
@@ -197,11 +225,11 @@ final class AILogService {
         default: break
         }
     }
-    private func consumeWithResume(original: URLRequest?, userMessageID: String, account: String?) async throws {
+    private func consumeWithResume(original: URLRequest?, userMessageID: String, account: String?, operation: UUID) async throws {
         var lastError: Error = URLError(.networkConnectionLost)
         for attempt in 0...3 {
             try Task.checkCancellation()
-            guard accountID == account else { return }
+            guard accountID == account, operationID == operation else { return }
             if attempt > 0 { try await Task.sleep(for: .milliseconds(500 * attempt)) }
             do {
                 let request: URLRequest
@@ -214,20 +242,32 @@ final class AILogService {
                 else { throw lastError }
                 var (bytes, response) = try await session.bytes(for: request)
                 if (response as? HTTPURLResponse)?.statusCode == 401 {
+                    bytes.task.cancel()
                     (bytes, response) = try await session.bytes(for: api.reauthenticate(request, userID: account))
                 }
+                defer { bytes.task.cancel() }
                 if (response as? HTTPURLResponse)?.statusCode == 404 { sessionID = nil }
                 try APIClient.validate(response)
                 var decoder = SSEByteDecoder()
                 for try await byte in bytes {
-                    try Task.checkCancellation(); guard accountID == account else { return }
-                    if let frame = decoder.append(byte) { try process(frame, userMessageID: userMessageID) }
+                    try Task.checkCancellation(); guard accountID == account, operationID == operation else { return }
+                    if let frame = decoder.append(byte) {
+                        try process(frame, userMessageID: userMessageID)
+                        // Completion is an SSE event, not transport EOF. A proxy
+                        // can leave the body open after the server finishes.
+                        if terminal { return }
+                    }
                 }
                 if let frame = decoder.flush() { try process(frame, userMessageID: userMessageID) }
                 if terminal { return }
                 lastError = URLError(.networkConnectionLost)
             } catch is CancellationError { throw CancellationError() }
-            catch { lastError = error; if terminal || (error as? APIError) != nil { throw error } }
+            catch {
+                // URLSession may report task cancellation as URLError.cancelled.
+                // Preserve the detached turn when the app backgrounds.
+                try Task.checkCancellation()
+                lastError = error; if terminal || (error as? APIError) != nil { throw error }
+            }
             guard activeTurnID != nil else { throw lastError }
             if !foreground { return }
         }
@@ -238,16 +278,14 @@ final class AILogService {
         if !active { task?.cancel(); return }
         guard activeTurnID != nil, task == nil, let userMessageID = activeUserMessageID else { return }
         let account = accountID
+        let operation = beginOperation()
         task = Task {
             defer {
-                if accountID == account {
-                    streaming = activeTurnID != nil; task = nil
-                    if Task.isCancelled, foreground, activeTurnID != nil { setForeground(true) }
-                }
+                finishOperation(operation)
             }
-            do { try await consumeWithResume(original: nil, userMessageID: userMessageID, account: account) }
+            do { try await consumeWithResume(original: nil, userMessageID: userMessageID, account: account, operation: operation) }
             catch is CancellationError { }
-            catch { if accountID == account { activeTurnID = nil; self.error = "Could not restore the AI response. \(error.localizedDescription)" } }
+            catch { if !Task.isCancelled, accountID == account, operationID == operation { activeTurnID = nil; self.error = "Could not restore the AI response. \(error.localizedDescription)" } }
         }
     }
     func approve(messageID: String, suggestionID: String, approved: Bool, store: AppStore) {

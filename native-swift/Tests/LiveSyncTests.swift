@@ -131,4 +131,67 @@ final class LiveSyncTests: XCTestCase {
         XCTAssertNil(chat.activeTurnID)
         chat.reset(accountID: nil)
     }
+    func testProductionAIFoodSuggestionAndLocalApproval() async throws {
+        guard let path = ProcessInfo.processInfo.environment["CALORIC_LIVE_AUTH_FILE"] else { throw XCTSkip("Explicit verification account required.") }
+        let auth = try await login(path)
+        let id = try XCTUnwrap(auth.user?.id)
+        let api = APIClient { user, refresh in try await auth.cookie(expectedUserID: user, refresh: refresh) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = AppStore(directory: folder, syncEnabled: false)
+        await store.activate(userID: id)
+        let chat = AILogService(api: api); chat.reset(accountID: id)
+        chat.submit("Comí 100 gramos de pechuga de pollo al almuerzo", store: store)
+        let deadline = Date().addingTimeInterval(90)
+        while chat.streaming, Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(chat.streaming)
+        XCTAssertNil(chat.error)
+        XCTAssertTrue(chat.messages.contains { $0.kind == "search" })
+        let approval = try XCTUnwrap(chat.messages.first { $0.kind == "approval" })
+        let suggestion = try XCTUnwrap(approval.suggestions.first)
+        XCTAssertEqual(suggestion.meal, .lunch)
+        XCTAssertTrue(store.entries.isEmpty)
+        chat.approve(messageID: approval.id, suggestionID: suggestion.id, approved: true, store: store)
+        XCTAssertEqual(store.entries.count, 1)
+        XCTAssertEqual(store.entries.first?.data.foodName, suggestion.food.name)
+        chat.approve(messageID: approval.id, suggestionID: suggestion.id, approved: true, store: store)
+        XCTAssertEqual(store.entries.count, 1, "Approval must not add the same suggestion twice.")
+        chat.submit("No busques alimentos. Respondé exactamente: segunda respuesta correcta", store: store)
+        let nextDeadline = Date().addingTimeInterval(30)
+        while chat.streaming, Date() < nextDeadline { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(chat.streaming)
+        XCTAssertNil(chat.error)
+        XCTAssertTrue(chat.messages.last?.text.contains("segunda respuesta correcta") == true)
+        chat.reset(accountID: nil)
+        await store.activate(userID: nil)
+        try? FileManager.default.removeItem(at: folder)
+    }
+
+    func testProductionAIVoiceUnderstanding() async throws {
+        guard let path = ProcessInfo.processInfo.environment["CALORIC_LIVE_AUTH_FILE"],
+              let audioPath = ProcessInfo.processInfo.environment["CALORIC_LIVE_AUDIO_FILE"] else { throw XCTSkip("Explicit verification account and synthetic audio fixture required.") }
+        let auth = try await login(path)
+        let id = try XCTUnwrap(auth.user?.id)
+        let api = APIClient { user, refresh in try await auth.cookie(expectedUserID: user, refresh: refresh) }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let store = AppStore(directory: folder, syncEnabled: false)
+        await store.activate(userID: id)
+        let audio = folder.appendingPathComponent("voice.m4a")
+        try FileManager.default.copyItem(at: URL(fileURLWithPath: audioPath), to: audio)
+        let chat = AILogService(api: api); chat.reset(accountID: id)
+        chat.submit("", store: store, audio: audio, duration: "0:04")
+        let deadline = Date().addingTimeInterval(90)
+        while chat.streaming, Date() < deadline { try await Task.sleep(for: .milliseconds(100)) }
+        XCTAssertFalse(chat.streaming)
+        XCTAssertNil(chat.error)
+        // The current backend consumes audio directly; it does not send a
+        // transcript event for voice-only messages.
+        XCTAssertEqual(chat.messages.first?.kind, "audio")
+        XCTAssertTrue(chat.messages.contains { $0.role == "assistant" && $0.text.lowercased().contains("voice test successful") })
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audio.path))
+        XCTAssertTrue(store.entries.isEmpty)
+        chat.reset(accountID: nil)
+        await store.activate(userID: nil)
+        try? FileManager.default.removeItem(at: folder)
+    }
+
 }

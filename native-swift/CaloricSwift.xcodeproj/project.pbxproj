@@ -25,6 +25,7 @@
 		65D3CCC4583BD1CFE02297A6 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = E25F2C4D4FE157B97347E70B /* SignInView.swift */; };
 		69A5D3D5D03462F654400DE7 /* BarcodeScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D5ECB24F30F1B2C955FE595 /* BarcodeScanner.swift */; };
 		6E39695E4AE57ECF7DD3E784 /* TodayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 523734D5CC7C6C037BC1E838 /* TodayView.swift */; };
+		75115521BED988389615D28B /* AILogTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = C3ECBC84B7115C46E15CF05F /* AILogTests.swift */; };
 		75740A3E6D3340A182338E4A /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 28990BB76C4B762F326E2ADB /* PrivacyInfo.xcprivacy */; };
 		77A84A7D4DBF5003C7C85C11 /* NativeAuth.swift in Sources */ = {isa = PBXBuildFile; fileRef = D6B9581207B7E730C5DDE2C4 /* NativeAuth.swift */; };
 		79455E1F44CDB9BF11D01B73 /* BrandPalette.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0A881C7D66EF4AC290868078 /* BrandPalette.swift */; };
@@ -130,6 +131,7 @@
 		C0C44319AE2DB9687C97B511 /* Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		C18EF70F5263BD920C6A9A97 /* VoiceTouchControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceTouchControl.swift; sourceTree = "<group>"; };
 		C251B5E7DF9E7617A2659E31 /* CaloricSwift.entitlements */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.entitlements; path = CaloricSwift.entitlements; sourceTree = "<group>"; };
+		C3ECBC84B7115C46E15CF05F /* AILogTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = AILogTests.swift; sourceTree = "<group>"; };
 		C5F4BF41FF0DF0D02892AC9E /* EntryDetailsView.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = EntryDetailsView.swift; sourceTree = "<group>"; };
 		C6B587581121AE9A2825753F /* PortionControl.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PortionControl.swift; sourceTree = "<group>"; };
 		C83221A65E16F0BB489C0181 /* CaloricSwiftTests.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = CaloricSwiftTests.swift; sourceTree = "<group>"; };
@@ -195,6 +197,7 @@
 		2E44C5A9DBAC11253F1BBC2B /* Tests */ = {
 			isa = PBXGroup;
 			children = (
+				C3ECBC84B7115C46E15CF05F /* AILogTests.swift */,
 				F82F3A45039C673ADD81C25F /* AuthTests.swift */,
 				C83221A65E16F0BB489C0181 /* CaloricSwiftTests.swift */,
 				775F2927BF17931158E6E96C /* FeatureParityTests.swift */,
@@ -516,6 +519,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				75115521BED988389615D28B /* AILogTests.swift in Sources */,
 				2BC2ACB3C99A7DF867F08E95 /* AuthTests.swift in Sources */,
 				DE470F8696DB83E341E792D4 /* CaloricSwiftTests.swift in Sources */,
 				D5AFB8C417BF68DFF49A675D /* FeatureParityTests.swift in Sources */,
@@ -557,7 +561,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = Resources/CaloricSwift.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 17;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;
@@ -582,7 +586,7 @@
 				CLANG_ENABLE_OBJC_WEAK = NO;
 				CODE_SIGN_ENTITLEMENTS = Widget/CaloricWidget.entitlements;
 				CODE_SIGN_STYLE = Automatic;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 17;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -605,7 +609,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 17;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Widget/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 17.0;
@@ -631,7 +635,7 @@
 				"CODE_SIGN_IDENTITY[sdk=iphoneos*]" = "$(CALORIC_SIGNING_IDENTITY)";
 				CODE_SIGN_STYLE = Automatic;
 				"CODE_SIGN_STYLE[sdk=iphoneos*]" = Manual;
-				CURRENT_PROJECT_VERSION = 16;
+				CURRENT_PROJECT_VERSION = 17;
 				ENABLE_USER_SCRIPT_SANDBOXING = YES;
 				GENERATE_INFOPLIST_FILE = NO;
 				INFOPLIST_FILE = Resources/Info.plist;

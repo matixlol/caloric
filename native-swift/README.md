@@ -42,13 +42,15 @@ Production integration tests are opt-in with `CALORIC_LIVE_AUTH_FILE` pointing t
 
 ```sh
 cd native-swift
-BUILD_NUMBER=8 bash scripts/testflight.sh
+BUILD_NUMBER=17 bash scripts/testflight.sh
 ```
 
 Saved credentials stay outside the repository in `~/.config/caloric/` (directory `700`, files `600`): `apple.json` references the App Manager API key; `signing.json` references the local distribution Keychain and provisioning profiles; `railway.json` references the production project token. Never paste or commit these files. `CALORIC_APPLE_CREDENTIALS` and `CALORIC_SIGNING_CREDENTIALS` support alternate locations. `scripts/appstore-connect.mjs` signs short-lived API requests without printing the key or JWT.
 
-The release script renews/reuses the app and widget distribution profiles through the API, installs them in Xcode, archives with the saved distribution identity, verifies both signed products, and uploads with the API key. It then waits for Apple processing, sets release notes and assigns **Caloric Swift Internal**. `CALORIC_RELEASE_NOTES` can point to a text file. To finish a previously uploaded build without uploading again, run `node scripts/finish-testflight.mjs 8`.
+The release script renews/reuses the app and widget distribution profiles through the API, installs them in Xcode, archives with the saved distribution identity, verifies both signed products, and uploads with the API key. It then waits for Apple processing, sets release notes and assigns **Caloric Swift Internal**. `CALORIC_RELEASE_NOTES` can point to a text file. To finish a previously uploaded build without uploading again, run `node scripts/finish-testflight.mjs 17`.
 
 Build 5 fixed the 401 error caused by the outdated fork's login. Build 6 contains the complete feature port and the separately signed widget. Build 7 adds native Liquid Glass and iOS controls. Build 8 refines friend-card dismissal, starts voice interactions on touch down, keeps lock/cancel responsive during audio startup, separates Quick add taps from hold pickers, aligns meal labels with section headers, and removes pull to refresh and the Settings Updates section. Production Better Auth login, diary download, recipe create/update/delete, friends and interrupted AI streams have passed native integration tests.
+
+Build 17 fixes AI responses remaining on “Thinking…” after the server finishes. It closes completed streams immediately, bounds stalled requests, and protects background recovery and account changes. Verification includes HTTP regressions, native production text / food / audio requests and the real assistant UI. All 55 distinct verification checks pass; build 17 is processed and available to Caloric Swift Internal in TestFlight. See the parity document for evidence.
 
 The widget uses App Group `group.lol.mati.caloric.swift` and bundle ID `lol.mati.caloric.swift.CaloricWidget`. Daily backups use the separate `iCloud.lol.mati.caloric.swift` CloudDocuments container. Camera, microphone and iCloud behavior require verification on a device; simulator tests cover manual barcode entry and synthetic voice gestures. Native app updates ship through TestFlight.

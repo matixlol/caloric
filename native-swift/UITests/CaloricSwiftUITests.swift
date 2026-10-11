@@ -20,6 +20,54 @@ final class CaloricSwiftUITests: XCTestCase {
         capture("Better Auth native sign-in", app)
     }
 
+    func testProductionAIRespondsAndMakesFoodApprovalInteractive() throws {
+        guard let path = ProcessInfo.processInfo.environment["CALORIC_LIVE_AUTH_FILE"] else { throw XCTSkip("Explicit temporary verification account required.") }
+        struct Login: Decodable { var email: String; var password: String }
+        let login = try JSONDecoder().decode(Login.self, from: Data(contentsOf: URL(fileURLWithPath: path)))
+        guard login.email.hasPrefix("caloric-swift-check-"), login.email.hasSuffix("@verification.invalid") else { throw XCTSkip("Temporary verification account only.") }
+        let app = XCUIApplication()
+        app.launch()
+        let email = app.textFields["login-email"]
+        if email.waitForExistence(timeout: 5) {
+            app.segmentedControls.buttons["Password"].tap()
+            email.tap(); email.typeText(login.email)
+            let password = app.secureTextFields["login-password"]
+            password.tap(); password.typeText(login.password)
+            app.buttons["Sign in"].tap()
+        }
+        XCTAssertTrue(app.staticTexts["Today"].firstMatch.waitForExistence(timeout: 20))
+        let springboard = XCUIApplication(bundleIdentifier: "com.apple.springboard")
+        let notNow = springboard.buttons.matching(NSPredicate(format: "label IN %@", ["Not Now", "Ahora no"])).firstMatch
+        if notNow.waitForExistence(timeout: 3) { notNow.tap() }
+        app.buttons["Settings"].tap()
+        guard app.staticTexts[login.email].waitForExistence(timeout: 5) else { throw XCTSkip("The simulator must be signed into the isolated verification account.") }
+        app.buttons["Close Settings"].tap()
+        let composer = app.textFields["ai-composer"]
+        composer.tap(); composer.typeText("No busques alimentos. Respondé exactamente: prueba IA correcta")
+        app.buttons["Send message"].tap()
+        XCTAssertTrue(app.staticTexts["prueba IA correcta"].waitForExistence(timeout: 30))
+        XCTAssertTrue(app.staticTexts["Thinking…"].waitForNonExistence(timeout: 5))
+        capture("Production AI response finished in Swift", app)
+        composer.tap(); composer.typeText("Comí 100 gramos de pechuga de pollo al almuerzo")
+        app.buttons["Send message"].tap()
+        XCTAssertTrue(app.buttons["Approve"].firstMatch.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.staticTexts["Thinking…"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["Approve"].firstMatch.isEnabled)
+        capture("Production AI food suggestion ready to approve", app)
+        app.buttons["Approve"].firstMatch.tap()
+        XCTAssertTrue(app.staticTexts["Approved and logged."].firstMatch.waitForExistence(timeout: 5))
+        capture("Production AI approval saved in Swift diary", app)
+        app.buttons["Hide the food assistant conversation"].tap()
+        XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
+        app.buttons["Settings"].tap()
+        let signOut = app.buttons["Sign Out"].firstMatch
+        if !signOut.isHittable { app.swipeUp() }
+        signOut.tap()
+        let confirmation = try XCTUnwrap(app.buttons.matching(identifier: "Sign Out").allElementsBoundByIndex.first { $0.isHittable })
+        confirmation.tap()
+        XCTAssertTrue(app.textFields["login-email"].waitForExistence(timeout: 10))
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-ui-testing", "-seed-food"] + extra
