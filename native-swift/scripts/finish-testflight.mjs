@@ -50,7 +50,8 @@ try {
     testFlightStatus: beta?.attributes.internalBuildState, confirmedAt: new Date().toISOString(),
     nativeWidget: 'SIGNED_AND_EMBEDDED', authentication: 'BETTER_AUTH',
   }, null, 2) + '\n');
-  console.log(`Build ${version} is processed and assigned to Caloric Swift Internal (${beta?.attributes.internalBuildState || 'assigned'}).`);
+  const group = await requestApple(`/v1/betaGroups/${groupID}`);
+  console.log(`Build ${version} is processed and assigned to ${group.data.attributes.name} (${beta?.attributes.internalBuildState || 'assigned'}).`);
 } catch (error) {
   console.error(`TestFlight finalization failed: ${error.message}`);
   process.exitCode = 1;

@@ -8,8 +8,8 @@ import { execFileSync } from 'node:child_process';
 import { requestApple } from './appstore-connect.mjs';
 
 const targets = [
-  { bundle: 'lol.mati.caloric.swift', id: 'K7N3BFR584', name: 'Caloric Swift' },
-  { bundle: 'lol.mati.caloric.swift.CaloricWidget', id: 'H55574XFU9', name: 'Caloric Swift Widget' },
+  { bundle: 'lol.mati.caloric.swift', id: 'K7N3BFR584', name: 'caloric' },
+  { bundle: 'lol.mati.caloric.swift.CaloricWidget', id: 'H55574XFU9', name: 'caloric Widget' },
 ];
 const group = 'group.lol.mati.caloric.swift';
 const team = 'BQ7842UUHJ';
