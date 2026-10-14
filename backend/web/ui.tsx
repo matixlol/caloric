@@ -176,6 +176,7 @@ export function Sheet({
   onClose,
   busy = false,
   wide = false,
+  fixedHeight = false,
 }: {
   title: string;
   subtitle?: string;
@@ -183,6 +184,7 @@ export function Sheet({
   onClose: () => void;
   busy?: boolean;
   wide?: boolean;
+  fixedHeight?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [popup, setPopup] = useState<HTMLDivElement | null>(null);
@@ -210,10 +212,12 @@ export function Sheet({
     const content = popup.querySelector<HTMLElement>(".sheet-content-inner")!;
     const measure = () =>
       setHeight(
-        Math.min(
-          top.offsetHeight + content.offsetHeight,
-          parseFloat(getComputedStyle(popup).maxHeight),
-        ),
+        fixedHeight
+          ? parseFloat(getComputedStyle(popup).maxHeight)
+          : Math.min(
+              top.offsetHeight + content.offsetHeight,
+              parseFloat(getComputedStyle(popup).maxHeight),
+            ),
       );
     const observer = new ResizeObserver(measure);
     observer.observe(top);
@@ -226,7 +230,7 @@ export function Sheet({
       window.removeEventListener("resize", measure);
       window.visualViewport?.removeEventListener("resize", measure);
     };
-  }, [popup]);
+  }, [popup, fixedHeight]);
   return (
     <Drawer.Root
       open={open}

@@ -159,8 +159,15 @@ restore the saved order. There are no move buttons or reorder success toasts.
 The food and recipe Add button also matches the native gesture: hold 260 ms,
 slide upward to select ¼–3 servings, and release to add. Whole servings have
 larger targets; releasing below the dead zone cancels. A normal tap still adds
-the entered serving quantity. Motion animates measured drawer heights as content
-changes, without scaling text; reduced-motion preferences disable resizing motion.
+the entered serving quantity. Food search defaults to MyFitnessPal; Open Food
+Facts remains selectable. Scrolling near the bottom automatically fetches the
+next page, keeping existing rows and scroll position, deduplicating overlapping
+foods and stopping at the API's ten-page limit. Failed pages retain results and
+offer a retry instead of repeatedly requesting the same page. The food search
+drawer keeps a fixed viewport height across loading, results and empty/error
+states. Food details and other forms still use compact drawers. Motion animates
+measured drawer heights between forms without scaling text; reduced-motion
+preferences disable resizing motion.
 Sheets slide in with a fading backdrop. Adding food, including through the
 assistant or Duplicate, reveals the saved row when the sheet closes instead of
 showing an added/duplicated success toast. Errors and delete/undo notices remain.

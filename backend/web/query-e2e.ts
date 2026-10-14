@@ -14,6 +14,7 @@ const context = await browser.newContext({
   viewport: { width: 1280, height: 900 },
   deviceScaleFactor: 2,
   reducedMotion: "reduce",
+  locale: "en-US",
 });
 const page = await context.newPage();
 const errors: string[] = [];
@@ -30,6 +31,9 @@ let assistantTurns = 0;
 const searches: string[] = [];
 let slowSearch!: Route;
 let receiveSlow!: () => void;
+let receiveNextPage!: () => void;
+let finishNextPage!: () => void;
+let failedNextPage = false;
 const food = (id: string, name: string, calories: number): Food => ({
   id,
   name,
@@ -126,21 +130,30 @@ await page.route("**/*", async (route) => {
       return;
     }
     const provider = target.searchParams.get("provider");
-    const second = target.searchParams.get("page") === "2";
+    const query = target.searchParams.get("query");
+    const requestedPage = Number(target.searchParams.get("page"));
+    if (query === "cap" || query === "empty") {
+      return route.fulfill({ json: { foods: [], hasMore: query === "cap" } });
+    }
+    if (query === "retry" && requestedPage === 2 && !failedNextPage) {
+      failedNextPage = true;
+      return route.fulfill({ status: 503, json: { message: "Page unavailable" } });
+    }
+    if (query === "oats" && provider === "mfp" && requestedPage === 2) {
+      receiveNextPage();
+      await new Promise<void>((resolve) => { finishNextPage = resolve; });
+    }
+    const firstIndex = (requestedPage - 1) * 20 + 1;
+    const rows = Array.from({ length: query === "retry" ? 1 : 20 }, (_, index) =>
+      food(`${provider}-${firstIndex + index}`, `${provider === "mfp" ? "MFP" : "OFF"} oats ${firstIndex + index}`, requestedPage * 111),
+    );
+    // Upstream pages can overlap; the first row must remain stable and unique.
+    if (requestedPage === 2) rows.unshift(food(`${provider}-duplicate`, `${provider === "mfp" ? "MFP" : "OFF"} duplicate`, 999));
+    for (const row of rows) row.canonicalKey = row.id.endsWith("duplicate") ? `${provider}-1` : row.id;
     return route.fulfill({
       json: {
-        foods: [
-          food(
-            `${provider}-${second}`,
-            provider === "mfp"
-              ? "MFP oats"
-              : second
-                ? "Second oats"
-                : "Search oats",
-            second ? 222 : 111,
-          ),
-        ],
-        hasMore: !second,
+        foods: rows,
+        hasMore: requestedPage < (query === "retry" ? 2 : 3),
       },
     });
   }
@@ -239,13 +252,17 @@ try {
     .getByRole("button", { name: "Add food to Breakfast", exact: true })
     .click();
   const search = page.getByRole("searchbox", { name: "Search foods" });
+  const drawerHeight = (await page.getByRole("dialog").boundingBox())!.height;
+  const nextPage = new Promise<void>((resolve) => { receiveNextPage = resolve; });
   const slow = new Promise<void>((resolve) => {
     receiveSlow = resolve;
   });
   await search.fill("slow");
   await slow;
+  assert.equal(await page.getByLabel("Food source").inputValue(), "mfp");
+  assert.equal((await page.getByRole("dialog").boundingBox())!.height, drawerHeight);
   await search.fill("oats");
-  await page.getByRole("button", { name: /^Search oats/ }).waitFor();
+  await page.getByRole("button", { name: /^MFP oats 1\b/ }).waitFor();
   await slowSearch
     .fulfill({
       json: { foods: [food("stale", "Stale result", 999)], hasMore: false },
@@ -255,27 +272,61 @@ try {
     await page.getByRole("button", { name: /^Stale result/ }).count(),
     0,
   );
-  await page.getByRole("button", { name: "Load more foods" }).click();
-  await page.getByRole("button", { name: /^Second oats/ }).waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: /^Search oats/ }).count(),
-    1,
-  );
-  assert.equal(
-    await page.getByRole("button", { name: "Load more foods" }).count(),
-    0,
-  );
-  await page.getByLabel("Food source").selectOption("mfp");
-  await page.getByRole("button", { name: /^MFP oats/ }).waitFor();
-  assert.equal(
-    await page.getByRole("button", { name: /^Second oats/ }).count(),
-    0,
-  );
-  const beforeCachedSearch = searches.length;
+  assert(searches.every((value) => new URLSearchParams(value).get("provider") === "mfp"));
+  await page.getByRole("button", { name: /^MFP oats 20\b/ }).scrollIntoViewIfNeeded();
+  await nextPage;
+  await page.getByText("Loading more foods…", { exact: true }).waitFor();
+  assert.equal(await page.locator(".food-result").count(), 20);
+  const scrollBefore = await page.locator(".sheet-content").evaluate((element) => element.scrollTop);
+  assert.equal((await page.getByRole("dialog").boundingBox())!.height, drawerHeight);
+  finishNextPage();
+  await page.getByRole("button", { name: /^MFP oats 21\b/ }).waitFor();
+  assert.equal(await page.getByRole("button", { name: /^MFP oats 1\b/ }).count(), 1);
+  assert.equal(await page.getByRole("button", { name: /duplicate/ }).count(), 0);
+  assert.equal(await page.locator(".sheet-content").evaluate((element) => element.scrollTop), scrollBefore);
+  await page.getByRole("button", { name: /^MFP oats 40\b/ }).scrollIntoViewIfNeeded();
+  await page.getByRole("button", { name: /^MFP oats 41\b/ }).waitFor();
+  assert.equal(await page.locator(".food-result").count(), 60);
+  assert.deepEqual(searches.filter((value) => new URLSearchParams(value).get("query") === "oats").map((value) => new URLSearchParams(value).get("page")), ["1", "2", "3"]);
+  assert.equal(await page.getByRole("button", { name: "Load more foods" }).count(), 0);
+  assert.equal((await page.getByRole("dialog").boundingBox())!.height, drawerHeight);
   await page.getByLabel("Food source").selectOption("openfoodfacts");
-  await page.getByRole("button", { name: /^Second oats/ }).waitFor();
+  await page.getByRole("button", { name: /^OFF oats 1\b/ }).waitFor();
+  assert.equal(await page.getByRole("button", { name: /^MFP oats/ }).count(), 0);
+  const beforeCachedSearch = searches.length;
+  await page.getByLabel("Food source").selectOption("mfp");
+  await page.getByRole("button", { name: /^MFP oats 41\b/ }).waitFor();
   assert.equal(searches.length, beforeCachedSearch);
+  await page.getByRole("button", { name: /^MFP oats 1\b/ }).click();
+  await page.getByRole("button", { name: "Back to search" }).waitFor();
+  await page.waitForFunction((height) => document.querySelector(".sheet")!.getBoundingClientRect().height < height - 80, drawerHeight);
+  await page.getByRole("button", { name: "Back to search" }).click();
+  await page.waitForFunction((height) => document.querySelector(".sheet")!.getBoundingClientRect().height === height, drawerHeight);
   await close();
+
+  // Short pages, empty results and failures must keep a phone-sized drawer stable.
+  await page.setViewportSize({ width: 390, height: 844 });
+  await page.getByRole("button", { name: "Add food to Breakfast", exact: true }).click();
+  const phoneHeight = (await page.getByRole("dialog").boundingBox())!.height;
+  await search.fill("retry");
+  await page.getByRole("alert").filter({ hasText: "Page unavailable" }).waitFor();
+  const failedSearchCount = searches.length;
+  await page.waitForTimeout(400);
+  assert.equal(searches.length, failedSearchCount, "Failed pages must not loop automatic retries");
+  assert.equal(await page.getByRole("button", { name: /^MFP oats 1\b/ }).count(), 1);
+  assert.equal((await page.getByRole("dialog").boundingBox())!.height, phoneHeight);
+  await page.getByRole("button", { name: "Retry loading more foods" }).click();
+  await page.getByRole("button", { name: /^MFP oats 21\b/ }).waitFor();
+  await search.fill("empty");
+  await page.getByRole("heading", { name: "No foods found" }).waitFor();
+  assert.equal((await page.getByRole("dialog").boundingBox())!.height, phoneHeight);
+  await search.fill("cap");
+  await page.waitForFunction(() => document.querySelector(".result-heading span")?.textContent === "0 foods" && !document.querySelector(".food-pagination button"));
+  await page.waitForTimeout(400);
+  assert.equal(searches.filter((value) => new URLSearchParams(value).get("query") === "cap").length, 10);
+  assert.equal((await page.getByRole("dialog").boundingBox())!.height, phoneHeight);
+  await close();
+  await page.setViewportSize({ width: 1280, height: 900 });
 
   await page
     .getByRole("button", { name: "Edit Greek yogurt", exact: true })
@@ -342,8 +393,12 @@ try {
   );
   assert.deepEqual(errors, []);
   console.log(
-    "PASS: query browser checks: auth/bootstrap retry, friend-day queries, social invalidation, search cancellation/pagination/provider cache, journal success/failure, assistant SSE/approval mutations, goals and sign-out/account isolation.",
+    "PASS: query browser checks: auth/bootstrap retry, friend-day queries, social invalidation, MFP default, automatic three-page search/deduplication/provider cache, stale search cancellation, desktop/phone drawer height, compact food details, failed-page retry/page cap, journal success/failure, assistant SSE/approval mutations, goals and sign-out/account isolation.",
   );
+} catch (error) {
+  console.error("Browser state at failure:", await page.locator("body").innerText());
+  console.error("Search requests:", searches);
+  throw error;
 } finally {
   await browser.close();
 }

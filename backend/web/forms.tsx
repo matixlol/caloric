@@ -311,10 +311,11 @@ export function FoodPicker({
   const [meal, setMeal] = useState(initialMeal);
   const [tab, setTab] = useState("foods");
   const [query, setQuery] = useState("");
-  const [provider, setProvider] = useState("openfoodfacts");
+  const [provider, setProvider] = useState("mfp");
   const [debouncedQuery, setDebouncedQuery] = useState("");
   const [selected, setSelected] = useState<Food | null>(null);
   const [portion, setPortion] = useState("1");
+  const loadMoreTarget = useRef<HTMLDivElement>(null);
   const operation = useOperation();
   // Only debounce input here; Query owns fetching, cancellation and pagination.
   useEffect(() => {
@@ -333,15 +334,46 @@ export function FoodPicker({
         signal,
       ),
     getNextPageParam: (lastPage, _pages, lastPageParam) =>
-      lastPage.hasMore ? lastPageParam + 1 : undefined,
+      lastPage.hasMore && lastPageParam < 10 ? lastPageParam + 1 : undefined,
     staleTime: 60_000,
   });
+  const seenFoods = new Set<string>();
   const results = searchEnabled
-    ? search.data?.pages.flatMap((page) => page.foods) || []
+    ? (search.data?.pages.flatMap((page) => page.foods) || []).filter((food) => {
+        const key = food.canonicalKey || food.id;
+        if (seenFoods.has(key)) return false;
+        seenFoods.add(key);
+        return true;
+      })
     : [];
   const searching =
     searchEnabled && (query.trim() !== debouncedQuery || search.isFetching);
   const searchError = searchEnabled ? search.error?.message ?? null : null;
+  useEffect(() => {
+    const target = loadMoreTarget.current;
+    if (
+      !target ||
+      selected ||
+      !searchEnabled ||
+      searching ||
+      !search.hasNextPage ||
+      search.isFetchNextPageError
+    ) return;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries.some((entry) => entry.isIntersecting)) {
+          void search.fetchNextPage({ cancelRefetch: false });
+        }
+      },
+      { root: target.closest(".sheet-content"), rootMargin: "160px 0px" },
+    );
+    observer.observe(target);
+    return () => observer.disconnect();
+  }, [
+    selected, searchEnabled, searching, search.hasNextPage,
+    search.isFetchNextPageError, search.fetchNextPage, results.length,
+    provider, debouncedQuery,
+  ]);
   const recipe =
     selected && snapshot.recipes.find((recipe) => recipe.id === selected.id);
   const foods =
@@ -379,6 +411,7 @@ export function FoodPicker({
       subtitle={`${label(meal)} · ${day === dateKey() ? "Today" : day}`}
       onClose={onClose}
       busy={operation.busy}
+      fixedHeight={!selected && tab === "foods"}
     >
       {selected ? (
         <form
@@ -493,8 +526,8 @@ export function FoodPicker({
                       setProvider(e.target.value);
                     }}
                   >
-                    <option value="openfoodfacts">Open Food Facts</option>
                     <option value="mfp">MyFitnessPal</option>
+                    <option value="openfoodfacts">Open Food Facts</option>
                   </select>
                 </label>
               )}
@@ -541,10 +574,10 @@ export function FoodPicker({
               </div>
               <ErrorNotice message={searchError} />
               <div className="food-results">
-                {filtered.map((food, index) => (
+                {filtered.map((food) => (
                   <button
                     className="food-result"
-                    key={`${food.id}_${index}`}
+                    key={food.id}
                     onClick={() => choose(food)}
                   >
                     <span className="result-icon">
@@ -572,7 +605,7 @@ export function FoodPicker({
                   </button>
                 ))}
               </div>
-              {searching && (
+              {searching && !search.isFetchingNextPage && (
                 <p role="status" className="loading-text">
                   Searching food sources…
                 </p>
@@ -590,14 +623,20 @@ export function FoodPicker({
                   text=""
                 />
               )}
-              {searchEnabled && search.hasNextPage && (
-                <button
-                  className="secondary-button"
-                  onClick={() => void search.fetchNextPage()}
-                  disabled={searching}
-                >
-                  Load more foods
-                </button>
+              {searchEnabled && (
+                <div ref={loadMoreTarget} className="food-pagination">
+                  {search.isFetchingNextPage ? (
+                    <p role="status" className="hint">Loading more foods…</p>
+                  ) : search.hasNextPage ? (
+                    <button
+                      className="secondary-button"
+                      onClick={() => void search.fetchNextPage({ cancelRefetch: false })}
+                      disabled={searching}
+                    >
+                      {search.isFetchNextPageError ? "Retry loading more foods" : "Load more foods"}
+                    </button>
+                  ) : null}
+                </div>
               )}
             </>
           )}

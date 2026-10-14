@@ -52,6 +52,7 @@ export type Snapshot = {
 };
 export type Food = {
   id: string;
+  canonicalKey?: string;
   name: string;
   brand?: string;
   serving?: string;

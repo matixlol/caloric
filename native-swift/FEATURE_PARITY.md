@@ -59,6 +59,8 @@ Simulator tests cannot verify physical camera input, actual microphone / transcr
 
 ## Repository tracking
 
+Web food search (2026-10-13): `backend/web` defaults to MyFitnessPal, automatically loads more results near the bottom, deduplicates overlapping pages and keeps the food search drawer height stable during loading. This change is explicitly scoped to the web app; the Expo and standalone Swift food screens and shared search API contracts are unchanged. Web verification passes all 18 unit / route tests and the query browser suite, including three-page scrolling, cancellation, source caching, retry / page limits and desktop / phone drawer heights.
+
 `origin` and `main` track the actual repository, `https://github.com/matixlol/caloric.git`. Pulls rebase local commits onto `origin/main`; tracked edits use Git autostash. `fork` points to `poasterbot/caloric` and is the default push remote. `upstream` also points to the actual repository for compatibility.
 
 Run `python3 native-swift/scripts/setup-repository.py` after cloning, then `git pull` from the root before comparing or porting features. Resolve any conflicts while preserving Swift changes; do not reset or clean `native-swift/`. No credentials are stored in Git.

@@ -905,6 +905,15 @@ input::-webkit-inner-spin-button {
   background: var(--card);
   padding: 0 12px;
 }
+.food-pagination {
+  min-height: 64px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.food-pagination .secondary-button {
+  width: 100%;
+}
 .food-result {
   display: flex;
   align-items: center;
