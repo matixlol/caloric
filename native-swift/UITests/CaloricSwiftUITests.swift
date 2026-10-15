@@ -81,6 +81,107 @@ final class CaloricSwiftUITests: XCTestCase {
         attachment.name = name
         attachment.lifetime = .keepAlways
         add(attachment)
+        if let folder = ProcessInfo.processInfo.environment["CALORIC_SHOTS_DIR"] {
+            let file = name.lowercased().replacingOccurrences(of: " ", with: "-") + ".png"
+            try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: folder).appendingPathComponent(file))
+        }
+    }
+
+    func testClassicAssistantIsDefaultWithoutAttachments() {
+        let app = launch(["-ai-variant-classic"])
+        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["voice-microphone"].exists)
+        XCTAssertFalse(app.buttons["ai-attach"].exists)
+    }
+
+    func testNextAssistantConversationEditsAndAddsSuggestions() {
+        let app = launch(["-ai-variant-next", "-seed-chat-next"])
+        XCTAssertTrue(app.descendants(matching: .any)["ai-next-panel"].waitForExistence(timeout: 5))
+        XCTAssertTrue(app.buttons["ai-attach"].exists, "Next keeps the home composer and adds the attach button")
+        XCTAssertTrue(app.textFields["ai-composer"].exists)
+        XCTAssertTrue(app.buttons["voice-microphone"].exists)
+        XCTAssertTrue(app.buttons["ai-approve-all"].waitForExistence(timeout: 3))
+        capture("next 01 panel approvals", app)
+        app.buttons["ai-expand"].tap()
+        let scroll = app.descendants(matching: .any)["ai-next-panel"].scrollViews.firstMatch
+        scroll.swipeDown(); scroll.swipeDown()
+        XCTAssertTrue(app.buttons["ai-message-image"].waitForExistence(timeout: 3))
+        app.buttons["ai-search-chip"].tap()
+        XCTAssertTrue(app.staticTexts["Poached egg"].waitForExistence(timeout: 3))
+        capture("next 02 expanded photo message and search", app)
+        app.buttons["ai-message-image"].tap()
+        XCTAssertTrue(app.buttons["Close photo"].waitForExistence(timeout: 3))
+        capture("next 03 photo viewer", app)
+        app.buttons["Close photo"].tap()
+        scroll.swipeUp(); scroll.swipeUp()
+        let increase = app.buttons.matching(identifier: "Increase portion").firstMatch
+        XCTAssertTrue(increase.waitForExistence(timeout: 3))
+        increase.tap(); increase.tap()
+        XCTAssertTrue(app.staticTexts["2 1/2"].waitForExistence(timeout: 2))
+        app.buttons.matching(identifier: "ai-meal-picker").element(boundBy: 1).tap()
+        let lunch = app.buttons["Lunch"].firstMatch
+        XCTAssertTrue(lunch.waitForExistence(timeout: 3))
+        capture("next 04 meal picker", app)
+        lunch.tap()
+        XCTAssertTrue(app.staticTexts["Add all 2 · 355 kcal"].waitForExistence(timeout: 3), app.debugDescription)
+        app.buttons["ai-approve-all"].tap()
+        XCTAssertTrue(app.staticTexts["Added to Breakfast · 2 1/2 portions"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Added to Lunch · 1 portion"].exists)
+        XCTAssertFalse(app.buttons["ai-approve-all"].exists)
+        capture("next 05 added all", app)
+        app.buttons["ai-new-chat"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["ai-empty-state"].waitForExistence(timeout: 3))
+        capture("next 06 empty state", app)
+        app.buttons["2 eggs and toast for breakfast"].tap()
+        XCTAssertEqual(app.textFields["ai-composer"].value as? String, "2 eggs and toast for breakfast")
+        XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 3))
+        app.buttons["Hide the food assistant conversation"].tap()
+        XCTAssertTrue(app.cells["Edit Grilled chicken"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.cells["diary-row-lunch-Sourdough toast"].exists || app.staticTexts["Sourdough toast"].exists)
+    }
+
+    func testNextAssistantAttachmentThumbnailsSendState() {
+        let app = launch(["-ai-variant-next", "-seed-ai-attachments", "-ai-panel-open"])
+        let thumbnails = app.buttons.matching(identifier: "ai-attachment-thumbnail")
+        XCTAssertTrue(thumbnails.firstMatch.waitForExistence(timeout: 5))
+        XCTAssertEqual(thumbnails.count, 2)
+        XCTAssertTrue(app.buttons["Send message"].exists, "Photos alone can be sent")
+        XCTAssertTrue(app.buttons["voice-microphone"].exists == false)
+        capture("next 07 attachment thumbnails", app)
+        app.buttons.matching(identifier: "ai-attachment-remove").firstMatch.tap()
+        XCTAssertEqual(thumbnails.count, 1)
+        app.buttons.matching(identifier: "ai-attachment-remove").firstMatch.tap()
+        XCTAssertFalse(thumbnails.firstMatch.exists)
+        XCTAssertTrue(app.buttons["voice-microphone"].waitForExistence(timeout: 3))
+        app.buttons["ai-attach"].tap()
+        XCTAssertTrue(app.buttons["Photo Library"].waitForExistence(timeout: 3))
+        capture("next 08 attach menu", app)
+        app.buttons["Photo Library"].tap()
+        sleep(3)
+        capture("next 09 photo picker", app)
+        // The system picker runs out of process; select the first library photo and confirm by position.
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.17, dy: 0.47)).tap()
+        sleep(1)
+        app.coordinate(withNormalizedOffset: CGVector(dx: 0.905, dy: 0.165)).tap()
+        XCTAssertTrue(thumbnails.firstMatch.waitForExistence(timeout: 10), "A library photo becomes an attachment")
+        XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 3))
+        capture("next 10 library photo attached", app)
+    }
+
+    func testSettingsLabsAppearsOnlyAfterSevenVersionTaps() {
+        let app = launch()
+        app.buttons["Settings"].tap()
+        let version = app.staticTexts["settings-version"]
+        for _ in 0..<4 where !version.isHittable { app.swipeUp() }
+        XCTAssertTrue(version.waitForExistence(timeout: 3))
+        XCTAssertFalse(app.staticTexts["Labs"].exists)
+        for _ in 0..<6 { version.tap() }
+        XCTAssertFalse(app.staticTexts["Labs"].exists)
+        version.tap()
+        XCTAssertTrue(app.staticTexts["Labs"].waitForExistence(timeout: 3))
+        app.swipeUp()
+        capture("next 11 settings labs", app)
+        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Default")).firstMatch.exists)
     }
 
     func testHomeScrollPerformance() {

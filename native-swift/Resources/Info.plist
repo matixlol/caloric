@@ -14,7 +14,7 @@
 <key>UISupportedInterfaceOrientations</key><array><string>UIInterfaceOrientationPortrait</string></array>
 <key>UISupportedInterfaceOrientations~ipad</key><array><string>UIInterfaceOrientationPortrait</string><string>UIInterfaceOrientationPortraitUpsideDown</string><string>UIInterfaceOrientationLandscapeLeft</string><string>UIInterfaceOrientationLandscapeRight</string></array>
 <key>NSMicrophoneUsageDescription</key><string>Caloric uses your microphone so you can log food with voice.</string>
-<key>NSCameraUsageDescription</key><string>Caloric scans barcodes on food packaging to find nutrition information.</string>
+<key>NSCameraUsageDescription</key><string>Caloric scans barcodes on food packaging and lets you photograph meals and nutrition labels for the food assistant.</string>
 <key>ITSAppUsesNonExemptEncryption</key><false/>
 <key>CaloricBackendURL</key><string>$(CALORIC_BACKEND_URL)</string>
 <key>CFBundleURLTypes</key><array><dict><key>CFBundleURLSchemes</key><array><string>caloric-swift</string><string>lol.mati.caloric.swift</string></array></dict></array>

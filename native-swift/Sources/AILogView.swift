@@ -6,6 +6,7 @@ struct AILogView: View {
     @Environment(\.scenePhase) private var scenePhase
     @State private var chat = AILogService()
     @State private var voice = VoiceRecorder()
+    @State private var labs = AssistantLabs.shared
     @State private var input = ""
     @State private var expanded = Set<String>()
     @State private var panelOpen = false
@@ -13,6 +14,44 @@ struct AILogView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var inputFocused: Bool
     var body: some View {
+        Group {
+            if labs.effective == .next { AssistantNextView(chat: chat, voice: voice, isPresented: isPresented) }
+            else { classic }
+        }
+            .onChange(of: store.userID, initial: true) { _, id in
+                chat.reset(accountID: id); _ = voice.stop(cancelled: true)
+                #if DEBUG
+                if AppConfiguration.uiTesting, id != nil, ProcessInfo.processInfo.arguments.contains("-seed-chat") {
+                    chat.messages = [
+                        ChatMessage(kind: "text", role: "user", text: "What can I add for lunch?"),
+                        ChatMessage(kind: "text", text: "Try a chicken bowl with rice and vegetables.")
+                    ]
+                    panelOpen = true
+                }
+                if AppConfiguration.uiTesting, id != nil, ProcessInfo.processInfo.arguments.contains("-seed-chat-next") {
+                    chat.configure(variant: labs.effective, requested: labs.sessionVariant)
+                    chat.messages = AssistantDemo.conversation()
+                }
+                if AppConfiguration.uiTesting, id != nil, ProcessInfo.processInfo.arguments.contains("-seed-chat-next-activity") {
+                    chat.configure(variant: labs.effective, requested: labs.sessionVariant)
+                    chat.simulateStreaming(AssistantDemo.activity())
+                }
+                #endif
+            }
+            .task(id: store.userID) { await labs.load(accountID: store.userID) }
+            .onChange(of: labs.effective, initial: true) { _, _ in
+                _ = voice.stop(cancelled: true)
+                chat.configure(variant: labs.effective, requested: labs.sessionVariant)
+            }
+            .onChange(of: labs.sessionVariant) { _, _ in chat.configure(variant: labs.effective, requested: labs.sessionVariant) }
+            .onChange(of: isPresented) { _, presented in if !presented { _ = voice.stop(cancelled: true) } }
+            .onChange(of: scenePhase) { _, phase in
+                chat.setForeground(phase == .active)
+                if phase == .active { Task { await labs.load(accountID: store.userID) } }
+            }
+            .onDisappear { _ = voice.stop(cancelled: true) }
+    }
+    private var classic: some View {
       GeometryReader { geometry in
        LiquidGlassGroup {
        VStack(spacing: 8) {
@@ -45,22 +84,8 @@ struct AILogView: View {
        }.padding(.bottom, 6)
        }
       }
-            .onChange(of: store.userID, initial: true) { _, id in
-                chat.reset(accountID: id); _ = voice.stop(cancelled: true)
-                #if DEBUG
-                if AppConfiguration.uiTesting, id != nil, ProcessInfo.processInfo.arguments.contains("-seed-chat") {
-                    chat.messages = [
-                        ChatMessage(kind: "text", role: "user", text: "What can I add for lunch?"),
-                        ChatMessage(kind: "text", text: "Try a chicken bowl with rice and vegetables.")
-                    ]
-                    panelOpen = true
-                }
-                #endif
-            }
             .onChange(of: inputFocused) { _, focused in if focused { withAnimation { panelOpen = true } } }
-            .onChange(of: isPresented) { _, presented in if !presented { inputFocused = false; _ = voice.stop(cancelled: true) } }
-            .onChange(of: scenePhase) { _, phase in chat.setForeground(phase == .active) }
-            .onDisappear { _ = voice.stop(cancelled: true) }
+            .onChange(of: isPresented) { _, presented in if !presented { inputFocused = false } }
     }
     @ViewBuilder private func messageView(_ message: ChatMessage) -> some View {
         switch message.kind {
