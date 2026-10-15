@@ -32,6 +32,9 @@ const paths = {
   copy: "M9 9h12v12H9ZM15 5V3H3v12h2",
   grip: "M8 5h.01M16 5h.01M8 12h.01M16 12h.01M8 19h.01M16 19h.01",
   logout: "M9 3H3v18h6M9 12h12m-5-5 5 5-5 5",
+  image: "M4 5h16v14H4ZM4 16l5-5 4 4 2-2 5 5M15.5 9.5h.01",
+  minus: "M5 12h14",
+  edit: "M4 20h4L19 9l-4-4L4 16v4ZM13 7l4 4",
 } as const;
 export type IconName = keyof typeof paths;
 export function Icon({ name, size = 20 }: { name: IconName; size?: number }) {

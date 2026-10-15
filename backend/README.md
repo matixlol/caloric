@@ -13,13 +13,18 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `countryCode` (default `US`)
     - `resourceType` (default `foods`)
     - `includeDetails` (default `true`)
+- `GET /ai/config`
+  - requires a Better Auth session (cookie or bearer)
+  - returns `variant` (`next` when the user is in `AI_NEXT_USER_IDS`, else `classic`)
 - `POST /ai/session`
   - requires a Better Auth session (cookie or bearer)
   - body:
     - `recentLogs` (optional)
+    - `variant` (optional, `next` | `classic`; defaults to the `/ai/config` value)
   - returns:
     - `sessionId`
     - `status` (`ready`)
+    - `variant`
 - `POST /ai/turn`
   - requires a Better Auth session (cookie or bearer)
   - body (`application/json`):
@@ -65,6 +70,19 @@ the server logs (password login does not depend on email delivery, which is what
 uses). See `migrate-clerk-users.local.ts` for the one-time script that recreates the pre-existing
 users as Better Auth accounts while preserving their user ids (so all their synced data keeps
 resolving with no rewrite).
+
+### Next assistant (shadow flag)
+
+Sessions created with `variant: "next"` use `AI_NEXT_MODEL` (`<provider>:<model>[@upstream]`,
+provider `google` or `openrouter`; default `openrouter:meta/muse-wonder`) with
+`AI_NEXT_THINKING_LEVEL` (default `minimal`), a prompt that covers meal photos and nutrition labels
+and asks for all searches in one step, parallel food searches, and a repair step that retries when
+the model prints a tool call as text. Voice notes are decoded to 16 kHz WAV with ffmpeg
+(`AI_NEXT_AUDIO_WAV`), so clients keep uploading m4a/WebM. Their multipart `/ai/turn` messages may include up to four `image` fields
+(JPEG, PNG, WebP or HEIC, 8 MB each). `AI_NEXT_USER_IDS` (comma-separated, `*` for everyone)
+enables the variant by default; the web client also honours `?ai=next|classic|default`, and the
+Swift app has a hidden Labs setting. `scripts/ai-eval.ts` replays exported production chats
+against candidate models (keep its data outside the repository).
 
 `/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
 OpenRouter tracking fields are sent as `user` (client user id) and `session_id` (backend session id).

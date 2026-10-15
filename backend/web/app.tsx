@@ -26,6 +26,8 @@ import {
 } from "./queries";
 import { EntryEditor, FoodPicker, Recipes, Settings, SignIn } from "./forms";
 import { Assistant } from "./chat";
+import { AssistantNext, type AssistantLaunch } from "./chat-next";
+import { imageFiles, useAssistantVariant } from "./assistant-next";
 import { FriendDay, Friends } from "./friends";
 import { Journal } from "./journal";
 import { ErrorNotice, format, Icon, IconButton, Summary } from "./ui";
@@ -93,6 +95,13 @@ function App({ userId }: { userId: string }) {
     null,
   );
   const [offline, setOffline] = useState(!navigator.onLine);
+  const assistantVariant = useAssistantVariant(userId);
+  const [launch, setLaunch] = useState<AssistantLaunch | null>(null);
+  const photoInput = useRef<HTMLInputElement>(null);
+  function openAssistant(options: Omit<AssistantLaunch, "key"> = {}) {
+    setLaunch({ ...options, key: Date.now() });
+    setModal({ type: "chat" });
+  }
   const writeLock = useRef(false);
   const dragging = useRef(false);
   const touch = useRef<{ x: number; y: number } | null>(null);
@@ -117,6 +126,34 @@ function App({ userId }: { userId: string }) {
   const friends = summaries.data;
   const friendsCount = friends?.length ?? rememberedCount;
   const friendsError = summaries.error;
+  useEffect(() => {
+    if (assistantVariant !== "next" || modal) return;
+    // Photos dropped or pasted anywhere on the journal open the assistant.
+    const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files");
+    const over = (event: DragEvent) => {
+      if (hasFiles(event)) event.preventDefault();
+    };
+    const drop = (event: DragEvent) => {
+      const files = imageFiles(event.dataTransfer?.files);
+      if (!files.length) return;
+      event.preventDefault();
+      openAssistant({ files });
+    };
+    const paste = (event: ClipboardEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (target?.closest("input, textarea, [contenteditable]")) return;
+      const files = imageFiles(event.clipboardData?.files);
+      if (files.length) openAssistant({ files });
+    };
+    window.addEventListener("dragover", over);
+    window.addEventListener("drop", drop);
+    window.addEventListener("paste", paste);
+    return () => {
+      window.removeEventListener("dragover", over);
+      window.removeEventListener("drop", drop);
+      window.removeEventListener("paste", paste);
+    };
+  }, [assistantVariant, Boolean(modal)]);
   useEffect(() => {
     if (!modal) return;
     // One history entry for the whole sheet flow, including Settings → Recipes.
@@ -471,17 +508,43 @@ function App({ userId }: { userId: string }) {
           />
         </nav>
       </main>
-      <div className="composer-dock">
-        <button
-          className="floating-composer"
-          onClick={() => setModal({ type: "chat" })}
-        >
-          <span>Message the food assistant</span>
+      <div
+        className={`composer-dock ${assistantVariant === "next" ? "next" : ""}`}
+      >
+        {assistantVariant === "next" && (
+          <>
+            <IconButton
+              name="image"
+              title="Log food from a photo"
+              onClick={() => photoInput.current?.click()}
+            />
+            <input
+              ref={photoInput}
+              type="file"
+              accept="image/*"
+              multiple
+              hidden
+              onChange={(e) => {
+                const files = Array.from(e.target.files ?? []);
+                e.target.value = "";
+                if (files.length) openAssistant({ files });
+              }}
+            />
+          </>
+        )}
+        <button className="floating-composer" onClick={() => openAssistant()}>
+          <span>
+            {assistantVariant === "next"
+              ? "What did you eat?"
+              : "Message the food assistant"}
+          </span>
         </button>
         <IconButton
           name="mic"
           title="Ask Caloric with voice"
-          onClick={() => setModal({ type: "chat" })}
+          onClick={() =>
+            openAssistant({ record: assistantVariant === "next" })
+          }
         />
       </div>
       {toast && (
@@ -573,13 +636,27 @@ function App({ userId }: { userId: string }) {
         />
       )}
       {modal?.type === "friends" && <Friends userId={userId} onClose={close} />}
-      <Assistant
-        open={modal?.type === "chat"}
-        snapshot={snapshot}
-        day={day}
-        onSave={addEntry}
-        onClose={close}
-      />
+      {assistantVariant === "next" ? (
+        <AssistantNext
+          open={modal?.type === "chat"}
+          launch={launch}
+          snapshot={snapshot}
+          day={day}
+          onSaveMany={async (entries) => {
+            await mutate({ entries }, null);
+            setAddedId(entries[entries.length - 1]!.id);
+          }}
+          onClose={close}
+        />
+      ) : (
+        <Assistant
+          open={modal?.type === "chat"}
+          snapshot={snapshot}
+          day={day}
+          onSave={addEntry}
+          onClose={close}
+        />
+      )}
     </>
   );
 }

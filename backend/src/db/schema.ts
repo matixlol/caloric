@@ -348,6 +348,9 @@ export const aiSessions = pgTable(
     searchResultCounter: integer("search_result_counter").notNull().default(1),
     searchResultsByLocalId: jsonb("search_results_by_local_id").notNull(),
     pendingApprovals: jsonb("pending_approvals").notNull(),
+    // Assistant flavour the session was created with ("next" = shadow-flagged
+    // experimental model with photo input). Null means the classic assistant.
+    variant: text("variant"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },
