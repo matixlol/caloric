@@ -1,70 +1,27 @@
-import {
-  streamText,
-  tool,
-  type JSONValue,
-  type ModelMessage,
-} from "ai";
-import {
-  createGoogleGenerativeAI,
-  type GoogleLanguageModelOptions,
-} from "@ai-sdk/google";
-import { z } from "zod";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "../ai-log-context";
 import { config } from "../config";
 import { isObjectRecord, jsonResponse, requireAuthenticatedUser } from "../http";
-import { createAiMessageId, createAiSessionId, createAiTurnId } from "../id";
+import { createAiSessionId, createAiTurnId } from "../id";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
+import { z } from "zod";
+import { fastSystemPrompt, runAssistantLoop, systemPrompt, type AssistantModel } from "./ai-agent";
+import { createAssistantModel } from "./ai-models";
 import {
   createAiSession,
   loadAiSession,
-  mealValues,
   saveAiSession,
   type AiSessionState,
-  type Meal,
-  type ResolvedApprovalSuggestion,
+  type AssistantVariant,
 } from "./ai-store";
 import {
   createTurnSseResponse,
   getResumableTurn,
   isResumableTurnPresent,
   startResumableTurn,
-  type AgentEvent,
 } from "./ai-turns";
-import { searchUnifiedFoods, type SearchResultFood } from "./search";
-
-const MealSchema = z.enum(mealValues);
-type SessionToolCall = {
-  toolCallId: string;
-  toolName: keyof typeof aiSdkTools;
-  input: unknown;
-};
-
-const SearchFoodsToolArgsSchema = z.object({
-  query: z.string().trim().min(2),
-  limit: z.coerce.number().int().min(1).max(10).optional(),
-});
-
-const ApprovalSuggestionInputSchema = z.object({
-  resultId: z.string().trim().min(1),
-  meal: z
-    .string()
-    .trim()
-    .transform((value) => {
-      const parsed = MealSchema.safeParse(value.toLowerCase());
-      return parsed.success ? parsed.data : "lunch";
-    }),
-  portion: z.coerce
-    .number()
-    .finite()
-    .catch(1)
-    .transform((value) => Math.round(Math.max(0.25, value) * 4) / 4),
-  reason: z.string().trim().min(1),
-});
-
-const RequestFoodApprovalsToolArgsSchema = z.object({
-  suggestions: z.array(ApprovalSuggestionInputSchema).min(1).max(8),
-});
+import { transcodeAudioToWav } from "./audio";
+import { searchUnifiedFoods } from "./search";
 
 const UserMessageActionSchema = z.object({
   type: z.literal("user-message"),
@@ -84,43 +41,9 @@ type AgentAction = z.infer<typeof JsonActionSchema>;
 type UserMessageAction = z.infer<typeof UserMessageActionSchema>;
 type ApprovalAction = z.infer<typeof ApprovalActionSchema>;
 
-const aiSdkTools = {
-  searchFoods: tool({
-    description: "Search foods in the app food database.",
-    inputSchema: SearchFoodsToolArgsSchema,
-  }),
-  requestFoodApprovals: tool({
-    description:
-      "Request user approval for one or more selected food entries using local result IDs from searchFoods. This renders interactive suggestions in the app and ends the current turn.",
-    inputSchema: RequestFoodApprovalsToolArgsSchema,
-  }),
-} as const;
-
-type ToolName = keyof typeof aiSdkTools;
-
-const systemPrompt = [
-  "You are Caloric's food logging assistant.",
-  "Always call searchFoods before suggesting a food entry.",
-  "searchFoods returns local result IDs. Only reference those IDs later.",
-  "Never send or edit nutrition/name/brand/serving in approval requests.",
-  "When ready, call requestFoodApprovals once with one or more suggestions.",
-  "Calling requestFoodApprovals ends your turn.",
-  "The app handles approval and rejection locally. Do not expect approval results or react to approval clicks.",
-  "Only set resultId, meal, portion, and reason in each suggestion.",
-  "Portion should be in quarter increments (0.25).",
-  "If the user sends audio, understand it directly from the audio input instead of talking about transcription.",
-  "Before searching, silently make a checklist of every requested food, explicit brand or variant, meal, and quantity.",
-  "Search every checklist item using the user's exact brand and variant terms.",
-  "Reject implausible matches, such as a normal single slice, egg, glass of milk, or ordinary serving with clearly impossible calories or macros, and search again.",
-  "If the exact variant is unavailable, prefer a plausible generic match over a conflicting brand or variant.",
-  "Before requesting approval, verify that every requested food appears exactly once, explicit meal buckets are preserved, no unmentioned foods were added, and each portion correctly converts the requested amount into the selected entry's serving units.",
-  "When you answer, keep the wording concise and practical.",
-].join(" ");
-
-const googleAiStudio = createGoogleGenerativeAI({
-  apiKey: config.googleAiStudioApiKey,
-  fetch: fetchWithGeminiSentryLogging as typeof fetch,
-});
+const maxImageCount = 4;
+const maxImageBytes = 8 * 1024 * 1024;
+const imageMediaTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 const sentryPayloadMaxLength = 80_000;
 const geminiSpanCallCounters = new WeakMap<object, number>();
@@ -301,15 +224,25 @@ function reportUnknownError(code: string, error: unknown): Response {
   );
 }
 
-function createMessageId(): string {
-  return createAiMessageId();
+function modelProviderKeys() {
+  return {
+    googleAiStudioApiKey: config.googleAiStudioApiKey,
+    openRouterApiKey: config.openRouterApiKey,
+    fetch: fetchWithGeminiSentryLogging as typeof fetch,
+  };
 }
 
-function createGeminiModel() {
-  return googleAiStudio.chat(config.geminiModel);
+function createSessionModel(variant: AssistantVariant): AssistantModel {
+  return variant === "next"
+    ? createAssistantModel(config.aiNextModel, config.aiNextThinkingLevel, modelProviderKeys())
+    : createAssistantModel(`google:${config.geminiModel}`, config.geminiThinkingLevel, modelProviderKeys());
 }
 
-async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaType: string }> {
+function isNextAssistantUser(userId: string): boolean {
+  return config.aiNextUserIds.includes("*") || config.aiNextUserIds.includes(userId);
+}
+
+async function encodeAudioFile(audioFile: File, decodeToWav = false): Promise<{ data: string; mediaType: string }> {
   if (audioFile.size <= 0) {
     throw new Error("Audio snippet was empty.");
   }
@@ -319,6 +252,16 @@ async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaTy
   }
 
   const bytes = new Uint8Array(await audioFile.arrayBuffer());
+  if (decodeToWav) {
+    // Several audio-native models only accept WAV/MP3/FLAC, so phones keep
+    // uploading compact m4a and the server decodes it.
+    try {
+      return { data: (await transcodeAudioToWav(bytes)).toString("base64"), mediaType: "audio/wav" };
+    } catch (error) {
+      captureUnknownError("ai_audio_decode_failed", error);
+    }
+  }
+
   const data = Buffer.from(bytes).toString("base64");
   const mediaType = audioFile.type.trim().toLowerCase().startsWith("audio/") ? audioFile.type.trim().toLowerCase() : "audio/mp4";
 
@@ -326,276 +269,6 @@ async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaTy
     data,
     mediaType,
   };
-}
-
-function createToolResultMessage(toolCall: SessionToolCall, value: unknown): ModelMessage {
-  return {
-    role: "tool",
-    content: [
-      {
-        type: "tool-result",
-        toolCallId: toolCall.toolCallId,
-        toolName: toolCall.toolName,
-        output: {
-          type: "json",
-          value: value as JSONValue,
-        },
-      },
-    ],
-  };
-}
-
-async function requestAiSdkTurn(
-  session: AiSessionState,
-  options?: {
-    onAssistantDelta?: (text: string) => void;
-    signal?: AbortSignal;
-  },
-): Promise<{
-  assistantText: string;
-  toolCalls: SessionToolCall[];
-  responseMessages: ModelMessage[];
-}> {
-  const result = streamText({
-    model: createGeminiModel(),
-    messages: session.conversation,
-    tools: aiSdkTools,
-    abortSignal: options?.signal,
-    providerOptions: {
-      google: {
-        thinkingConfig: {
-          thinkingLevel: config.geminiThinkingLevel,
-        },
-      } satisfies GoogleLanguageModelOptions,
-    },
-    experimental_telemetry: {
-      isEnabled: true,
-      functionId: "backend.ai.turn",
-      metadata: {
-        sessionId: session.id,
-        messageCount: session.conversation.length,
-        toolCount: Object.keys(aiSdkTools).length,
-        provider: "google-ai-studio",
-        model: config.geminiModel,
-        thinkingLevel: config.geminiThinkingLevel,
-      },
-    },
-  });
-
-  let assistantText = "";
-
-  for await (const chunk of result.fullStream) {
-    if (chunk.type === "text-delta" && chunk.text) {
-      assistantText += chunk.text;
-      options?.onAssistantDelta?.(chunk.text);
-    }
-  }
-
-  const response = await result.response;
-  const toolCalls: SessionToolCall[] = [];
-  for (const toolCall of await result.toolCalls) {
-    if (!(toolCall.toolName in aiSdkTools)) {
-      continue;
-    }
-
-    toolCalls.push({
-      toolCallId: toolCall.toolCallId,
-      toolName: toolCall.toolName as ToolName,
-      input: toolCall.input,
-    });
-  }
-
-  return {
-    assistantText,
-    toolCalls,
-    responseMessages: response.messages,
-  };
-}
-
-async function runToolCall(
-  session: AiSessionState,
-  toolCall: SessionToolCall,
-  signal?: AbortSignal,
-): Promise<{ stopAfterTool: boolean; output: unknown; events: AgentEvent[] }> {
-  if (toolCall.toolName === "searchFoods") {
-    const parsedArgs = SearchFoodsToolArgsSchema.safeParse(toolCall.input);
-    if (!parsedArgs.success) {
-      return {
-        stopAfterTool: false,
-        output: {
-          error: "Invalid searchFoods input.",
-        },
-        events: [],
-      };
-    }
-
-    const limit = parsedArgs.data.limit ?? 6;
-    const topFoods = await searchUnifiedFoods(parsedArgs.data.query, limit, signal);
-    const foodsWithResultIds: SearchResultFood[] = topFoods.map((food) => {
-      const resultId = `r${session.searchResultCounter}`;
-      session.searchResultCounter += 1;
-
-      const mapped: SearchResultFood = {
-        ...food,
-        resultId,
-      };
-
-      session.searchResultsByLocalId[resultId] = mapped;
-      return mapped;
-    });
-
-    return {
-      stopAfterTool: false,
-      output: {
-        foods: foodsWithResultIds,
-      },
-      events: [
-        {
-          kind: "search",
-          query: parsedArgs.data.query,
-          foods: foodsWithResultIds,
-        },
-      ],
-    };
-  }
-
-  if (toolCall.toolName === "requestFoodApprovals") {
-    const parsedArgs = RequestFoodApprovalsToolArgsSchema.safeParse(toolCall.input);
-    if (!parsedArgs.success) {
-      return {
-        stopAfterTool: false,
-        output: {
-          error: "Invalid requestFoodApprovals input.",
-        },
-        events: [],
-      };
-    }
-
-    const resolvedSuggestions: ResolvedApprovalSuggestion[] = [];
-    const unknownResultIds: string[] = [];
-    const seenSuggestions = new Set<string>();
-
-    for (const suggestion of parsedArgs.data.suggestions) {
-      const food = session.searchResultsByLocalId[suggestion.resultId];
-      if (!food) {
-        unknownResultIds.push(suggestion.resultId);
-        continue;
-      }
-
-      const duplicateKey = `${suggestion.resultId}|${suggestion.meal}|${suggestion.portion}`;
-      if (seenSuggestions.has(duplicateKey)) {
-        continue;
-      }
-
-      seenSuggestions.add(duplicateKey);
-      resolvedSuggestions.push({
-        suggestionId: createMessageId(),
-        resultId: suggestion.resultId,
-        meal: suggestion.meal,
-        portion: suggestion.portion,
-        reason: suggestion.reason,
-        food,
-      });
-    }
-
-    if (unknownResultIds.length > 0) {
-      return {
-        stopAfterTool: false,
-        output: {
-          error: `Unknown result IDs: ${unknownResultIds.slice(0, 5).join(", ")}`,
-        },
-        events: [],
-      };
-    }
-
-    if (resolvedSuggestions.length === 0) {
-      return {
-        stopAfterTool: false,
-        output: {
-          error: "No valid suggestions to approve.",
-        },
-        events: [],
-      };
-    }
-
-    return {
-      stopAfterTool: true,
-      output: {
-        displayed: true,
-        suggestionCount: resolvedSuggestions.length,
-        note: "Suggestions are visible in the app. Approval and rejection stay local to the client.",
-      },
-      events: [
-        {
-          kind: "approval",
-          toolCallId: toolCall.toolCallId,
-          suggestions: resolvedSuggestions,
-        },
-      ],
-    };
-  }
-
-  return {
-    stopAfterTool: false,
-    output: {
-      error: `Unknown tool: ${toolCall.toolName}`,
-    },
-    events: [],
-  };
-}
-
-async function runAssistantLoop(
-  session: AiSessionState,
-  options?: {
-    onEvent?: (event: AgentEvent) => void;
-    signal?: AbortSignal;
-  },
-): Promise<void> {
-  const emit = (event: AgentEvent) => {
-    options?.onEvent?.(event);
-  };
-
-  for (let step = 0; step < 8; step += 1) {
-    const turn = await requestAiSdkTurn(session, {
-      signal: options?.signal,
-      onAssistantDelta: (text) => {
-        if (!text) {
-          return;
-        }
-
-        emit({
-          kind: "assistant-delta",
-          text,
-        });
-      },
-    });
-
-    if (turn.assistantText.trim()) {
-      emit({
-        kind: "assistant",
-        text: turn.assistantText,
-      });
-    }
-
-    session.conversation.push(...turn.responseMessages);
-
-    if (turn.toolCalls.length === 0) {
-      return;
-    }
-
-    for (const toolCall of turn.toolCalls) {
-      const toolResult = await runToolCall(session, toolCall, options?.signal);
-      for (const event of toolResult.events) {
-        emit(event);
-      }
-
-      session.conversation.push(createToolResultMessage(toolCall, toolResult.output ?? null));
-
-      if (toolResult.stopAfterTool) {
-        return;
-      }
-    }
-  }
 }
 
 async function parseJsonBody(request: Request): Promise<Record<string, unknown> | null> {
@@ -607,11 +280,28 @@ async function parseJsonBody(request: Request): Promise<Record<string, unknown> 
   }
 }
 
+async function encodeImageFile(imageFile: File): Promise<{ data: string; mediaType: string }> {
+  const mediaType = imageFile.type.trim().toLowerCase();
+  if (!imageMediaTypes.has(mediaType)) {
+    throw new Error("Photos must be JPEG, PNG, WebP, or HEIC.");
+  }
+
+  if (imageFile.size <= 0 || imageFile.size > maxImageBytes) {
+    throw new Error("Photo is too large (max 8 MB).");
+  }
+
+  return {
+    data: Buffer.from(await imageFile.arrayBuffer()).toString("base64"),
+    mediaType,
+  };
+}
+
 async function parseTurnRequest(request: Request): Promise<
   | {
       sessionId: string;
       action: AgentAction;
       audioFile: File | null;
+      imageFiles: File[];
     }
   | Response
 > {
@@ -650,11 +340,16 @@ async function parseTurnRequest(request: Request): Promise<
 
       const audioField = formData.get("audio");
       const audioFile = audioField instanceof File && audioField.size > 0 ? audioField : null;
+      const imageFiles = formData.getAll("image").filter((field): field is File => field instanceof File && field.size > 0);
+      if (imageFiles.length > maxImageCount) {
+        return jsonResponse({ error: `Attach at most ${maxImageCount} photos` }, 400);
+      }
 
       return {
         sessionId,
         action: parsedAction.data,
         audioFile,
+        imageFiles,
       };
     }
 
@@ -674,6 +369,7 @@ async function parseTurnRequest(request: Request): Promise<
         sessionId,
         action: parsedAction.data,
         audioFile: null,
+        imageFiles: [],
       };
     }
 
@@ -695,6 +391,7 @@ async function parseTurnRequest(request: Request): Promise<
     sessionId,
     action: parsedAction.data,
     audioFile: null,
+    imageFiles: [],
   };
 }
 
@@ -714,14 +411,24 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
       "app.ai.recent_log_count": recentLogHints.length,
     });
 
+    // The client's hidden toggle wins; otherwise the server-side allowlist decides.
+    const variant: AssistantVariant =
+      body?.variant === "next" || body?.variant === "classic"
+        ? body.variant
+        : isNextAssistantUser(auth.userId)
+          ? "next"
+          : "classic";
+    Sentry.getActiveSpan()?.setAttribute("app.ai.variant", variant);
+
     const sessionId = createAiSessionId();
     await createAiSession({
       id: sessionId,
       userId: auth.userId,
+      variant,
       conversation: [
         {
           role: "system",
-          content: systemPrompt,
+          content: variant === "next" ? fastSystemPrompt : systemPrompt,
         },
         ...(recentLogContextPrompt
           ? [
@@ -740,10 +447,21 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
     return jsonResponse({
       sessionId,
       status: "ready",
+      variant,
     });
   } catch (error) {
     return reportUnknownError("ai_session_failed", error);
   }
+}
+
+export async function handleAiConfigRequest(request: Request): Promise<Response> {
+  const auth = await requireAuthenticatedUser(request);
+  if (auth instanceof Response) {
+    return auth;
+  }
+
+  const variant: AssistantVariant = isNextAssistantUser(auth.userId) ? "next" : "classic";
+  return jsonResponse({ variant });
 }
 
 export async function handleAiTurnRequest(request: Request): Promise<Response> {
@@ -767,12 +485,18 @@ export async function handleAiTurnRequest(request: Request): Promise<Response> {
     "app.ai.session_id": parsed.sessionId,
     "app.ai.action_type": parsed.action.type,
     "app.ai.has_audio": Boolean(parsed.audioFile),
+    "app.ai.image_count": parsed.imageFiles.length,
+    "app.ai.variant": session.variant,
     "app.ai.pending_approval_count": Object.keys(session.pendingApprovals).length,
   });
 
   try {
     if (parsed.action.type === "user-message") {
-      return handleUserMessageAction(request, session, parsed.action, parsed.audioFile);
+      if (parsed.imageFiles.length > 0 && session.variant !== "next") {
+        return jsonResponse({ error: "Photos require the next assistant" }, 400);
+      }
+
+      return await handleUserMessageAction(request, session, parsed.action, parsed.audioFile, parsed.imageFiles);
     }
 
     return handleApprovalAction(request, session, parsed.action);
@@ -786,20 +510,24 @@ async function handleUserMessageAction(
   session: AiSessionState,
   action: UserMessageAction,
   audioFile: File | null,
+  imageFiles: File[],
 ): Promise<Response> {
   const message = action.message?.trim() ?? "";
 
-  if (!message && !audioFile) {
-    return jsonResponse({ error: "action.message or audio is required" }, 400);
+  if (!message && !audioFile && imageFiles.length === 0) {
+    return jsonResponse({ error: "action.message, audio, or a photo is required" }, 400);
   }
 
   Sentry.getActiveSpan()?.setAttributes({
     "app.ai.user_message_length": message.length,
   });
 
-  if (audioFile) {
-    const encodedAudio = await encodeAudioFile(audioFile);
-    const content: Array<{ type: "text"; text: string } | { type: "file"; data: string; mediaType: string; filename?: string }> = [];
+  if (audioFile || imageFiles.length > 0) {
+    type UserPart =
+      | { type: "text"; text: string }
+      | { type: "image"; image: string; mediaType: string }
+      | { type: "file"; data: string; mediaType: string; filename?: string };
+    const content: UserPart[] = [];
 
     if (message) {
       content.push({
@@ -808,12 +536,30 @@ async function handleUserMessageAction(
       });
     }
 
-    content.push({
-      type: "file",
-      data: encodedAudio.data,
-      mediaType: encodedAudio.mediaType,
-      filename: audioFile.name || undefined,
-    });
+    for (const imageFile of imageFiles) {
+      let encodedImage: { data: string; mediaType: string };
+      try {
+        encodedImage = await encodeImageFile(imageFile);
+      } catch (error) {
+        return jsonResponse({ error: "invalid_image", message: error instanceof Error ? error.message : "Invalid photo." }, 400);
+      }
+
+      content.push({
+        type: "image",
+        image: encodedImage.data,
+        mediaType: encodedImage.mediaType,
+      });
+    }
+
+    if (audioFile) {
+      const encodedAudio = await encodeAudioFile(audioFile, session.variant === "next" && config.aiNextAudioWav);
+      content.push({
+        type: "file",
+        data: encodedAudio.data,
+        mediaType: encodedAudio.mediaType,
+        filename: audioFile.name || undefined,
+      });
+    }
 
     session.conversation.push({
       role: "user",
@@ -852,6 +598,10 @@ async function handleUserMessageAction(
       }
 
       await runAssistantLoop(session, {
+        assistant: createSessionModel(session.variant),
+        search: searchUnifiedFoods,
+        repair: session.variant === "next",
+        parallelSearch: session.variant === "next",
         onEvent: emit.event,
         signal,
       });

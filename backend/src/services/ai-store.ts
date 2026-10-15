@@ -22,9 +22,12 @@ export type ResolvedApprovalSuggestion = {
   output?: ApprovalOutput;
 };
 
+export type AssistantVariant = "classic" | "next";
+
 export type AiSessionState = {
   id: string;
   userId: string;
+  variant: AssistantVariant;
   conversation: ModelMessage[];
   searchResultCounter: number;
   searchResultsByLocalId: Record<string, SearchResultFood>;
@@ -41,6 +44,7 @@ export async function createAiSession(session: AiSessionState): Promise<void> {
     searchResultCounter: session.searchResultCounter,
     searchResultsByLocalId: session.searchResultsByLocalId,
     pendingApprovals: session.pendingApprovals,
+    variant: session.variant === "next" ? "next" : null,
     createdAt: now,
     updatedAt: now,
   });
@@ -55,6 +59,7 @@ export async function loadAiSession(sessionId: string, userId: string): Promise<
       searchResultCounter: aiSessions.searchResultCounter,
       searchResultsByLocalId: aiSessions.searchResultsByLocalId,
       pendingApprovals: aiSessions.pendingApprovals,
+      variant: aiSessions.variant,
     })
     .from(aiSessions)
     .where(and(eq(aiSessions.id, sessionId), eq(aiSessions.userId, userId)))
@@ -67,6 +72,7 @@ export async function loadAiSession(sessionId: string, userId: string): Promise<
   return {
     id: session.id,
     userId: session.userId,
+    variant: session.variant === "next" ? "next" : "classic",
     conversation: session.conversation as ModelMessage[],
     searchResultCounter: session.searchResultCounter,
     searchResultsByLocalId: session.searchResultsByLocalId as Record<string, SearchResultFood>,

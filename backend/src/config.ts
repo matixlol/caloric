@@ -41,6 +41,7 @@ type GeminiThinkingLevel = (typeof geminiThinkingLevels)[number];
 function getGeminiThinkingLevel(
   raw: string | undefined,
   fallback: GeminiThinkingLevel,
+  name = "GEMINI_THINKING_LEVEL",
 ): GeminiThinkingLevel {
   if (!raw) {
     return fallback;
@@ -53,7 +54,7 @@ function getGeminiThinkingLevel(
   }
 
   throw new Error(
-    `Environment variable GEMINI_THINKING_LEVEL must be one of: ${geminiThinkingLevels.join(", ")}`,
+    `Environment variable ${name} must be one of: ${geminiThinkingLevels.join(", ")}`,
   );
 }
 
@@ -108,4 +109,14 @@ export const config = {
   googleAiStudioApiKey: Bun.env.GOOGLE_AI_STUDIO_API_KEY?.trim() || undefined,
   geminiModel: Bun.env.GEMINI_MODEL ?? "gemini-3.6-flash",
   geminiThinkingLevel: getGeminiThinkingLevel(Bun.env.GEMINI_THINKING_LEVEL, "low"),
+  openRouterApiKey: Bun.env.OPENROUTER_API_KEY?.trim() || undefined,
+  // Shadow-flagged "next" assistant: a newer model plus photo attachments.
+  // AI_NEXT_MODEL is "<provider>:<model>", where provider is google or openrouter.
+  aiNextModel: Bun.env.AI_NEXT_MODEL?.trim() || "openrouter:meta/muse-wonder",
+  // Decode next-assistant voice notes to WAV with ffmpeg before sending them on.
+  aiNextAudioWav: getBooleanEnv("AI_NEXT_AUDIO_WAV", true),
+  aiNextThinkingLevel: getGeminiThinkingLevel(Bun.env.AI_NEXT_THINKING_LEVEL, "minimal", "AI_NEXT_THINKING_LEVEL"),
+  // Comma-separated user IDs that get the next assistant by default ("*" for everyone).
+  // Anyone else can still opt in through the hidden client toggle.
+  aiNextUserIds: parseTrustedOrigins(Bun.env.AI_NEXT_USER_IDS),
 };
