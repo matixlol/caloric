@@ -16,54 +16,58 @@ struct SettingsView: View {
     }
     var body: some View {
       NavigationStack {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack(alignment: .center, spacing: 8) {
-                    Text("Cloud sync").font(.subheadline).foregroundStyle(.secondary)
-                    Spacer()
-                    HStack(spacing: 4) {
-                        Circle().fill(syncColor).frame(width: 6, height: 6)
-                        Text(store.isSyncing ? "Syncing" : store.syncError != nil ? "Sync failed" : store.dirty ? "Pending" : store.lastSyncedAt != nil ? "Synced" : "Not synced").fontWeight(.semibold)
-                    }.font(.system(size: 10)).lineLimit(1).fixedSize().padding(.horizontal, 8).padding(.vertical, 6)
-                        .background(syncColor.opacity(0.08), in: Capsule()).accessibilityIdentifier("sync-status")
-                }.padding(.top, 4)
-                sectionTitle("Goals")
+        Form {
+            Section {
                 HStack {
-                    Text("Daily Calories").font(.system(size: 16))
+                    Text("Daily Calories")
                     Spacer()
                     TextField("2500", text: $goal).keyboardType(.numberPad).multilineTextAlignment(.trailing)
-                        .font(.system(size: 16)).frame(width: 85).accessibilityLabel("Daily calorie goal")
-                }.padding(.vertical, 3).caloricCard()
-                if !edited.isValid { Text("Daily calorie goal must be between 100 and 10000.").font(.system(size: 13)).foregroundStyle(.red) }
-                sectionTitle("Macro Ratios")
+                        .monospacedDigit().foregroundStyle(.secondary).frame(maxWidth: 120).accessibilityLabel("Daily calorie goal")
+                }
+            } header: { Text("Goals") } footer: {
+                if !edited.isValid { Text("Daily calorie goal must be between 100 and 10000.").foregroundStyle(.red) }
+            }
+            Section {
                 VStack(alignment: .leading, spacing: 14) {
                     HStack(spacing: 10) {
                         legend("Protein \(edited.proteinGoal)g", Theme.protein)
+                        Spacer(minLength: 0)
                         legend("Carbs \(edited.carbsGoal)g", Theme.carbs)
+                        Spacer(minLength: 0)
                         legend("Fat \(edited.fatGoal)g", Theme.fat)
                     }.minimumScaleFactor(0.75).lineLimit(1)
                     MacroRatioSlider(settings: $ratios).frame(height: 52)
-                }.caloricCard()
-                sectionTitle("Account")
-                VStack(spacing: 0) {
-                    valueRow("Signed in as", AppConfiguration.uiTesting ? "preview@caloric.app" : auth.user?.email ?? "")
-                    Divider()
-                    HStack { Text("Last synced"); Spacer(); if let date = store.lastSyncedAt { Text(date, style: .relative).foregroundStyle(.secondary) } else { Text("Never").foregroundStyle(.secondary) } }.font(.system(size: 14)).padding(.vertical, 12)
-                    Divider()
-                    Button { Task { await store.synchronize() } } label: {
-                        HStack { Text("Sync now"); Spacer(); if store.isSyncing { ProgressView() } else { Image(systemName: "arrow.triangle.2.circlepath") } }
-                    }.font(.system(size: 16)).foregroundStyle(Theme.tint).padding(.vertical, 14).disabled(store.isSyncing)
-                    Divider()
-                    Button(signingOut ? "Signing Out..." : "Sign Out") { confirmSignOut = true }
-                        .font(.system(size: 16)).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading).padding(.vertical, 14).disabled(signingOut)
-                }.caloricCard(padding: 14)
-                if let error { Text(error).font(.system(size: 13)).foregroundStyle(.red) }
-                if let error = store.error { Text(error).font(.system(size: 13)).foregroundStyle(.secondary) }
-                if let error = store.syncError { Text(error).font(.system(size: 13)).foregroundStyle(.red) }
-                sectionTitle("Friends")
-                FriendsSettingsView()
-            }.padding(.horizontal, 16).padding(.bottom, 24)
-        }.background(Theme.background).scrollDismissesKeyboard(.interactively)
+                }.padding(.vertical, 6)
+            } header: { Text("Macro Ratios") } footer: { Text("Drag the handles to split your daily calories between protein, carbs and fat.") }
+            FriendsSettingsView()
+            Section {
+                LabeledContent("Signed in as") {
+                    Text(AppConfiguration.uiTesting ? "preview@caloric.app" : auth.user?.email ?? "").lineLimit(1).truncationMode(.middle)
+                }
+                LabeledContent("Cloud Sync") {
+                    HStack(spacing: 6) {
+                        Circle().fill(syncColor).frame(width: 8, height: 8)
+                        Text(syncLabel)
+                    }.accessibilityElement(children: .combine).accessibilityIdentifier("sync-status")
+                }
+                LabeledContent("Last Synced") {
+                    if let date = store.lastSyncedAt { Text(date, style: .relative) } else { Text("Never") }
+                }
+                Button { Task { await store.synchronize() } } label: {
+                    HStack {
+                        Label("Sync Now", systemImage: "arrow.triangle.2.circlepath")
+                        Spacer()
+                        if store.isSyncing { ProgressView() }
+                    }
+                }.formAction().disabled(store.isSyncing)
+                Button(role: .destructive) { confirmSignOut = true } label: {
+                    Text(signingOut ? "Signing Out..." : "Sign Out")
+                }.formAction(.red).disabled(signingOut)
+            } header: { Text("Account") } footer: {
+                if let message = error ?? store.syncError ?? store.error { Text(message).foregroundStyle(error != nil || store.syncError != nil ? .red : .secondary) }
+            }
+        }
+            .formStyle(.grouped).tint(Theme.tint).scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.large)
             .toolbar { ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() }.accessibilityLabel("Close Settings") } }
             .onAppear { load() }
@@ -88,14 +92,21 @@ struct SettingsView: View {
     }
     private var syncColor: Color { store.isSyncing ? Theme.tint : store.syncError != nil ? .red : store.dirty || store.lastSyncedAt == nil ? Theme.carbs : .green }
     private func load() { goal = "\(store.settings.calorieGoal)"; ratios = store.settings }
-    private func sectionTitle(_ text: String) -> some View { Text(text).font(.system(size: 13)).foregroundStyle(.secondary).padding(.horizontal, 4).padding(.top, 6) }
-    private func valueRow(_ label: String, _ value: String) -> some View {
-        HStack(spacing: 12) { Text(label).foregroundStyle(.primary); Spacer(minLength: 4); Text(value).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7) }
-            .font(.system(size: 16)).padding(.vertical, 13)
-    }
+    private var syncLabel: String { store.isSyncing ? "Syncing" : store.syncError != nil ? "Sync Failed" : store.dirty ? "Pending" : store.lastSyncedAt != nil ? "Synced" : "Not Synced" }
     private func legend(_ text: String, _ color: Color) -> some View {
-        HStack(spacing: 5) { Circle().fill(color).frame(width: 8, height: 8); Text(text).font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary) }
+        HStack(spacing: 5) { Circle().fill(color).frame(width: 8, height: 8); Text(text).font(.footnote.weight(.semibold)).monospacedDigit().foregroundStyle(.secondary) }
     }
+}
+
+private struct FormAction: ViewModifier {
+    @Environment(\.isEnabled) private var isEnabled
+    let color: Color
+    func body(content: Content) -> some View { content.foregroundStyle(isEnabled ? color : Color(uiColor: .tertiaryLabel)) }
+}
+
+extension View {
+    /// The root view forces a label-colored foreground, so Form buttons need their tint applied explicitly.
+    func formAction(_ color: Color = Theme.tint) -> some View { modifier(FormAction(color: color)) }
 }
 
 struct MacroRatioSlider: View {

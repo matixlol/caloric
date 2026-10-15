@@ -414,7 +414,7 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertEqual(app.textFields["food-search"].value as? String, "12345678")
         app.buttons["Close food search"].tap(); app.buttons["Settings"].tap()
         app.swipeUp()
-        XCTAssertTrue(app.staticTexts["Friends"].exists)
+        XCTAssertTrue(app.staticTexts["Friends"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.buttons["Copy your friend code"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.textFields["Friend code"].exists)
         capture("Friends settings and account code", app)
