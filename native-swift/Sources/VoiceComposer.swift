@@ -1,6 +1,6 @@
 import SwiftUI
 
-struct VoiceComposer: View {
+struct VoiceComposer<Leading: View, Accessory: View>: View {
     @Binding var input: String
     @Bindable var voice: VoiceRecorder
     var focus: FocusState<Bool>.Binding
@@ -8,6 +8,12 @@ struct VoiceComposer: View {
     let sendText: () -> Void
     let sendVoice: (URL, String) -> Void
     let glassNamespace: Namespace.ID
+    /// Pending attachments allow sending without text (next assistant only).
+    var hasAttachments = false
+    var sendEnabled = true
+    var placeholder = "Message the food assistant"
+    @ViewBuilder var leading: () -> Leading
+    @ViewBuilder var accessory: () -> Accessory
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var holding = false
@@ -19,20 +25,22 @@ struct VoiceComposer: View {
 
     var body: some View {
         VStack(spacing: 8) {
+            accessory()
             HStack(alignment: .bottom, spacing: 10) {
+                if !active { leading() }
                 if active { recordingCard.transition(.opacity.combined(with: .move(edge: .bottom))) }
                 else {
-                    TextField("Message the food assistant", text: $input, axis: .vertical)
+                    TextField(placeholder, text: $input, axis: .vertical)
                         .lineLimit(1...5).font(.body).textFieldStyle(.plain).focused(focus).disabled(disabled)
-                        .submitLabel(.send).onSubmit { if !disabled { sendText() } }
+                        .submitLabel(.send).onSubmit { if !disabled && sendEnabled { sendText() } }
                         .padding(.horizontal, 18).padding(.vertical, 12).frame(minHeight: 48)
                         .caloricGlass(in: RoundedRectangle(cornerRadius: 26), interactive: true)
                         .glassIdentity("composer", in: glassNamespace)
                         .accessibilityIdentifier("ai-composer")
                         .onChange(of: input) { _, value in if value.count > 600 { input = String(value.prefix(600)) } }
                 }
-                if !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && !active {
-                    actionButton("paperplane.fill", label: "Send message", color: Theme.tint, action: sendText).disabled(disabled)
+                if (!input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAttachments) && !active {
+                    actionButton("paperplane.fill", label: "Send message", color: Theme.tint, action: sendText).disabled(disabled || !sendEnabled)
                 } else if locked && voice.recording {
                     actionButton("paperplane.fill", label: "Send voice message", color: Theme.tint) { finish(cancelled: false) }
                 } else { microphone }
@@ -45,6 +53,7 @@ struct VoiceComposer: View {
             .animation(reduceMotion ? nil : .spring(response: 0.32, dampingFraction: 0.86), value: active)
             .animation(reduceMotion ? nil : .spring(response: 0.25, dampingFraction: 0.8), value: locked)
             .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: input.isEmpty)
+            .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: hasAttachments)
             .onChange(of: voice.recording) { _, recording in
                 if !recording && !voice.starting { reset() }
             }
@@ -166,4 +175,12 @@ struct VoiceComposer: View {
         reset()
     }
     private func reset() { holding = false; locked = false; cancelProgress = 0; lockProgress = 0 }
+}
+
+extension VoiceComposer where Leading == EmptyView, Accessory == EmptyView {
+    init(input: Binding<String>, voice: VoiceRecorder, focus: FocusState<Bool>.Binding, disabled: Bool,
+         sendText: @escaping () -> Void, sendVoice: @escaping (URL, String) -> Void, glassNamespace: Namespace.ID) {
+        self.init(input: input, voice: voice, focus: focus, disabled: disabled, sendText: sendText, sendVoice: sendVoice,
+                  glassNamespace: glassNamespace, leading: { EmptyView() }, accessory: { EmptyView() })
+    }
 }

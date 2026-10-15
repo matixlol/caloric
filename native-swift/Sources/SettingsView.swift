@@ -9,6 +9,9 @@ struct SettingsView: View {
     @State private var confirmSignOut = false
     @State private var signingOut = false
     @State private var error: String?
+    @State private var labs = AssistantLabs.shared
+    @State private var versionTaps = 0
+    @State private var labsUnlocked = false
     private var edited: UserSettings {
         var settings = ratios
         settings.calorieGoal = Int(goal) ?? 0
@@ -66,6 +69,19 @@ struct SettingsView: View {
             } header: { Text("Account") } footer: {
                 if let message = error ?? store.syncError ?? store.error { Text(message).foregroundStyle(error != nil || store.syncError != nil ? .red : .secondary) }
             }
+            if labsUnlocked || labs.override != nil { labsSection }
+            Section {} footer: {
+                Text(versionText).font(.caption2).foregroundStyle(.tertiary)
+                    .frame(maxWidth: .infinity).contentShape(Rectangle())
+                    .onTapGesture {
+                        versionTaps += 1
+                        if versionTaps >= 7 && !labsUnlocked {
+                            withAnimation { labsUnlocked = true }
+                            UINotificationFeedbackGenerator().notificationOccurred(.success)
+                        }
+                    }
+                    .accessibilityIdentifier("settings-version")
+            }
         }
             .formStyle(.grouped).tint(Theme.tint).scrollDismissesKeyboard(.interactively)
             .navigationTitle("Settings").navigationBarTitleDisplayMode(.large)
@@ -89,6 +105,21 @@ struct SettingsView: View {
                 }
             } message: { Text("You will need to sign in again to access your account.") }
       }
+    }
+    private var versionText: String {
+        let info = Bundle.main.infoDictionary
+        return "caloric \(info?["CFBundleShortVersionString"] as? String ?? "") (\(info?["CFBundleVersion"] as? String ?? ""))"
+    }
+    private var labsSection: some View {
+        Section {
+            Picker("Assistant", selection: Binding(get: { labs.override }, set: { labs.override = $0 })) {
+                Text("Default").tag(AssistantVariant?.none)
+                Text("Classic").tag(AssistantVariant?.some(.classic))
+                Text("Next (new model + photos)").tag(AssistantVariant?.some(.next))
+            }.pickerStyle(.menu).accessibilityIdentifier("labs-assistant-picker")
+        } header: { Text("Labs") } footer: {
+            Text("Default follows your account (\(labs.serverVariant == .next ? "Next" : "Classic")). Changing this starts a new chat.")
+        }.accessibilityIdentifier("labs-section")
     }
     private var syncColor: Color { store.isSyncing ? Theme.tint : store.syncError != nil ? .red : store.dirty || store.lastSyncedAt == nil ? Theme.carbs : .green }
     private func load() { goal = "\(store.settings.calorieGoal)"; ratios = store.settings }
