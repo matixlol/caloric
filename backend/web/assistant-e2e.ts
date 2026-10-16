@@ -3,7 +3,7 @@ import { fileURLToPath } from "node:url";
 import { chromium } from "playwright";
 import { createDemo, dateKey, type Food } from "./model";
 
-// Deterministic browser test for the shadow-flagged "next" assistant: photo
+// Deterministic browser test for the food assistant: photo
 // attachments (picker, drop, paste), the multipart turn payload, streamed
 // events and the review cards. All API traffic is mocked; nothing leaves the
 // machine. Screenshots go to CALORIC_SHOTS (default /tmp/caloric-web-shots).
@@ -92,10 +92,9 @@ async function run(scheme: "light" | "dark") {
     if (path === "/social/daily-summaries") return route.fulfill({ json: { summaries: [] } });
     if (path === "/social/me")
       return route.fulfill({ json: { profile: { userId: "next-user", displayName: "Next", friendCode: "N-1" }, friends: [], incomingRequests: [], outgoingRequests: [] } });
-    if (path === "/ai/config") return route.fulfill({ json: { variant: "next" } });
     if (path === "/ai/session") {
-      assert.equal(request.postDataJSON().variant, "next");
-      return route.fulfill({ json: { sessionId: "next-session", variant: "next" } });
+      assert.equal(request.postDataJSON().variant, undefined);
+      return route.fulfill({ json: { sessionId: "assistant-session" } });
     }
     if (path === "/ai/turn") {
       const body = request.postDataBuffer()!.toString("latin1");
@@ -165,7 +164,7 @@ try {
   snapshot = createDemo(dateKey());
   await run("dark");
   assert.deepEqual(errors, []);
-  console.log(`assistant next e2e passed; screenshots in ${shots}`);
+  console.log(`assistant e2e passed; screenshots in ${shots}`);
 } finally {
   await browser.close();
   server.stop(true);

@@ -4,8 +4,8 @@
 // output of this script outside the repository (the defaults live under /tmp).
 //
 //   bun scripts/ai-eval.ts export                      # needs PROD_DATABASE_URL
-//   bun scripts/ai-eval.ts transcribe                  # reference transcripts (Gemini)
-//   bun scripts/ai-eval.ts run google:gemini-3.8-flash [--prompt next] [--thinking low]
+//   bun scripts/ai-eval.ts transcribe                  # reference transcripts (OpenRouter)
+//   bun scripts/ai-eval.ts run meta/muse-wonder [--reasoning low]   # any OpenRouter model ID
 //   bun scripts/ai-eval.ts judge <run.json>...         # hindsight grading (OpenRouter)
 //   bun scripts/ai-eval.ts report <graded.json>...
 //
@@ -26,14 +26,13 @@ const { values: flags, positionals } = parseArgs({
   allowPositionals: true,
   options: {
     dir: { type: "string", default: "/tmp/caloric-exp" },
-    prompt: { type: "string", default: "classic" },
-    thinking: { type: "string", default: "low" },
+    reasoning: { type: "string", default: "minimal" },
+    transcriber: { type: "string", default: "google/gemini-4-argon" },
     concurrency: { type: "string", default: "6" },
     limit: { type: "string" },
     label: { type: "string" },
-    judge: { type: "string", default: "openrouter:anthropic/claude-opus-5.5" },
+    judge: { type: "string", default: "anthropic/claude-opus-5.5" },
     search: { type: "string", default: "https://backend.caloric.mati.lol/search" },
-    repair: { type: "boolean", default: false },
     asr: { type: "string" },
     wav: { type: "boolean", default: false },
     // Write judge prompts to batch files for external graders (e.g. Claude subagents)
@@ -56,7 +55,7 @@ type Suggestion = { meal: string; portion: number; reason: string; food: { name:
 type CaseResult = {
   sessionId: string;
   model: string;
-  prompt: string;
+  reasoning: string;
   ms: number;
   error?: string;
   searches: string[];
@@ -116,9 +115,7 @@ async function transcribe() {
   const sessions = await readJson<ExportedSession[]>("sessions.json");
   const cachePath = `${dir}/transcripts.json`;
   const cache: Record<string, string> = (await Bun.file(cachePath).exists()) ? await readJson(cachePath) : {};
-  const model = createAssistantModel(flags.judge?.startsWith("google:") ? flags.judge : "google:gemini-4-argon", "low", {
-    googleAiStudioApiKey: process.env.GOOGLE_AI_STUDIO_API_KEY,
-  });
+  const model = createAssistantModel(flags.transcriber!, "low", { openRouterApiKey: process.env.OPENROUTER_API_KEY });
   const clips: Array<{ key: string; part: { data: string; mediaType: string } }> = [];
   for (const session of sessions) {
     session.conversation.forEach((message, index) => {
@@ -203,10 +200,7 @@ async function asrTranscripts(spec: string, sessions: ExportedSession[]) {
   const cache: Record<string, string> = (await Bun.file(cachePath).exists()) ? await readJson(cachePath) : {};
   // A comma-separated list falls back to the next model when one fails.
   const models = spec.split(",").map((one) =>
-    createAssistantModel(one.trim(), "minimal", {
-      googleAiStudioApiKey: process.env.GOOGLE_AI_STUDIO_API_KEY,
-      openRouterApiKey: process.env.OPENROUTER_API_KEY,
-    }),
+    createAssistantModel(one.trim(), "minimal", { openRouterApiKey: process.env.OPENROUTER_API_KEY }),
   );
   const jobs = sessions.flatMap((session) => {
     const first = firstUserIndex(session.conversation);
@@ -281,32 +275,27 @@ function withTranscript(message: ModelMessage, transcript: string | undefined): 
 }
 
 async function run(spec: string) {
-  const { runAssistantLoop, systemPrompt, nextSystemPrompt, fastSystemPrompt } = await import("../src/services/ai-agent");
+  const { runAssistantLoop, systemPrompt } = await import("../src/services/ai-agent");
   const { createAssistantModel } = await import("../src/services/ai-models");
   const sessions = await readJson<ExportedSession[]>("sessions.json");
   const cases = sessions.filter((session) => firstUserIndex(session.conversation) >= 0).slice(0, flags.limit ? Number(flags.limit) : undefined);
-  const assistant = createAssistantModel(spec, flags.thinking as "low", {
-    googleAiStudioApiKey: process.env.GOOGLE_AI_STUDIO_API_KEY,
-    openRouterApiKey: process.env.OPENROUTER_API_KEY,
-  });
-  const prompt = flags.prompt === "fast" ? fastSystemPrompt : flags.prompt === "next" ? nextSystemPrompt : systemPrompt;
+  const assistant = createAssistantModel(spec, flags.reasoning as "minimal", { openRouterApiKey: process.env.OPENROUTER_API_KEY });
   const { search, flush } = await cachedSearch();
   const asr = flags.asr ? await asrTranscripts(flags.asr, cases) : null;
   const label =
     flags.label ??
-    `${spec.replace(/[^a-z0-9.-]+/gi, "_")}__${flags.prompt}__${flags.thinking}${flags.repair ? "__repair" : ""}${flags.wav ? "__wav" : ""}${flags.asr ? `__asr-${flags.asr.split(",")[0]!.replace(/^.*\//, "")}` : ""}`;
+    `${spec.replace(/[^a-z0-9.-]+/gi, "_")}__${flags.reasoning}${flags.wav ? "__wav" : ""}${flags.asr ? `__asr-${flags.asr.split(",")[0]!.replace(/^.*\//, "")}` : ""}`;
   let done = 0;
 
   const results = await mapLimit(cases, Number(flags.concurrency), async (session): Promise<CaseResult> => {
     const first = firstUserIndex(session.conversation);
-    // Keep the recent-log context from production, swap in the prompt under test.
+    // Keep the recent-log context from production, swap in the current prompt.
     const context = session.conversation.slice(0, first).filter((message, index) => index > 0 && message.role === "system");
     const state = {
       id: session.id,
       userId: session.user_id,
-      variant: "classic" as const,
       conversation: [
-        { role: "system" as const, content: prompt },
+        { role: "system" as const, content: systemPrompt },
         ...context,
         asr
           ? withTranscript(session.conversation[first]!, asr[`${session.id}#${first}`])
@@ -318,14 +307,12 @@ async function run(spec: string) {
       searchResultsByLocalId: {},
       pendingApprovals: {},
     };
-    const result: CaseResult = { sessionId: session.id, model: spec, prompt: flags.prompt!, ms: 0, searches: [], texts: [], suggestions: [] };
+    const result: CaseResult = { sessionId: session.id, model: spec, reasoning: flags.reasoning!, ms: 0, searches: [], texts: [], suggestions: [] };
     const started = performance.now();
     try {
       await runAssistantLoop(state, {
         assistant,
         search,
-        repair: flags.repair,
-        parallelSearch: true,
         onUsage: (usage) => {
           result.inputTokens = (result.inputTokens ?? 0) + usage.inputTokens;
           result.outputTokens = (result.outputTokens ?? 0) + usage.outputTokens;
@@ -406,10 +393,7 @@ async function judge(files: string[]) {
   const sessions = new Map((await readJson<ExportedSession[]>("sessions.json")).map((s) => [s.id, s]));
   const transcripts: Record<string, string> = (await Bun.file(`${dir}/transcripts.json`).exists()) ? await readJson(`transcripts.json`) : {};
   const runs = await Promise.all(files.map((file) => readJson<CaseResult[]>(file)));
-  const judgeModel = createAssistantModel(flags.judge!, "low", {
-    googleAiStudioApiKey: process.env.GOOGLE_AI_STUDIO_API_KEY,
-    openRouterApiKey: process.env.OPENROUTER_API_KEY,
-  });
+  const judgeModel = createAssistantModel(flags.judge!, "low", { openRouterApiKey: process.env.OPENROUTER_API_KEY });
   const cachePath = `${dir}/${flags.cache}`;
   const cache: Record<string, unknown> = (await Bun.file(cachePath).exists()) ? await readJson(cachePath) : {};
   const Grade = z.object({
@@ -560,7 +544,7 @@ async function report(files: string[]) {
 
 if (command === "export") await exportSessions();
 else if (command === "transcribe") await transcribe();
-else if (command === "run") await run(positionals[1] ?? "google:gemini-3.6-flash");
+else if (command === "run") await run(positionals[1] ?? "meta/muse-wonder");
 else if (command === "judge") await judge(positionals.slice(1).map((f) => (f.includes("/") ? f : `runs/${f}`)));
 else if (command === "judge-import") await judgeImport(positionals.slice(1).map((f) => (f.includes("/") ? f : `runs/${f}`)));
 else if (command === "report") await report(positionals.slice(1).map((f) => (f.includes("/") ? f : `runs/${f}`)));

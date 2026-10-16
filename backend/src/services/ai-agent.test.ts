@@ -38,7 +38,6 @@ function session(): AiSessionState {
   return {
     id: "s",
     userId: "u",
-    variant: "next",
     conversation: [{ role: "user", content: "a banana" }],
     searchResultCounter: 1,
     searchResultsByLocalId: {},
@@ -80,7 +79,7 @@ describe("runAssistantLoop parallel search", () => {
       return [{ id: query, name: query.split(" ")[1]! }] as never[];
     };
     const events: AgentEvent[] = [];
-    await runAssistantLoop(session(), { assistant: { id: "mock", model }, search, parallelSearch: true, onEvent: (e) => events.push(e) });
+    await runAssistantLoop(session(), { assistant: { id: "mock", model }, search, onEvent: (e) => events.push(e) });
 
     expect(maxInFlight).toBe(2);
     expect(events.filter((e) => e.kind === "search").map((e) => (e as { query: string }).query)).toEqual(["slow apple", "fast bread"]);
@@ -97,7 +96,7 @@ describe("runAssistantLoop repair", () => {
     ]);
     const events: AgentEvent[] = [];
     const state = session();
-    await runAssistantLoop(state, { assistant: { id: "mock", model }, search, repair: true, onEvent: (e) => events.push(e) });
+    await runAssistantLoop(state, { assistant: { id: "mock", model }, search, onEvent: (e) => events.push(e) });
 
     expect(prompts).toHaveLength(3);
     expect(JSON.stringify(prompts[1])).toContain("Automatic note from the app");
@@ -110,21 +109,15 @@ describe("runAssistantLoop repair", () => {
 
   test("retries a silent stop after searching, at most twice", async () => {
     const { model, prompts } = scriptedModel([{ tool: { name: "searchFoods", input: { query: "banana" } } }, {}, {}, {}]);
-    await runAssistantLoop(session(), { assistant: { id: "mock", model }, search, repair: true });
+    await runAssistantLoop(session(), { assistant: { id: "mock", model }, search });
     expect(prompts).toHaveLength(4);
   });
 
-  test("streams normal text unchanged and keeps classic behaviour without repair", async () => {
+  test("streams normal text unchanged", async () => {
     const { model, prompts } = scriptedModel([{ text: "What size was the banana you ate today?" }]);
     const events: AgentEvent[] = [];
-    await runAssistantLoop(session(), { assistant: { id: "mock", model }, search, repair: true, onEvent: (e) => events.push(e) });
+    await runAssistantLoop(session(), { assistant: { id: "mock", model }, search, onEvent: (e) => events.push(e) });
     expect(prompts).toHaveLength(1);
     expect(events.filter((e) => e.kind === "assistant-delta").map((e) => (e as { text: string }).text).join("")).toBe("What size was the banana you ate today?");
-
-    const classic = scriptedModel([{ text: "call:default_api:searchFoods{query:banana}" }]);
-    const classicEvents: AgentEvent[] = [];
-    await runAssistantLoop(session(), { assistant: { id: "mock", model: classic.model }, search, onEvent: (e) => classicEvents.push(e) });
-    expect(classic.prompts).toHaveLength(1);
-    expect(classicEvents.at(-1)).toMatchObject({ kind: "assistant", text: "call:default_api:searchFoods{query:banana}" });
   });
 });

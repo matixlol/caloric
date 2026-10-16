@@ -1,9 +1,9 @@
 import PhotosUI
 import SwiftUI
 
-/// Shadow-flagged food assistant: photos, drag and drop, and compact food review.
-/// The home composer keeps the classic hold-to-talk gestures; the conversation opens in a native sheet.
-struct AssistantNextView: View {
+/// Food assistant: text, hold-to-talk voice notes, photos (library, camera, paste, drag and drop)
+/// and compact food review. The home composer opens the conversation in a native sheet.
+struct AssistantView: View {
     let chat: AILogService
     let voice: VoiceRecorder
     var isPresented = true
@@ -41,7 +41,7 @@ struct AssistantNextView: View {
             let arguments = ProcessInfo.processInfo.arguments
             if AppConfiguration.uiTesting {
                 if arguments.contains("-seed-ai-attachments") { draft.attachments = AssistantDemo.images(count: 2) }
-                if arguments.contains("-ai-panel-open") || arguments.contains("-seed-chat-next") || arguments.contains("-seed-chat-next-activity") { open = true }
+                if arguments.contains("-ai-panel-open") || arguments.contains("-seed-chat") || arguments.contains("-seed-chat-activity") { open = true }
                 if arguments.contains("-ai-panel-expanded") { open = true; detent = .large }
                 if arguments.contains("-ai-focus") { focusOnOpen = true }
             }
@@ -188,7 +188,7 @@ private struct AssistantConversationScreen: View {
         .presentationContentInteraction(.scrolls)
         .interactiveDismissDisabled(voice.recording || voice.starting)
         .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("ai-next-panel")
+        .accessibilityIdentifier("ai-panel")
         .onAppear {
             detent = isEmpty ? compact : detent == .large ? .large : .medium
             if focusOnOpen { focusOnOpen = false; focus = true }
@@ -228,10 +228,6 @@ private struct AssistantTitle: View {
             Image(systemName: "sparkles").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.tint)
                 .accessibilityHidden(true)
             Text("Assistant").font(.headline)
-            Text("LABS").font(.system(size: 9, weight: .heavy)).tracking(0.8)
-                .foregroundStyle(Theme.tint).padding(.horizontal, 5).padding(.vertical, 2.5)
-                .background(Theme.tint.opacity(0.14), in: Capsule())
-                .accessibilityLabel("Labs preview")
         }
     }
 }

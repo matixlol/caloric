@@ -40,7 +40,7 @@ struct ChatMessage: Identifiable {
     var toolCallID: String?
     var suggestions: [FoodSuggestion] = []
     var duration: String?
-    /// Photos attached to a user message (next assistant only).
+    /// Photos attached to a user message.
     var images: [AssistantImage] = []
 }
 
@@ -97,12 +97,6 @@ final class AILogService {
     private var activeUserMessageID: String?
     private var terminal = false
     private var foreground = true
-    /// The assistant experience this conversation belongs to. Switching it starts a new chat.
-    private(set) var variant: AssistantVariant = .classic
-    /// Variant sent with `ai/session`; nil omits the field (classic default behaviour).
-    private var requestedVariant: AssistantVariant?
-    /// Variant reported by the server for the current session, when it says so.
-    private(set) var sessionVariant: AssistantVariant?
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
     @ObservationIgnored private var operationID: UUID?
@@ -145,24 +139,15 @@ final class AILogService {
     /// Cancels any running request and forgets the server session and visible conversation.
     func startNewConversation() {
         operationID = nil; timeoutTask?.cancel(); timeoutTask = nil
-        task?.cancel(); task = nil; sessionID = nil; sessionVariant = nil; messages = []; streaming = false; error = nil
+        task?.cancel(); task = nil; sessionID = nil; messages = []; streaming = false; error = nil
         activeTurnID = nil; appliedSequence = -1; activeAssistantID = nil; activeUserMessageID = nil; terminal = false
-    }
-    /// Selects the assistant experience. The chat restarts only when the effective variant changes;
-    /// `requested` is what the next `ai/session` request sends.
-    func configure(variant: AssistantVariant, requested: AssistantVariant?) {
-        requestedVariant = requested
-        guard variant != self.variant else { return }
-        self.variant = variant
-        startNewConversation()
     }
     struct SessionContext: Encodable {
         var recentLogs: [Hint]
-        var variant: AssistantVariant?
         struct Hint: Encodable { var foodName: String; var meal: Meal; var brand: String?; var serving: String?; var createdAt: Int64; var dateKey: String }
     }
     struct MultipartImage { var data: Data; var filename: String }
-    /// Builds the `ai/turn` multipart body. Audio-only bodies are identical to the original classic encoding.
+    /// Builds the `ai/turn` multipart body for text with photos and/or a voice note.
     static func multipartBody(boundary: String, sessionID: String, text: String, audio: Data?, images: [Data]) -> Data {
         var body = Data()
         func field(_ name: String, _ value: String) {
@@ -194,23 +179,19 @@ final class AILogService {
             }
             do {
                 if sessionID == nil {
-                    struct Session: Decodable { var sessionId: String; var variant: String? }
+                    struct Session: Decodable { var sessionId: String }
                     let cutoff = LocalDay.milliseconds() - 3 * 24 * 60 * 60 * 1000
                     let hints = store.entries.filter { $0.data.createdAt >= cutoff }.prefix(80).map {
                         SessionContext.Hint(foodName: $0.data.foodName, meal: $0.data.meal, brand: $0.data.brand, serving: $0.data.serving, createdAt: $0.data.createdAt, dateKey: $0.data.dateKey)
                     }
-                    let context = SessionContext(recentLogs: hints, variant: requestedVariant)
+                    let context = SessionContext(recentLogs: hints)
                     let request = try await api.request("ai/session", method: "POST", body: JSONEncoder().encode(context), expectedUserID: activeAccount)
                     let response: Session = try await api.send(request)
                     try Task.checkCancellation()
                     guard accountID == activeAccount, operationID == operation else { return }
                     sessionID = response.sessionId
-                    sessionVariant = response.variant.flatMap(AssistantVariant.init(rawValue:))
                 }
                 guard let sessionID else { return }
-                if !images.isEmpty, sessionVariant == .classic {
-                    throw APIError.response(400, "Photos are not available for this chat yet. Start a new chat and try again.")
-                }
                 var request: URLRequest
                 if audio != nil || !images.isEmpty {
                     let boundary = "Caloric-\(UUID().uuidString)"

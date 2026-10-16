@@ -3,7 +3,7 @@ import { describe, expect, it, mock } from "bun:test";
 const hasRequiredEnv =
   Boolean(Bun.env.DATABASE_URL) &&
   Boolean(Bun.env.BETTER_AUTH_SECRET) &&
-  Boolean(Bun.env.GOOGLE_AI_STUDIO_API_KEY);
+  Boolean(Bun.env.OPENROUTER_API_KEY);
 
 const liveIt = hasRequiredEnv ? it : it.skip;
 

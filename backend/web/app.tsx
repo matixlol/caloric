@@ -25,9 +25,8 @@ import {
   friendSummariesQuery,
 } from "./queries";
 import { EntryEditor, FoodPicker, Recipes, Settings, SignIn } from "./forms";
-import { Assistant } from "./chat";
-import { AssistantNext, type AssistantLaunch } from "./chat-next";
-import { imageFiles, useAssistantVariant } from "./assistant-next";
+import { Assistant, type AssistantLaunch } from "./chat";
+import { imageFiles } from "./assistant";
 import { FriendDay, Friends } from "./friends";
 import { Journal } from "./journal";
 import { ErrorNotice, format, Icon, IconButton, Summary } from "./ui";
@@ -95,7 +94,6 @@ function App({ userId }: { userId: string }) {
     null,
   );
   const [offline, setOffline] = useState(!navigator.onLine);
-  const assistantVariant = useAssistantVariant(userId);
   const [launch, setLaunch] = useState<AssistantLaunch | null>(null);
   const photoInput = useRef<HTMLInputElement>(null);
   function openAssistant(options: Omit<AssistantLaunch, "key"> = {}) {
@@ -127,7 +125,7 @@ function App({ userId }: { userId: string }) {
   const friendsCount = friends?.length ?? rememberedCount;
   const friendsError = summaries.error;
   useEffect(() => {
-    if (assistantVariant !== "next" || modal) return;
+    if (modal) return;
     // Photos dropped or pasted anywhere on the journal open the assistant.
     const hasFiles = (event: DragEvent) => event.dataTransfer?.types.includes("Files");
     const over = (event: DragEvent) => {
@@ -153,7 +151,7 @@ function App({ userId }: { userId: string }) {
       window.removeEventListener("drop", drop);
       window.removeEventListener("paste", paste);
     };
-  }, [assistantVariant, Boolean(modal)]);
+  }, [Boolean(modal)]);
   useEffect(() => {
     if (!modal) return;
     // One history entry for the whole sheet flow, including Settings → Recipes.
@@ -508,43 +506,31 @@ function App({ userId }: { userId: string }) {
           />
         </nav>
       </main>
-      <div
-        className={`composer-dock ${assistantVariant === "next" ? "next" : ""}`}
-      >
-        {assistantVariant === "next" && (
-          <>
-            <IconButton
-              name="image"
-              title="Log food from a photo"
-              onClick={() => photoInput.current?.click()}
-            />
-            <input
-              ref={photoInput}
-              type="file"
-              accept="image/*"
-              multiple
-              hidden
-              onChange={(e) => {
-                const files = Array.from(e.target.files ?? []);
-                e.target.value = "";
-                if (files.length) openAssistant({ files });
-              }}
-            />
-          </>
-        )}
+      <div className="composer-dock">
+        <IconButton
+          name="image"
+          title="Log food from a photo"
+          onClick={() => photoInput.current?.click()}
+        />
+        <input
+          ref={photoInput}
+          type="file"
+          accept="image/*"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.target.files ?? []);
+            e.target.value = "";
+            if (files.length) openAssistant({ files });
+          }}
+        />
         <button className="floating-composer" onClick={() => openAssistant()}>
-          <span>
-            {assistantVariant === "next"
-              ? "What did you eat?"
-              : "Message the food assistant"}
-          </span>
+          <span>What did you eat?</span>
         </button>
         <IconButton
           name="mic"
           title="Ask Caloric with voice"
-          onClick={() =>
-            openAssistant({ record: assistantVariant === "next" })
-          }
+          onClick={() => openAssistant({ record: true })}
         />
       </div>
       {toast && (
@@ -636,27 +622,17 @@ function App({ userId }: { userId: string }) {
         />
       )}
       {modal?.type === "friends" && <Friends userId={userId} onClose={close} />}
-      {assistantVariant === "next" ? (
-        <AssistantNext
-          open={modal?.type === "chat"}
-          launch={launch}
-          snapshot={snapshot}
-          day={day}
-          onSaveMany={async (entries) => {
-            await mutate({ entries }, null);
-            setAddedId(entries[entries.length - 1]!.id);
-          }}
-          onClose={close}
-        />
-      ) : (
-        <Assistant
-          open={modal?.type === "chat"}
-          snapshot={snapshot}
-          day={day}
-          onSave={addEntry}
-          onClose={close}
-        />
-      )}
+      <Assistant
+        open={modal?.type === "chat"}
+        launch={launch}
+        snapshot={snapshot}
+        day={day}
+        onSaveMany={async (entries) => {
+          await mutate({ entries }, null);
+          setAddedId(entries[entries.length - 1]!.id);
+        }}
+        onClose={close}
+      />
     </>
   );
 }

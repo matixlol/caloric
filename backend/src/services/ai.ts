@@ -5,15 +5,9 @@ import { createAiSessionId, createAiTurnId } from "../id";
 import { logError, summarizeText } from "../logging";
 import { Sentry } from "../lib/sentry";
 import { z } from "zod";
-import { fastSystemPrompt, runAssistantLoop, systemPrompt, type AssistantModel } from "./ai-agent";
+import { runAssistantLoop, systemPrompt } from "./ai-agent";
 import { createAssistantModel } from "./ai-models";
-import {
-  createAiSession,
-  loadAiSession,
-  saveAiSession,
-  type AiSessionState,
-  type AssistantVariant,
-} from "./ai-store";
+import { createAiSession, loadAiSession, saveAiSession, type AiSessionState } from "./ai-store";
 import {
   createTurnSseResponse,
   getResumableTurn,
@@ -46,7 +40,7 @@ const maxImageBytes = 8 * 1024 * 1024;
 const imageMediaTypes = new Set(["image/jpeg", "image/png", "image/webp", "image/heic", "image/heif"]);
 
 const sentryPayloadMaxLength = 80_000;
-const geminiSpanCallCounters = new WeakMap<object, number>();
+const modelSpanCallCounters = new WeakMap<object, number>();
 
 function truncateForSentry(value: string, maxLength = sentryPayloadMaxLength): { value: string; truncated: boolean } {
   if (value.length <= maxLength) {
@@ -68,7 +62,7 @@ function headerRecord(headers: Headers): Record<string, string> {
       const normalizedKey = key.toLowerCase();
       return [
         key,
-        normalizedKey === "authorization" || normalizedKey === "x-goog-api-key" ? "[redacted]" : value,
+        normalizedKey === "authorization" ? "[redacted]" : value,
       ];
     }),
   );
@@ -86,7 +80,7 @@ async function requestBodyText(request: Request): Promise<string | null> {
   }
 }
 
-function addGeminiSpanEvent(
+function addModelSpanEvent(
   name: string,
   attributes: Record<string, string | number | boolean | null | undefined>,
 ): void {
@@ -101,30 +95,30 @@ function addGeminiSpanEvent(
   Sentry.getActiveSpan()?.addEvent(name, compactAttributes);
 }
 
-function nextGeminiSpanCallIndex(): number {
+function nextModelSpanCallIndex(): number {
   const span = Sentry.getActiveSpan();
   if (!span) {
     return 1;
   }
 
-  const next = (geminiSpanCallCounters.get(span) ?? 0) + 1;
-  geminiSpanCallCounters.set(span, next);
+  const next = (modelSpanCallCounters.get(span) ?? 0) + 1;
+  modelSpanCallCounters.set(span, next);
   span.setAttributes({
-    "app.ai.gemini.call_count": next,
+    "app.ai.model.call_count": next,
   });
 
   return next;
 }
 
-async function fetchWithGeminiSentryLogging(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+async function fetchWithModelSentryLogging(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const request = input instanceof Request ? new Request(input, init) : new Request(input, init);
-  const callIndex = nextGeminiSpanCallIndex();
+  const callIndex = nextModelSpanCallIndex();
   const startedAt = performance.now();
   const rawRequestBody = await requestBodyText(request);
   const requestBody = rawRequestBody ? truncateForSentry(rawRequestBody) : null;
 
-  addGeminiSpanEvent("gemini.request", {
-    "app.ai.gemini.call_index": callIndex,
+  addModelSpanEvent("model.request", {
+    "app.ai.model.call_index": callIndex,
     "http.request.method": request.method,
     "url.full": request.url,
     "http.request.headers": JSON.stringify(headerRecord(request.headers)),
@@ -141,31 +135,31 @@ async function fetchWithGeminiSentryLogging(input: RequestInfo | URL, init?: Req
       .text()
       .then((rawResponseBody) => {
         const responseBody = truncateForSentry(rawResponseBody);
-        addGeminiSpanEvent("gemini.response", {
-          "app.ai.gemini.call_index": callIndex,
+        addModelSpanEvent("model.response", {
+          "app.ai.model.call_index": callIndex,
           "http.response.status_code": response.status,
           "http.response.headers": JSON.stringify(headerRecord(response.headers)),
           "http.response.body": responseBody.value,
           "http.response.body_length": rawResponseBody.length,
           "http.response.body_truncated": responseBody.truncated,
-          "app.ai.gemini.duration_ms": Math.round(performance.now() - startedAt),
+          "app.ai.model.duration_ms": Math.round(performance.now() - startedAt),
         });
       })
       .catch((error) => {
-        addGeminiSpanEvent("gemini.response_body_failed", {
-          "app.ai.gemini.call_index": callIndex,
+        addModelSpanEvent("model.response_body_failed", {
+          "app.ai.model.call_index": callIndex,
           "http.response.status_code": response.status,
-          "app.ai.gemini.error": stringifyUnknownError(error),
-          "app.ai.gemini.duration_ms": Math.round(performance.now() - startedAt),
+          "app.ai.model.error": stringifyUnknownError(error),
+          "app.ai.model.duration_ms": Math.round(performance.now() - startedAt),
         });
       });
 
     return response;
   } catch (error) {
-    addGeminiSpanEvent("gemini.fetch_failed", {
-      "app.ai.gemini.call_index": callIndex,
-      "app.ai.gemini.error": stringifyUnknownError(error),
-      "app.ai.gemini.duration_ms": Math.round(performance.now() - startedAt),
+    addModelSpanEvent("model.fetch_failed", {
+      "app.ai.model.call_index": callIndex,
+      "app.ai.model.error": stringifyUnknownError(error),
+      "app.ai.model.duration_ms": Math.round(performance.now() - startedAt),
     });
 
     throw error;
@@ -224,25 +218,14 @@ function reportUnknownError(code: string, error: unknown): Response {
   );
 }
 
-function modelProviderKeys() {
-  return {
-    googleAiStudioApiKey: config.googleAiStudioApiKey,
+function createSessionModel() {
+  return createAssistantModel(config.aiModel, config.aiReasoningEffort, {
     openRouterApiKey: config.openRouterApiKey,
-    fetch: fetchWithGeminiSentryLogging as typeof fetch,
-  };
+    fetch: fetchWithModelSentryLogging as typeof fetch,
+  });
 }
 
-function createSessionModel(variant: AssistantVariant): AssistantModel {
-  return variant === "next"
-    ? createAssistantModel(config.aiNextModel, config.aiNextThinkingLevel, modelProviderKeys())
-    : createAssistantModel(`google:${config.geminiModel}`, config.geminiThinkingLevel, modelProviderKeys());
-}
-
-function isNextAssistantUser(userId: string): boolean {
-  return config.aiNextUserIds.includes("*") || config.aiNextUserIds.includes(userId);
-}
-
-async function encodeAudioFile(audioFile: File, decodeToWav = false): Promise<{ data: string; mediaType: string }> {
+async function encodeAudioFile(audioFile: File): Promise<{ data: string; mediaType: string }> {
   if (audioFile.size <= 0) {
     throw new Error("Audio snippet was empty.");
   }
@@ -252,14 +235,12 @@ async function encodeAudioFile(audioFile: File, decodeToWav = false): Promise<{ 
   }
 
   const bytes = new Uint8Array(await audioFile.arrayBuffer());
-  if (decodeToWav) {
-    // Several audio-native models only accept WAV/MP3/FLAC, so phones keep
-    // uploading compact m4a and the server decodes it.
-    try {
-      return { data: (await transcodeAudioToWav(bytes)).toString("base64"), mediaType: "audio/wav" };
-    } catch (error) {
-      captureUnknownError("ai_audio_decode_failed", error);
-    }
+  // Several audio-native models only accept WAV/MP3/FLAC, so phones keep
+  // uploading compact m4a and the server decodes it.
+  try {
+    return { data: (await transcodeAudioToWav(bytes)).toString("base64"), mediaType: "audio/wav" };
+  } catch (error) {
+    captureUnknownError("ai_audio_decode_failed", error);
   }
 
   const data = Buffer.from(bytes).toString("base64");
@@ -411,24 +392,14 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
       "app.ai.recent_log_count": recentLogHints.length,
     });
 
-    // The client's hidden toggle wins; otherwise the server-side allowlist decides.
-    const variant: AssistantVariant =
-      body?.variant === "next" || body?.variant === "classic"
-        ? body.variant
-        : isNextAssistantUser(auth.userId)
-          ? "next"
-          : "classic";
-    Sentry.getActiveSpan()?.setAttribute("app.ai.variant", variant);
-
     const sessionId = createAiSessionId();
     await createAiSession({
       id: sessionId,
       userId: auth.userId,
-      variant,
       conversation: [
         {
           role: "system",
-          content: variant === "next" ? fastSystemPrompt : systemPrompt,
+          content: systemPrompt,
         },
         ...(recentLogContextPrompt
           ? [
@@ -447,21 +418,10 @@ export async function handleAiSessionRequest(request: Request): Promise<Response
     return jsonResponse({
       sessionId,
       status: "ready",
-      variant,
     });
   } catch (error) {
     return reportUnknownError("ai_session_failed", error);
   }
-}
-
-export async function handleAiConfigRequest(request: Request): Promise<Response> {
-  const auth = await requireAuthenticatedUser(request);
-  if (auth instanceof Response) {
-    return auth;
-  }
-
-  const variant: AssistantVariant = isNextAssistantUser(auth.userId) ? "next" : "classic";
-  return jsonResponse({ variant });
 }
 
 export async function handleAiTurnRequest(request: Request): Promise<Response> {
@@ -486,16 +446,11 @@ export async function handleAiTurnRequest(request: Request): Promise<Response> {
     "app.ai.action_type": parsed.action.type,
     "app.ai.has_audio": Boolean(parsed.audioFile),
     "app.ai.image_count": parsed.imageFiles.length,
-    "app.ai.variant": session.variant,
     "app.ai.pending_approval_count": Object.keys(session.pendingApprovals).length,
   });
 
   try {
     if (parsed.action.type === "user-message") {
-      if (parsed.imageFiles.length > 0 && session.variant !== "next") {
-        return jsonResponse({ error: "Photos require the next assistant" }, 400);
-      }
-
       return await handleUserMessageAction(request, session, parsed.action, parsed.audioFile, parsed.imageFiles);
     }
 
@@ -552,7 +507,7 @@ async function handleUserMessageAction(
     }
 
     if (audioFile) {
-      const encodedAudio = await encodeAudioFile(audioFile, session.variant === "next" && config.aiNextAudioWav);
+      const encodedAudio = await encodeAudioFile(audioFile);
       content.push({
         type: "file",
         data: encodedAudio.data,
@@ -598,10 +553,8 @@ async function handleUserMessageAction(
       }
 
       await runAssistantLoop(session, {
-        assistant: createSessionModel(session.variant),
+        assistant: createSessionModel(),
         search: searchUnifiedFoods,
-        repair: session.variant === "next",
-        parallelSearch: session.variant === "next",
         onEvent: emit.event,
         signal,
       });
