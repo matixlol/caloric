@@ -12,6 +12,8 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
     var hasAttachments = false
     var sendEnabled = true
     var placeholder = "Message the food assistant"
+    /// When set, the field is a button that opens the full assistant instead of taking text in place.
+    var openField: (() -> Void)? = nil
     @ViewBuilder var leading: () -> Leading
     @ViewBuilder var accessory: () -> Accessory
     @Environment(\.scenePhase) private var scenePhase
@@ -21,6 +23,7 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
     @State private var lockProgress: CGFloat = 0
     @State private var cancelProgress: CGFloat = 0
     private var active: Bool { holding || voice.recording || voice.starting }
+    private var hasText: Bool { !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var cancelling: Bool { cancelProgress >= 1 && !locked }
 
     var body: some View {
@@ -29,6 +32,7 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
             HStack(alignment: .bottom, spacing: 10) {
                 if !active { leading() }
                 if active { recordingCard.transition(.opacity.combined(with: .move(edge: .bottom))) }
+                else if let openField { fieldButton(openField) }
                 else {
                     TextField(placeholder, text: $input, axis: .vertical)
                         .lineLimit(1...5).font(.body).textFieldStyle(.plain).focused(focus).disabled(disabled)
@@ -39,11 +43,21 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
                         .accessibilityIdentifier("ai-composer")
                         .onChange(of: input) { _, value in if value.count > 600 { input = String(value.prefix(600)) } }
                 }
-                if (!input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || hasAttachments) && !active {
+                // The microphone keeps one structural position so a hold that changes the layout
+                // (photos attached, recording starts) never recreates its touch view mid-gesture.
+                if hasText && !active {
                     actionButton("paperplane.fill", label: "Send message", color: Theme.tint, action: sendText).disabled(disabled || !sendEnabled)
-                } else if locked && voice.recording {
-                    actionButton("paperplane.fill", label: "Send voice message", color: Theme.tint) { finish(cancelled: false) }
-                } else { microphone }
+                }
+                if active || !hasText {
+                    if locked && voice.recording {
+                        actionButton("paperplane.fill", label: "Send voice message", color: Theme.tint) { finish(cancelled: false) }
+                    } else { microphone }
+                }
+                if hasAttachments && !hasText && !active {
+                    // Photos can go with a typed note, a voice note, or on their own.
+                    actionButton("paperplane.fill", label: "Send message", color: Theme.tint, glassID: "composer-send", action: sendText)
+                        .disabled(disabled || !sendEnabled)
+                }
             }
             if let error = voice.error {
                 Text(error).font(.system(size: 12)).foregroundStyle(.red).frame(maxWidth: .infinity, alignment: .leading)
@@ -144,11 +158,26 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
             }.opacity(disabled ? 0.5 : 1)
     }
 
-    private func actionButton(_ image: String, label: String, color: Color, action: @escaping () -> Void) -> some View {
+    private func actionButton(_ image: String, label: String, color: Color, glassID: String = "composer-action", action: @escaping () -> Void) -> some View {
         Button(action: action) { Image(systemName: image).font(.system(size: 20, weight: .semibold)).foregroundStyle(Theme.onTint).frame(width: 24, height: 24) }
             .nativeActionStyle(prominent: true, shape: .circle).controlSize(.large).tint(color)
-            .glassIdentity("composer-action", in: glassNamespace).accessibilityLabel(label)
+            .glassIdentity(glassID, in: glassNamespace).accessibilityLabel(label)
             .holdFocus(active, cornerRadius: 26)
+    }
+
+    private func fieldButton(_ action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(hasText ? input : placeholder).font(.body).lineLimit(1)
+                .foregroundStyle(hasText ? Theme.label : Color.secondary.opacity(0.8))
+                .frame(maxWidth: .infinity, minHeight: 24, alignment: .leading)
+                .padding(.horizontal, 18).padding(.vertical, 12)
+                .contentShape(RoundedRectangle(cornerRadius: 26))
+        }.buttonStyle(.plain)
+            .caloricGlass(in: RoundedRectangle(cornerRadius: 26), interactive: true)
+            .glassIdentity("composer", in: glassNamespace)
+            .disabled(disabled && !hasText)
+            .accessibilityLabel(hasText ? "Draft: \(input)" : placeholder).accessibilityHint("Opens the food assistant")
+            .accessibilityIdentifier("ai-composer")
     }
 
     private func beginRecording() {

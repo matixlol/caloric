@@ -28,12 +28,29 @@ struct VoiceTouchControl: UIViewRepresentable {
         var moved: ((CGSize) -> Void)?
         var ended: ((Bool) -> Void)?
         private var origin: CGPoint?
+        private var paused: [UIGestureRecognizer] = []
 
         override func beginTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
             guard isEnabled else { return false }
             origin = touch.location(in: nil)
+            pauseAncestorPans()
             began?()
             return true
+        }
+        /// A hold that slides up to lock must not resize or dismiss an enclosing sheet or scroll view.
+        private func pauseAncestorPans() {
+            var view = superview
+            while let current = view {
+                for recognizer in current.gestureRecognizers ?? [] where recognizer is UIPanGestureRecognizer && recognizer.isEnabled {
+                    recognizer.isEnabled = false
+                    paused.append(recognizer)
+                }
+                view = current.superview
+            }
+        }
+        private func resumeAncestorPans() {
+            paused.forEach { $0.isEnabled = true }
+            paused = []
         }
         override func continueTracking(_ touch: UITouch, with event: UIEvent?) -> Bool {
             update(touch)
@@ -50,6 +67,7 @@ struct VoiceTouchControl: UIViewRepresentable {
             moved?(CGSize(width: point.x - origin.x, height: point.y - origin.y))
         }
         private func finish(cancelled: Bool) {
+            resumeAncestorPans()
             guard origin != nil else { return }
             origin = nil
             ended?(cancelled)

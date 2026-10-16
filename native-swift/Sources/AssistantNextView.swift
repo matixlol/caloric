@@ -1,207 +1,394 @@
 import PhotosUI
 import SwiftUI
 
-/// Shadow-flagged food assistant: photos, drag and drop, and a larger conversation panel.
-/// The home composer (text field + hold-to-talk microphone) keeps the classic gestures.
+/// Shadow-flagged food assistant: photos, drag and drop, and compact food review.
+/// The home composer keeps the classic hold-to-talk gestures; the conversation opens in a native sheet.
 struct AssistantNextView: View {
     let chat: AILogService
     let voice: VoiceRecorder
     var isPresented = true
     @Environment(AppStore.self) private var store
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @State private var input = ""
-    @State private var attachments: [AssistantImage] = []
-    @State private var loadingAttachments = 0
-    @State private var panelOpen = false
-    @State private var expanded = false
-    @State private var dragOffset: CGFloat = 0
-    @State private var photoItems: [PhotosPickerItem] = []
-    @State private var showPhotoPicker = false
-    @State private var showCamera = false
-    @State private var viewer: ImageViewerItem?
-    @State private var dropTargeted = false
-    @State private var attachmentError: String?
+    @State private var draft = AssistantDraft()
+    @State private var open = false
+    @State private var detent: PresentationDetent = .medium
+    @State private var focusOnOpen = false
     @Namespace private var glassNamespace
-    @FocusState private var inputFocused: Bool
+    @FocusState private var homeFocus: Bool
 
     var body: some View {
-        GeometryReader { geometry in
-            LiquidGlassGroup {
-                VStack(spacing: 8) {
-                    Spacer(minLength: 0)
-                    if panelOpen {
-                        panel(available: geometry.size.height)
-                            .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
-                    }
-                    composer
-                }.padding(.bottom, 6)
-                    .dropDestination(for: DroppedImage.self) { items, _ in
-                        let data = items.map(\.data)
-                        guard !data.isEmpty else { return false }
-                        addAttachments(data.map { .data($0) })
-                        return true
-                    } isTargeted: { targeted in withAnimation(reduceMotion ? nil : .smooth(duration: 0.18)) { dropTargeted = targeted } }
-            }
+        // Home dock: tapping the field opens the conversation sheet; the mic and photo button work in place.
+        LiquidGlassGroup {
+            VStack(spacing: 0) {
+                Spacer(minLength: 0)
+                AssistantComposerBar(chat: chat, voice: voice, draft: draft, focus: $homeFocus, glassNamespace: glassNamespace,
+                                     openField: { show(focus: true) }, sendText: submitText, sendVoice: submitVoice)
+                    .background { DockFade() }
+            }.padding(.bottom, 6)
         }
-        .photosPicker(isPresented: $showPhotoPicker, selection: $photoItems,
-                      maxSelectionCount: max(1, AssistantImageProcessor.maxAttachments - attachments.count),
-                      selectionBehavior: .ordered, matching: .images, preferredItemEncoding: .compatible)
-        .onChange(of: photoItems) { _, items in
-            guard !items.isEmpty else { return }
-            photoItems = []
-            addAttachments(items.map { .item($0) })
+        .modifier(AssistantPickers(draft: draft, active: !open))
+        .sheet(isPresented: $open) {
+            AssistantConversationScreen(chat: chat, voice: voice, draft: draft, detent: $detent,
+                                        focusOnOpen: $focusOnOpen, sendText: submitText, sendVoice: submitVoice)
         }
-        .fullScreenCover(isPresented: $showCamera) {
-            CameraPicker { image in addAttachments([.image(image)]) }.ignoresSafeArea()
+        .onChange(of: isPresented) { _, presented in if !presented { homeFocus = false; open = false } }
+        .onChange(of: draft.loading) { old, new in
+            // Photos picked from the home composer open the conversation once the picker has gone.
+            guard new > old, !open else { return }
+            Task { try? await Task.sleep(for: .milliseconds(450)); show(focus: false) }
         }
-        .fullScreenCover(item: $viewer) { AssistantImageViewer(item: $0) }
-        .onChange(of: inputFocused) { _, focused in if focused { open() } }
-        .onChange(of: isPresented) { _, presented in if !presented { inputFocused = false } }
         .onAppear {
             #if DEBUG
             let arguments = ProcessInfo.processInfo.arguments
             if AppConfiguration.uiTesting {
-                if arguments.contains("-seed-ai-attachments") { attachments = AssistantDemo.images(count: 2) }
-                if arguments.contains("-ai-panel-open") || arguments.contains("-seed-chat-next") || arguments.contains("-seed-chat-next-activity") { panelOpen = true }
-                if arguments.contains("-ai-panel-expanded") { panelOpen = true; expanded = true }
+                if arguments.contains("-seed-ai-attachments") { draft.attachments = AssistantDemo.images(count: 2) }
+                if arguments.contains("-ai-panel-open") || arguments.contains("-seed-chat-next") || arguments.contains("-seed-chat-next-activity") { open = true }
+                if arguments.contains("-ai-panel-expanded") { open = true; detent = .large }
+                if arguments.contains("-ai-focus") { focusOnOpen = true }
             }
             #endif
         }
     }
 
-    // MARK: Panel
+    private func show(focus: Bool) {
+        focusOnOpen = focus
+        open = true
+    }
 
-    private func panel(available: CGFloat) -> some View {
-        let compact = min(500, max(260, available * 0.56))
-        let target = expanded ? available : compact
-        return VStack(spacing: 0) {
-            header
-            ScrollViewReader { proxy in
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 16) {
-                        if chat.messages.isEmpty && !chat.streaming && chat.error == nil { emptyState }
-                        ForEach(chat.messages) { message in
-                            messageView(message).transition(reduceMotion ? .opacity : .opacity.combined(with: .move(edge: .bottom)))
-                        }
-                        if let activity = chat.activity { ActivityRow(text: activity).transition(.opacity) }
-                        if let error = chat.error ?? attachmentError { errorRow(error) }
-                        Color.clear.frame(height: 1).id("chat-bottom")
-                    }.padding(.horizontal, 16).padding(.top, 4).padding(.bottom, 14)
-                        .animation(reduceMotion ? nil : .smooth(duration: 0.25), value: chat.messages.count)
-                        .animation(reduceMotion ? nil : .smooth(duration: 0.2), value: chat.activity)
-                }.scrollDismissesKeyboard(.interactively).scrollIndicators(.hidden)
-                    .mask {
-                        VStack(spacing: 0) {
-                            LinearGradient(colors: [.clear, .black], startPoint: .top, endPoint: .bottom).frame(height: 14)
-                            Color.black
-                        }
-                    }
-                    .onAppear { proxy.scrollTo("chat-bottom", anchor: .bottom) }
-                    .onChange(of: chat.messages.count) { _, _ in withAnimation(reduceMotion ? nil : .smooth) { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
-                    .onChange(of: chat.messages.last?.text) { _, _ in proxy.scrollTo("chat-bottom", anchor: .bottom) }
-                    .onChange(of: chat.activity) { _, _ in withAnimation(reduceMotion ? nil : .smooth) { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
-                    .onChange(of: expanded) { _, _ in proxy.scrollTo("chat-bottom", anchor: .bottom) }
-                    .onChange(of: inputFocused) { _, focused in if focused { withAnimation { proxy.scrollTo("chat-bottom", anchor: .bottom) } } }
-            }
+    private func submitText() {
+        let text = draft.input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty || !draft.attachments.isEmpty, draft.loading == 0, !chat.streaming else { return }
+        let images = draft.take()
+        draft.input = ""; homeFocus = false
+        chat.submit(text, store: store, images: images)
+        show(focus: false)
+    }
+
+    private func submitVoice(_ audio: URL, _ duration: String) {
+        chat.submit("", store: store, audio: audio, duration: duration, images: draft.take())
+        show(focus: false)
+    }
+}
+
+// MARK: - Shared state
+
+/// Text and photos waiting to be sent, shared by the home dock and the conversation sheet.
+@MainActor @Observable
+final class AssistantDraft {
+    enum Source { case item(PhotosPickerItem), data(Data), image(UIImage) }
+
+    var input = ""
+    var attachments: [AssistantImage] = []
+    var loading = 0
+    var error: String?
+    var showPhotoPicker = false
+    var showCamera = false
+    var viewer: ImageViewerItem?
+    var dropTargeted = false
+    var photoItems: [PhotosPickerItem] = [] {
+        didSet {
+            guard !photoItems.isEmpty else { return }
+            let items = photoItems
+            photoItems = []
+            add(items.map { .item($0) })
         }
-        .frame(maxWidth: .infinity)
-        .frame(minHeight: min(200, target), maxHeight: max(200, target - dragOffset))
-        .background(Theme.background.opacity(0.4), in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .caloricGlass(in: RoundedRectangle(cornerRadius: 30, style: .continuous))
-        .glassIdentity("conversation", in: glassNamespace)
-        .padding(.horizontal, 10)
+    }
+
+    var isFull: Bool { attachments.count + loading >= AssistantImageProcessor.maxAttachments }
+
+    func take() -> [AssistantImage] {
+        defer { attachments = []; error = nil }
+        return attachments
+    }
+
+    func remove(_ image: AssistantImage) { attachments.removeAll { $0.id == image.id } }
+
+    func paste() {
+        let images = UIPasteboard.general.images ?? []
+        if !images.isEmpty { add(images.map { .image($0) }) }
+    }
+
+    func add(_ sources: [Source]) {
+        let room = AssistantImageProcessor.maxAttachments - attachments.count - loading
+        guard room > 0 else { error = "You can attach up to \(AssistantImageProcessor.maxAttachments) photos per message."; return }
+        let accepted = Array(sources.prefix(room))
+        error = sources.count > room ? "Only the first \(AssistantImageProcessor.maxAttachments) photos were attached." : nil
+        loading += accepted.count
+        Task {
+            var failed = false
+            for source in accepted {
+                let image: AssistantImage?
+                switch source {
+                case let .item(item):
+                    if let data = try? await item.loadTransferable(type: Data.self) {
+                        image = await Task.detached(priority: .userInitiated) { AssistantImageProcessor.prepare(data) }.value
+                    } else { image = nil }
+                case let .data(data): image = await Task.detached(priority: .userInitiated) { AssistantImageProcessor.prepare(data) }.value
+                case let .image(picture): image = await Task.detached(priority: .userInitiated) { AssistantImageProcessor.prepare(picture) }.value
+                }
+                loading = max(0, loading - 1)
+                if let image { attachments.append(image) } else { failed = true }
+            }
+            if failed { error = "A photo could not be read. Try another one." }
+        }
+    }
+}
+
+/// Photo library, camera and photo viewer. Only the top-most presenter may be active.
+private struct AssistantPickers: ViewModifier {
+    @Bindable var draft: AssistantDraft
+    let active: Bool
+    func body(content: Content) -> some View {
+        content
+            .photosPicker(isPresented: Binding(get: { active && draft.showPhotoPicker }, set: { draft.showPhotoPicker = $0 }),
+                          selection: $draft.photoItems,
+                          maxSelectionCount: max(1, AssistantImageProcessor.maxAttachments - draft.attachments.count),
+                          selectionBehavior: .ordered, matching: .images, preferredItemEncoding: .compatible)
+            .fullScreenCover(isPresented: Binding(get: { active && draft.showCamera }, set: { draft.showCamera = $0 })) {
+                CameraPicker { image in draft.add([.image(image)]) }.ignoresSafeArea()
+            }
+            .fullScreenCover(item: Binding(get: { active ? draft.viewer : nil }, set: { draft.viewer = $0 })) { AssistantImageViewer(item: $0) }
+    }
+}
+
+// MARK: - Conversation sheet
+
+private struct AssistantConversationScreen: View {
+    let chat: AILogService
+    let voice: VoiceRecorder
+    let draft: AssistantDraft
+    @Binding var detent: PresentationDetent
+    @Binding var focusOnOpen: Bool
+    let sendText: () -> Void
+    let sendVoice: (URL, String) -> Void
+    @FocusState private var focus: Bool
+    @Namespace private var glassNamespace
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 4) {
+                AssistantTitle()
+                Spacer(minLength: 4)
+                AssistantHeaderButton(symbol: "square.and.pencil", label: "New chat", identifier: "ai-new-chat") {
+                    chat.startNewConversation(); draft.error = nil
+                }.disabled(chat.messages.isEmpty && chat.error == nil || chat.streaming)
+            }
+            .padding(.leading, 20).padding(.trailing, 10).padding(.top, 18).padding(.bottom, 2)
+            AssistantConversation(chat: chat, draft: draft)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            LiquidGlassGroup {
+                AssistantComposerBar(chat: chat, voice: voice, draft: draft, focus: $focus, glassNamespace: glassNamespace,
+                                     sendText: { focus = false; sendText() }, sendVoice: sendVoice)
+            }.padding(.bottom, 2)
+        }
+        .modifier(AssistantPickers(draft: draft, active: true))
+        .presentationDetents(detents, selection: $detent)
+        .presentationBackground(Theme.background)
+        .presentationDragIndicator(.visible)
+        .presentationContentInteraction(.scrolls)
+        .interactiveDismissDisabled(voice.recording || voice.starting)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("ai-next-panel")
-    }
-
-    private var header: some View {
-        VStack(spacing: 4) {
-            Capsule().fill(Color.secondary.opacity(0.45)).frame(width: 36, height: 5).padding(.top, 7)
-                .accessibilityHidden(true)
-            HStack(spacing: 8) {
-                Image(systemName: "sparkles").font(.system(size: 15, weight: .semibold)).foregroundStyle(Theme.tint)
-                    .accessibilityHidden(true)
-                Text("Assistant").font(.headline)
-                Text("LABS").font(.system(size: 10, weight: .heavy)).tracking(0.8)
-                    .foregroundStyle(Theme.tint).padding(.horizontal, 6).padding(.vertical, 3)
-                    .background(Theme.tint.opacity(0.14), in: Capsule())
-                    .accessibilityLabel("Labs preview")
-                Spacer(minLength: 4)
-                headerButton("square.and.pencil", label: "New chat", identifier: "ai-new-chat") {
-                    withAnimation(reduceMotion ? nil : .smooth) { chat.startNewConversation(); attachmentError = nil }
-                }.disabled(chat.messages.isEmpty && chat.error == nil)
-                headerButton(expanded ? "arrow.down.right.and.arrow.up.left" : "arrow.up.left.and.arrow.down.right",
-                             label: expanded ? "Shrink the assistant" : "Expand the assistant", identifier: "ai-expand") {
-                    withAnimation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86)) { expanded.toggle() }
-                }
-                headerButton("chevron.down", label: "Hide the food assistant conversation", identifier: "ai-collapse") { close() }
-            }.padding(.leading, 18).padding(.trailing, 10).padding(.bottom, 4)
+        .onAppear {
+            detent = isEmpty ? compact : detent == .large ? .large : .medium
+            if focusOnOpen { focusOnOpen = false; focus = true }
         }
-        .contentShape(Rectangle())
-        .gesture(DragGesture(minimumDistance: 6)
-            .onChanged { value in dragOffset = expanded ? max(-40, value.translation.height) : max(-160, min(220, value.translation.height)) }
-            .onEnded { value in
-                let distance = value.predictedEndTranslation.height
-                withAnimation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86)) {
-                    if distance > 140 { if expanded && distance < 420 { expanded = false } else { close(animated: false) } }
-                    else if distance < -80 { expanded = true }
-                    dragOffset = 0
-                }
-            })
-        .accessibilityAction(named: expanded ? "Shrink" : "Expand") { expanded.toggle() }
+        .onChange(of: isEmpty) { _, empty in
+            withAnimation(.smooth) { detent = empty ? compact : .medium }
+        }
+        .onChange(of: compact) { old, new in if detent == old { withAnimation(.smooth) { detent = new } } }
     }
 
-    private func headerButton(_ symbol: String, label: String, identifier: String, action: @escaping () -> Void) -> some View {
+    /// Just tall enough for the title, the prompt, pending photos and the composer.
+    private var compact: PresentationDetent { .height(draft.attachments.isEmpty && draft.loading == 0 && draft.error == nil ? 268 : 372) }
+    private var isEmpty: Bool { chat.messages.isEmpty && !chat.streaming && chat.error == nil }
+    private var detents: Set<PresentationDetent> {
+        isEmpty ? [compact, .large] : [.medium, .large]
+    }
+}
+
+// MARK: - Building blocks
+
+/// Fades the diary out behind the home composer so rows never collide with the controls.
+private struct DockFade: View {
+    var body: some View {
+        VStack(spacing: 0) {
+            LinearGradient(colors: [Theme.background.opacity(0), Theme.background.opacity(0.94)], startPoint: .top, endPoint: .bottom)
+                .frame(height: 56)
+            Theme.background.opacity(0.94)
+        }
+        .padding(.top, -56).padding(.bottom, -40).ignoresSafeArea(edges: .bottom)
+        .allowsHitTesting(false).accessibilityHidden(true)
+    }
+}
+
+private struct AssistantTitle: View {
+    var body: some View {
+        HStack(spacing: 7) {
+            Image(systemName: "sparkles").font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.tint)
+                .accessibilityHidden(true)
+            Text("Assistant").font(.headline)
+            Text("LABS").font(.system(size: 9, weight: .heavy)).tracking(0.8)
+                .foregroundStyle(Theme.tint).padding(.horizontal, 5).padding(.vertical, 2.5)
+                .background(Theme.tint.opacity(0.14), in: Capsule())
+                .accessibilityLabel("Labs preview")
+        }
+    }
+}
+
+private struct AssistantHeaderButton: View {
+    let symbol: String
+    let label: String
+    let identifier: String
+    let action: () -> Void
+    var body: some View {
         Button(action: action) {
             Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(.secondary)
                 .frame(width: 32, height: 32).background(Color.primary.opacity(0.07), in: Circle())
                 .frame(width: 40, height: 44).contentShape(Rectangle())
         }.buttonStyle(.plain).accessibilityLabel(label).accessibilityIdentifier(identifier)
     }
+}
 
-    // MARK: Empty state
+/// Text field, hold-to-talk mic, photo button and pending photos.
+private struct AssistantComposerBar: View {
+    let chat: AILogService
+    let voice: VoiceRecorder
+    @Bindable var draft: AssistantDraft
+    var focus: FocusState<Bool>.Binding
+    let glassNamespace: Namespace.ID
+    var openField: (() -> Void)? = nil
+    let sendText: () -> Void
+    let sendVoice: (URL, String) -> Void
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
-    private var emptyState: some View {
-        VStack(spacing: 14) {
-            Image(systemName: "fork.knife").font(.system(size: 22, weight: .semibold)).foregroundStyle(Theme.onTint)
-                .frame(width: 52, height: 52)
-                .background(LinearGradient(colors: [Theme.tint, Theme.accent], startPoint: .topLeading, endPoint: .bottomTrailing), in: Circle())
-                .accessibilityHidden(true)
-            VStack(spacing: 5) {
-                Text("What did you eat?").font(.title3.weight(.bold))
-                Text("Describe it, hold the mic to talk, or add a photo of your plate or a nutrition label.")
-                    .font(.subheadline).foregroundStyle(.secondary).multilineTextAlignment(.center)
-                    .fixedSize(horizontal: false, vertical: true)
+    var body: some View {
+        VoiceComposer(input: $draft.input, voice: voice, focus: focus, disabled: chat.streaming, sendText: sendText, sendVoice: sendVoice,
+                      glassNamespace: glassNamespace, hasAttachments: !draft.attachments.isEmpty, sendEnabled: draft.loading == 0,
+                      placeholder: "What did you eat?", openField: openField) {
+            attachButton
+        } accessory: {
+            if !draft.attachments.isEmpty || draft.loading > 0 {
+                AttachmentStrip(images: draft.attachments, loading: draft.loading, remove: draft.remove,
+                                open: { index in draft.viewer = ImageViewerItem(images: draft.attachments, index: index) })
+                    .transition(.opacity.combined(with: .move(edge: .bottom)))
             }
-            VStack(spacing: 8) {
-                promptButton("camera.fill", "Snap a photo of your meal") { CameraPicker.isAvailable ? (showCamera = true) : (showPhotoPicker = true) }
-                promptButton("text.bubble.fill", "2 eggs and toast for breakfast") { fill("2 eggs and toast for breakfast") }
-                promptButton("cup.and.saucer.fill", "Flat white and a croissant") { fill("Flat white and a croissant") }
-                promptButton("fork.knife", "Chicken burrito bowl for lunch") { fill("Chicken burrito bowl for lunch") }
-            }.padding(.top, 4)
-        }.frame(maxWidth: .infinity).padding(.top, 8).padding(.horizontal, 4)
+            if let error = draft.error {
+                Label(error, systemImage: "exclamationmark.triangle.fill").font(.footnote).foregroundStyle(.orange)
+                    .frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 6)
+            }
+        }
+        .dropDestination(for: DroppedImage.self) { items, _ in
+            guard !items.isEmpty else { return false }
+            draft.add(items.map { .data($0.data) })
+            return true
+        } isTargeted: { targeted in withAnimation(reduceMotion ? nil : .smooth(duration: 0.18)) { draft.dropTargeted = targeted } }
+        .overlay {
+            if draft.dropTargeted {
+                RoundedRectangle(cornerRadius: 28, style: .continuous)
+                    .strokeBorder(Theme.tint, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
+                    .background(Theme.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
+                    .overlay(Label("Drop to attach", systemImage: "photo.on.rectangle.angled").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.tint))
+                    .padding(.horizontal, 6).allowsHitTesting(false)
+            }
+        }
+        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85), value: draft.attachments.count + draft.loading)
+    }
+
+    private var attachButton: some View {
+        Menu {
+            Button { draft.showPhotoPicker = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
+            if CameraPicker.isAvailable {
+                Button { draft.showCamera = true } label: { Label("Take Photo", systemImage: "camera") }
+            }
+            if UIPasteboard.general.hasImages {
+                Button { draft.paste() } label: { Label("Paste Photo", systemImage: "doc.on.clipboard") }
+            }
+        } label: {
+            Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary)
+                .frame(width: 48, height: 48)
+                .caloricGlass(in: Circle(), interactive: true)
+                .glassIdentity("composer-attach", in: glassNamespace)
+        }
+        .menuOrder(.fixed)
+        .disabled(draft.isFull)
+        .opacity(draft.isFull ? 0.5 : 1)
+        .accessibilityLabel("Add photos")
+        .accessibilityHint("Attach up to four photos of your meal or a nutrition label")
+        .accessibilityIdentifier("ai-attach")
+    }
+}
+
+/// Scrolling list of messages, anchored to the latest one.
+private struct AssistantConversation: View {
+    let chat: AILogService
+    let draft: AssistantDraft
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    var body: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 14) {
+                    if chat.messages.isEmpty && !chat.streaming && chat.error == nil { AssistantEmptyState(draft: draft) }
+                    ForEach(chat.messages) { message in AssistantMessageView(message: message, chat: chat, draft: draft) }
+                    if let activity = chat.activity { ActivityRow(text: activity).transition(.opacity) }
+                    if let error = chat.error { errorRow(error) }
+                    Color.clear.frame(height: 1).id("chat-bottom")
+                }.padding(.horizontal, 16).padding(.top, 8).padding(.bottom, 10)
+                    .animation(reduceMotion ? nil : .smooth(duration: 0.22), value: chat.messages.count)
+            }
+            .scrollDismissesKeyboard(.interactively).scrollIndicators(.hidden)
+            .defaultScrollAnchor(chat.messages.isEmpty ? .top : .bottom)
+            .onChange(of: chat.messages.count) { _, _ in withAnimation(reduceMotion ? nil : .smooth) { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
+            .onChange(of: chat.messages.last?.text) { _, _ in proxy.scrollTo("chat-bottom", anchor: .bottom) }
+            .onChange(of: chat.activity) { _, _ in withAnimation(reduceMotion ? nil : .smooth) { proxy.scrollTo("chat-bottom", anchor: .bottom) } }
+        }
+    }
+
+    private func errorRow(_ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
+            Text(text).font(.footnote).foregroundStyle(Theme.label).frame(maxWidth: .infinity, alignment: .leading)
+        }.padding(12).background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
+            .accessibilityElement(children: .combine)
+    }
+}
+
+/// Short prompt with two photo shortcuts; small enough for the half-height sheet.
+private struct AssistantEmptyState: View {
+    let draft: AssistantDraft
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("What did you eat?").font(.title3.weight(.bold))
+                Text("Type it, hold the mic to talk, or add a photo of your plate or a nutrition label.")
+                    .font(.subheadline).foregroundStyle(.secondary).fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 8) {
+                if CameraPicker.isAvailable { shortcut("camera.fill", "Take photo") { draft.showCamera = true } }
+                shortcut("photo.on.rectangle", "Choose photo") { draft.showPhotoPicker = true }
+            }
+        }.frame(maxWidth: .infinity, alignment: .leading).padding(.top, 6)
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier("ai-empty-state")
     }
-
-    private func promptButton(_ symbol: String, _ text: String, action: @escaping () -> Void) -> some View {
+    private func shortcut(_ symbol: String, _ title: String, action: @escaping () -> Void) -> some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: symbol).font(.system(size: 14, weight: .semibold)).foregroundStyle(Theme.tint).frame(width: 22)
-                Text(text).font(.subheadline.weight(.medium)).foregroundStyle(Theme.label).multilineTextAlignment(.leading)
-                Spacer(minLength: 4)
-                Image(systemName: "arrow.up.left").font(.system(size: 12, weight: .semibold)).foregroundStyle(.tertiary)
-            }.padding(.horizontal, 14).padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading)
-                .background(Theme.card.opacity(0.85), in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-                .contentShape(RoundedRectangle(cornerRadius: 16))
-        }.buttonStyle(.plain).accessibilityIdentifier("ai-example-prompt")
+            Label(title, systemImage: symbol).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label)
+                .padding(.horizontal, 14).frame(height: 40)
+                .background(Theme.card, in: Capsule())
+                .overlay(Capsule().strokeBorder(Theme.separator.opacity(0.6), lineWidth: 0.5))
+        }.buttonStyle(.plain).accessibilityIdentifier("ai-empty-shortcut")
     }
+}
 
-    // MARK: Messages
-
-    @ViewBuilder private func messageView(_ message: ChatMessage) -> some View {
+private struct AssistantMessageView: View {
+    let message: ChatMessage
+    let chat: AILogService
+    let draft: AssistantDraft
+    var body: some View {
         switch message.kind {
-        case "text" where message.role == "user": userBubble(message)
-        case "audio": userBubble(message)
+        case "text" where message.role == "user", "audio": userBubble
         case "text":
             Text((try? AttributedString(markdown: message.text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))) ?? AttributedString(message.text))
                 .font(.body).foregroundStyle(Theme.label).textSelection(.enabled)
@@ -212,13 +399,13 @@ struct AssistantNextView: View {
         }
     }
 
-    private func userBubble(_ message: ChatMessage) -> some View {
+    private var userBubble: some View {
         let shape = UnevenRoundedRectangle(topLeadingRadius: 20, bottomLeadingRadius: 20, bottomTrailingRadius: 6, topTrailingRadius: 20, style: .continuous)
         return HStack {
             Spacer(minLength: 56)
             VStack(alignment: .trailing, spacing: 6) {
                 if !message.images.isEmpty {
-                    MessageImages(images: message.images) { index in viewer = ImageViewerItem(images: message.images, index: index) }
+                    MessageImages(images: message.images) { index in draft.viewer = ImageViewerItem(images: message.images, index: index) }
                 }
                 if message.kind == "audio" {
                     VStack(alignment: .leading, spacing: 8) {
@@ -240,128 +427,6 @@ struct AssistantNextView: View {
                 }
             }
         }
-    }
-
-    private func errorRow(_ text: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
-            Text(text).font(.footnote).foregroundStyle(Theme.label).frame(maxWidth: .infinity, alignment: .leading)
-        }.padding(12).background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .accessibilityElement(children: .combine)
-    }
-
-    // MARK: Composer
-
-    private var composer: some View {
-        VoiceComposer(input: $input, voice: voice, focus: $inputFocused, disabled: chat.streaming, sendText: sendText,
-                      sendVoice: { audio, duration in
-                          open()
-                          let images = takeAttachments()
-                          chat.submit("", store: store, audio: audio, duration: duration, images: images)
-                      }, glassNamespace: glassNamespace,
-                      hasAttachments: !attachments.isEmpty, sendEnabled: loadingAttachments == 0,
-                      placeholder: "What did you eat?") {
-            attachButton
-        } accessory: {
-            if !attachments.isEmpty || loadingAttachments > 0 {
-                AttachmentStrip(images: attachments, loading: loadingAttachments,
-                                remove: { image in attachments.removeAll { $0.id == image.id } },
-                                open: { index in viewer = ImageViewerItem(images: attachments, index: index) })
-                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-            }
-        }
-        .overlay {
-            if dropTargeted {
-                RoundedRectangle(cornerRadius: 28, style: .continuous)
-                    .strokeBorder(Theme.tint, style: StrokeStyle(lineWidth: 2, dash: [7, 5]))
-                    .background(Theme.tint.opacity(0.08), in: RoundedRectangle(cornerRadius: 28, style: .continuous))
-                    .overlay(Label("Drop to attach", systemImage: "photo.on.rectangle.angled").font(.subheadline.weight(.semibold)).foregroundStyle(Theme.tint))
-                    .padding(.horizontal, 6).allowsHitTesting(false)
-            }
-        }
-        .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85), value: attachments.count + loadingAttachments)
-    }
-
-    private var attachButton: some View {
-        let full = attachments.count + loadingAttachments >= AssistantImageProcessor.maxAttachments
-        return Menu {
-            Button { showPhotoPicker = true } label: { Label("Photo Library", systemImage: "photo.on.rectangle") }
-            if CameraPicker.isAvailable {
-                Button { showCamera = true } label: { Label("Take Photo", systemImage: "camera") }
-            }
-            if UIPasteboard.general.hasImages {
-                Button { pasteImages() } label: { Label("Paste Photo", systemImage: "doc.on.clipboard") }
-            }
-        } label: {
-            Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary)
-                .frame(width: 48, height: 48)
-                .caloricGlass(in: Circle(), interactive: true)
-                .glassIdentity("composer-attach", in: glassNamespace)
-        }
-        .menuOrder(.fixed)
-        .disabled(full)
-        .opacity(full ? 0.5 : 1)
-        .accessibilityLabel("Add photos")
-        .accessibilityHint("Attach up to four photos of your meal or a nutrition label")
-        .accessibilityIdentifier("ai-attach")
-    }
-
-    // MARK: Actions
-
-    private func open() { withAnimation(reduceMotion ? nil : .spring(response: 0.38, dampingFraction: 0.86)) { panelOpen = true } }
-    private func close(animated: Bool = true) {
-        withAnimation(animated && !reduceMotion ? .spring(response: 0.38, dampingFraction: 0.86) : nil) {
-            panelOpen = false; expanded = false; inputFocused = false
-        }
-    }
-    private func fill(_ text: String) { input = text; inputFocused = true }
-
-    private func sendText() {
-        let text = input.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !attachments.isEmpty, loadingAttachments == 0 else { return }
-        open()
-        let images = takeAttachments()
-        input = ""; inputFocused = false
-        chat.submit(text, store: store, images: images)
-    }
-
-    private func takeAttachments() -> [AssistantImage] {
-        defer { attachments = []; attachmentError = nil }
-        return attachments
-    }
-
-    private enum Source { case item(PhotosPickerItem), data(Data), image(UIImage) }
-
-    private func addAttachments(_ sources: [Source]) {
-        let room = AssistantImageProcessor.maxAttachments - attachments.count - loadingAttachments
-        guard room > 0 else { attachmentError = "You can attach up to \(AssistantImageProcessor.maxAttachments) photos per message."; return }
-        let accepted = Array(sources.prefix(room))
-        attachmentError = sources.count > room ? "Only the first \(AssistantImageProcessor.maxAttachments) photos were attached." : nil
-        loadingAttachments += accepted.count
-        open()
-        Task {
-            var failed = false
-            for source in accepted {
-                let image: AssistantImage?
-                switch source {
-                case let .item(item):
-                    if let data = try? await item.loadTransferable(type: Data.self) {
-                        image = await Task.detached(priority: .userInitiated) { AssistantImageProcessor.prepare(data) }.value
-                    } else { image = nil }
-                case let .data(data): image = await Task.detached(priority: .userInitiated) { AssistantImageProcessor.prepare(data) }.value
-                case let .image(picture): image = await Task.detached(priority: .userInitiated) { AssistantImageProcessor.prepare(picture) }.value
-                }
-                loadingAttachments = max(0, loadingAttachments - 1)
-                if let image { attachments.append(image) } else { failed = true }
-            }
-            if failed { attachmentError = "A photo could not be read. Try another one." }
-        }
-    }
-
-    private func pasteImages() {
-        let images = UIPasteboard.general.images ?? []
-        guard !images.isEmpty else { return }
-        addAttachments(images.map { .image($0) })
     }
 }
 

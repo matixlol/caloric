@@ -76,6 +76,11 @@ final class CaloricSwiftUITests: XCTestCase {
         return app
     }
 
+    private func waitForDisappearance(_ element: XCUIElement, timeout: TimeInterval = 3) -> Bool {
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
+        return XCTWaiter.wait(for: [gone], timeout: timeout) == .completed
+    }
+
     private func capture(_ name: String, _ app: XCUIApplication) {
         let attachment = XCTAttachment(screenshot: app.screenshot())
         attachment.name = name
@@ -94,78 +99,85 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertFalse(app.buttons["ai-attach"].exists)
     }
 
-    func testNextAssistantConversationEditsAndAddsSuggestions() {
+    func testNextAssistantSheetEditsAndAddsSuggestions() {
         let app = launch(["-ai-variant-next", "-seed-chat-next"])
         XCTAssertTrue(app.descendants(matching: .any)["ai-next-panel"].waitForExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["ai-attach"].exists, "Next keeps the home composer and adds the attach button")
-        XCTAssertTrue(app.textFields["ai-composer"].exists)
-        XCTAssertTrue(app.buttons["voice-microphone"].exists)
-        XCTAssertTrue(app.buttons["ai-approve-all"].waitForExistence(timeout: 3))
-        capture("next 01 panel approvals", app)
-        app.buttons["ai-expand"].tap()
-        let scroll = app.descendants(matching: .any)["ai-next-panel"].scrollViews.firstMatch
-        scroll.swipeDown(); scroll.swipeDown()
+        let approve = app.buttons["ai-approve-all"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 3))
+        XCTAssertEqual(approve.label, "Add 2 · 310 kcal")
+        capture("next 01 sheet approvals", app)
+        app.buttons.matching(identifier: "ai-suggestion-toggle").element(boundBy: 1).tap()
+        XCTAssertEqual(approve.label, "Add 1 · 180 kcal", "Unticked foods are left out")
+        let increase = app.buttons.matching(identifier: "Increase portion").firstMatch
+        increase.tap(); increase.tap()
+        XCTAssertTrue(app.staticTexts["2 1/2"].waitForExistence(timeout: 2))
+        XCTAssertEqual(approve.label, "Add 1 · 225 kcal")
+        app.buttons["ai-meal-picker"].tap()
+        let lunch = app.buttons["Lunch"].firstMatch
+        XCTAssertTrue(lunch.waitForExistence(timeout: 3))
+        lunch.tap()
+        capture("next 02 edited approvals", app)
+        approve.tap()
+        XCTAssertTrue(app.staticTexts["Lunch · 2 1/2 portions"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.staticTexts["Added 1 food"].exists)
+        XCTAssertFalse(approve.exists)
+        app.staticTexts["Assistant"].swipeUp()
         XCTAssertTrue(app.buttons["ai-message-image"].waitForExistence(timeout: 3))
         app.buttons["ai-search-chip"].tap()
         XCTAssertTrue(app.staticTexts["Poached egg"].waitForExistence(timeout: 3))
-        capture("next 02 expanded photo message and search", app)
+        capture("next 03 large sheet with photo and search", app)
         app.buttons["ai-message-image"].tap()
         XCTAssertTrue(app.buttons["Close photo"].waitForExistence(timeout: 3))
-        capture("next 03 photo viewer", app)
         app.buttons["Close photo"].tap()
-        scroll.swipeUp(); scroll.swipeUp()
-        let increase = app.buttons.matching(identifier: "Increase portion").firstMatch
-        XCTAssertTrue(increase.waitForExistence(timeout: 3))
-        increase.tap(); increase.tap()
-        XCTAssertTrue(app.staticTexts["2 1/2"].waitForExistence(timeout: 2))
-        app.buttons.matching(identifier: "ai-meal-picker").element(boundBy: 1).tap()
-        let lunch = app.buttons["Lunch"].firstMatch
-        XCTAssertTrue(lunch.waitForExistence(timeout: 3))
-        capture("next 04 meal picker", app)
-        lunch.tap()
-        XCTAssertTrue(app.staticTexts["Add all 2 · 355 kcal"].waitForExistence(timeout: 3), app.debugDescription)
-        app.buttons["ai-approve-all"].tap()
-        XCTAssertTrue(app.staticTexts["Added to Breakfast · 2 1/2 portions"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.staticTexts["Added to Lunch · 1 portion"].exists)
-        XCTAssertFalse(app.buttons["ai-approve-all"].exists)
-        capture("next 05 added all", app)
         app.buttons["ai-new-chat"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["ai-empty-state"].waitForExistence(timeout: 3))
-        capture("next 06 empty state", app)
-        app.buttons["2 eggs and toast for breakfast"].tap()
-        XCTAssertEqual(app.textFields["ai-composer"].value as? String, "2 eggs and toast for breakfast")
-        XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 3))
-        app.buttons["Hide the food assistant conversation"].tap()
-        XCTAssertTrue(app.cells["Edit Grilled chicken"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.cells["diary-row-lunch-Sourdough toast"].exists || app.staticTexts["Sourdough toast"].exists)
+        capture("next 04 compact empty sheet", app)
+        let grab = app.staticTexts["Assistant"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        grab.press(forDuration: 0.05, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 400)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(waitForDisappearance(app.descendants(matching: .any)["ai-next-panel"]), "Swiping the sheet down closes it")
+        XCTAssertTrue(app.staticTexts["Fried egg"].waitForExistence(timeout: 3), "The approved food is in the diary")
     }
 
-    func testNextAssistantAttachmentThumbnailsSendState() {
-        let app = launch(["-ai-variant-next", "-seed-ai-attachments", "-ai-panel-open"])
+    func testNextAssistantPhotosKeepVoiceAndSend() {
+        let app = launch(["-ai-variant-next", "-seed-ai-attachments", "-ui-test-voice"])
         let thumbnails = app.buttons.matching(identifier: "ai-attachment-thumbnail")
         XCTAssertTrue(thumbnails.firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(thumbnails.count, 2)
         XCTAssertTrue(app.buttons["Send message"].exists, "Photos alone can be sent")
-        XCTAssertTrue(app.buttons["voice-microphone"].exists == false)
-        capture("next 07 attachment thumbnails", app)
+        let microphone = app.buttons["voice-microphone"]
+        XCTAssertTrue(microphone.exists, "A voice note can still go with the photos")
+        capture("next 05 photos with mic and send", app)
+        let start = microphone.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        start.press(forDuration: 0.8, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)))
+        XCTAssertTrue(app.staticTexts["Recording locked"].waitForExistence(timeout: 3), app.debugDescription)
+        XCTAssertEqual(thumbnails.count, 2, "Photos stay attached while recording")
+        capture("next 06 recording with photos", app)
+        app.buttons["Cancel voice recording"].tap()
+        XCTAssertTrue(microphone.waitForExistence(timeout: 3))
+        XCTAssertEqual(thumbnails.count, 2)
         app.buttons.matching(identifier: "ai-attachment-remove").firstMatch.tap()
-        XCTAssertEqual(thumbnails.count, 1)
         app.buttons.matching(identifier: "ai-attachment-remove").firstMatch.tap()
         XCTAssertFalse(thumbnails.firstMatch.exists)
-        XCTAssertTrue(app.buttons["voice-microphone"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.buttons["Send message"].exists)
+        app.buttons["ai-composer"].tap()
+        XCTAssertTrue(app.descendants(matching: .any)["ai-empty-state"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        capture("next 07 sheet opened from home field", app)
+    }
+
+    func testNextAssistantLibraryPhotoOpensSheet() {
+        let app = launch(["-ai-variant-next"])
         app.buttons["ai-attach"].tap()
         XCTAssertTrue(app.buttons["Photo Library"].waitForExistence(timeout: 3))
-        capture("next 08 attach menu", app)
         app.buttons["Photo Library"].tap()
         sleep(3)
-        capture("next 09 photo picker", app)
         // The system picker runs out of process; select the first library photo and confirm by position.
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.17, dy: 0.47)).tap()
         sleep(1)
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.905, dy: 0.165)).tap()
-        XCTAssertTrue(thumbnails.firstMatch.waitForExistence(timeout: 10), "A library photo becomes an attachment")
-        XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 3))
-        capture("next 10 library photo attached", app)
+        XCTAssertTrue(app.descendants(matching: .any)["ai-next-panel"].waitForExistence(timeout: 10), "Picking a photo opens the assistant")
+        XCTAssertTrue(app.buttons.matching(identifier: "ai-attachment-thumbnail").firstMatch.waitForExistence(timeout: 10))
+        capture("next 08 library photo in sheet", app)
     }
 
     func testSettingsLabsAppearsOnlyAfterSevenVersionTaps() {
