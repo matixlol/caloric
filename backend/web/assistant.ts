@@ -1,42 +1,5 @@
-import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
 import { createParser } from "eventsource-parser";
-import { api } from "./model";
 import type { AgentEvent } from "../../mobile/src/ai/types";
-
-// Shadow flag for the experimental assistant (newer model + photo input + new UI).
-// The server allowlist decides by default; `?ai=next`, `?ai=classic` or
-// `?ai=default` stores a local override for this browser.
-export type AssistantVariant = "next" | "classic";
-const overrideKey = "caloric.ai.variant";
-
-function readOverride(): AssistantVariant | null {
-  try {
-    const param = new URLSearchParams(location.search).get("ai");
-    if (param) {
-      if (param === "next" || param === "classic") localStorage.setItem(overrideKey, param);
-      else localStorage.removeItem(overrideKey);
-      const url = new URL(location.href);
-      url.searchParams.delete("ai");
-      history.replaceState(history.state, "", url);
-    }
-    const stored = localStorage.getItem(overrideKey);
-    return stored === "next" || stored === "classic" ? stored : null;
-  } catch {
-    return null;
-  }
-}
-
-export function useAssistantVariant(userId: string): AssistantVariant {
-  const [override] = useState(readOverride);
-  const config = useQuery({
-    queryKey: ["ai-config", userId],
-    queryFn: ({ signal }) => api<{ variant?: AssistantVariant }>("/ai/config", undefined, signal),
-    enabled: override === null,
-    staleTime: Infinity,
-  });
-  return override ?? (config.data?.variant === "next" ? "next" : "classic");
-}
 
 export const maxAttachments = 4;
 const maxImageEdge = 1600;

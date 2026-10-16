@@ -163,8 +163,7 @@ await page.route("**/*", async (route) => {
   }
   if (path === "/ai/turn") {
     assistantTurns++;
-    const action = request.postDataJSON().action;
-    if (action.type === "approval") return route.fulfill({ json: {} });
+    assert.match(request.postDataBuffer()!.toString("latin1"), /name="message"\r\n\r\nAdd some food/);
     const events = [
       {
         type: "event",
@@ -180,6 +179,8 @@ await page.route("**/*", async (route) => {
           suggestions: [
             {
               suggestionId: "query-test-food",
+              resultId: "r1",
+              reason: "Half a serving.",
               food: food("ai-food", "Assistant food", 200),
               portion: 0.5,
               meal: "lunch",
@@ -350,16 +351,16 @@ try {
   failWrite = false;
 
   await page
-    .getByRole("button", { name: "Message the food assistant" })
+    .getByRole("button", { name: "What did you eat?" })
     .click();
   await page.getByLabel("Message Caloric").fill("Add some food");
   await page.getByRole("button", { name: "Send message" }).click();
   await page.getByText("Here is your food.", { exact: true }).waitFor();
-  await page.getByRole("button", { name: "Add food", exact: true }).click();
+  await page.getByRole("button", { name: "Add", exact: true }).click();
   await page.getByText("Added to Lunch", { exact: true }).waitFor();
   await calories("1,476");
   assert.equal(assistantSessions, 1);
-  assert.equal(assistantTurns, 2);
+  assert.equal(assistantTurns, 1, "Approvals stay local");
   await close();
 
   await page.getByRole("button", { name: "Settings", exact: true }).click();

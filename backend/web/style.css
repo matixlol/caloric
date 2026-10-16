@@ -1331,16 +1331,6 @@ input::-webkit-inner-spin-button {
 .startup {
   padding: 20px;
 }
-.chat-transcript {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  min-height: 32dvh;
-  max-height: calc(100dvh - 280px);
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  padding-bottom: 10px;
-}
 .chat-welcome {
   text-align: center;
   padding: 20px 0;
@@ -1376,92 +1366,6 @@ input::-webkit-inner-spin-button {
   padding: 14px;
   font-size: 15px;
 }
-.chat-message {
-  align-self: flex-start;
-  background: var(--input);
-  padding: 12px;
-  border-radius: 18px;
-  font-size: 17px;
-  line-height: 22px;
-  max-width: 100%;
-  overflow-wrap: anywhere;
-}
-.chat-message.user {
-  align-self: flex-end;
-  background: var(--tint);
-  color: var(--on-tint);
-  max-width: 88%;
-}
-.chat-role {
-  display: none;
-}
-.chat-message > p {
-  white-space: pre-wrap;
-}
-.approval-card {
-  background: var(--card);
-  border-radius: 14px;
-  padding: 12px;
-  margin-top: 12px;
-}
-.approval-card .section-heading {
-  align-items: baseline;
-  font-size: 15px;
-}
-.approval-card .section-heading > span {
-  color: var(--secondary);
-  font-size: 13px;
-  white-space: nowrap;
-}
-.approval-card > p {
-  font-size: 13px;
-  color: var(--secondary);
-  margin: 6px 0;
-}
-.approval-actions {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  margin-top: 12px;
-}
-.approval-actions .primary-button {
-  font-size: 15px;
-  padding: 8px 12px;
-}
-.approval-portion {
-  display: flex;
-  flex-direction: column;
-  font-size: 13px;
-  color: var(--secondary);
-  margin-right: auto;
-}
-.approval-portion input {
-  width: 60px;
-  background: var(--bg);
-  padding: 8px;
-}
-.saved-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 15px;
-  color: var(--tint);
-}
-.chat-input {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 6px 6px 16px;
-  background: var(--card);
-  border-radius: 26px;
-  margin-top: 12px;
-}
-.chat-input input {
-  flex: 1;
-  padding: 0;
-  background: none;
-  min-height: 36px;
-}
 .send-button {
   display: inline-flex;
   align-items: center;
@@ -1473,8 +1377,8 @@ input::-webkit-inner-spin-button {
   color: var(--on-tint);
   background: var(--tint);
 }
-/* Shadow-flagged "next" assistant. */
-.composer-dock.next > .icon-button:first-child {
+/* Assistant. */
+.composer-dock > .icon-button:first-child {
   color: var(--secondary);
 }
 .ax {

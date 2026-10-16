@@ -35,27 +35,22 @@ function getBooleanEnv(name: string, fallback: boolean): boolean {
   throw new Error(`Environment variable ${name} must be a valid boolean`);
 }
 
-const geminiThinkingLevels = ["minimal", "low", "medium", "high"] as const;
-type GeminiThinkingLevel = (typeof geminiThinkingLevels)[number];
+const reasoningEfforts = ["minimal", "low", "medium", "high"] as const;
+export type ReasoningEffort = (typeof reasoningEfforts)[number];
 
-function getGeminiThinkingLevel(
-  raw: string | undefined,
-  fallback: GeminiThinkingLevel,
-  name = "GEMINI_THINKING_LEVEL",
-): GeminiThinkingLevel {
+function getReasoningEffort(name: string, fallback: ReasoningEffort): ReasoningEffort {
+  const raw = Bun.env[name];
   if (!raw) {
     return fallback;
   }
 
   const normalized = raw.trim().toLowerCase();
-  const parsed = geminiThinkingLevels.find((level) => level === normalized);
+  const parsed = reasoningEfforts.find((level) => level === normalized);
   if (parsed) {
     return parsed;
   }
 
-  throw new Error(
-    `Environment variable ${name} must be one of: ${geminiThinkingLevels.join(", ")}`,
-  );
+  throw new Error(`Environment variable ${name} must be one of: ${reasoningEfforts.join(", ")}`);
 }
 
 function parseTrustedOrigins(raw: string | undefined): string[] {
@@ -104,19 +99,10 @@ export const config = {
     Bun.env.OPEN_FOOD_FACTS_USER_AGENT ?? "Caloric/1.0 (OpenFoodFacts integration; contact required)",
   openFoodFactsUserEmail: Bun.env.OPEN_FOOD_FACTS_USER_EMAIL,
   // AI is optional at process startup (for example, the local web preview).
-  // The Google provider reports its configuration error if an AI route is
-  // actually used without a key; all non-AI routes remain available.
-  googleAiStudioApiKey: Bun.env.GOOGLE_AI_STUDIO_API_KEY?.trim() || undefined,
-  geminiModel: Bun.env.GEMINI_MODEL ?? "gemini-3.6-flash",
-  geminiThinkingLevel: getGeminiThinkingLevel(Bun.env.GEMINI_THINKING_LEVEL, "low"),
+  // OpenRouter reports its configuration error if an AI route is actually used
+  // without a key; all non-AI routes remain available.
   openRouterApiKey: Bun.env.OPENROUTER_API_KEY?.trim() || undefined,
-  // Shadow-flagged "next" assistant: a newer model plus photo attachments.
-  // AI_NEXT_MODEL is "<provider>:<model>", where provider is google or openrouter.
-  aiNextModel: Bun.env.AI_NEXT_MODEL?.trim() || "openrouter:meta/muse-wonder",
-  // Decode next-assistant voice notes to WAV with ffmpeg before sending them on.
-  aiNextAudioWav: getBooleanEnv("AI_NEXT_AUDIO_WAV", true),
-  aiNextThinkingLevel: getGeminiThinkingLevel(Bun.env.AI_NEXT_THINKING_LEVEL, "minimal", "AI_NEXT_THINKING_LEVEL"),
-  // Comma-separated user IDs that get the next assistant by default ("*" for everyone).
-  // Anyone else can still opt in through the hidden client toggle.
-  aiNextUserIds: parseTrustedOrigins(Bun.env.AI_NEXT_USER_IDS),
+  // OpenRouter model ID, optionally pinned to one upstream: "<model>@<provider>".
+  aiModel: Bun.env.AI_MODEL?.trim() || "meta/muse-wonder",
+  aiReasoningEffort: getReasoningEffort("AI_REASONING_EFFORT", "minimal"),
 };

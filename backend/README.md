@@ -13,18 +13,13 @@ Bun microservice that proxies food search APIs, merges local ANMAT data with MyF
     - `countryCode` (default `US`)
     - `resourceType` (default `foods`)
     - `includeDetails` (default `true`)
-- `GET /ai/config`
-  - requires a Better Auth session (cookie or bearer)
-  - returns `variant` (`next` when the user is in `AI_NEXT_USER_IDS`, else `classic`)
 - `POST /ai/session`
   - requires a Better Auth session (cookie or bearer)
   - body:
     - `recentLogs` (optional)
-    - `variant` (optional, `next` | `classic`; defaults to the `/ai/config` value)
   - returns:
     - `sessionId`
     - `status` (`ready`)
-    - `variant`
 - `POST /ai/turn`
   - requires a Better Auth session (cookie or bearer)
   - body (`application/json`):
@@ -71,17 +66,14 @@ uses). See `migrate-clerk-users.local.ts` for the one-time script that recreates
 users as Better Auth accounts while preserving their user ids (so all their synced data keeps
 resolving with no rewrite).
 
-### Next assistant (shadow flag)
+### Food assistant
 
-Sessions created with `variant: "next"` use `AI_NEXT_MODEL` (`<provider>:<model>[@upstream]`,
-provider `google` or `openrouter`; default `openrouter:meta/muse-wonder`) with
-`AI_NEXT_THINKING_LEVEL` (default `minimal`), a prompt that covers meal photos and nutrition labels
-and asks for all searches in one step, parallel food searches, and a repair step that retries when
-the model prints a tool call as text. Voice notes are decoded to 16 kHz WAV with ffmpeg
-(`AI_NEXT_AUDIO_WAV`), so clients keep uploading m4a/WebM. Their multipart `/ai/turn` messages may include up to four `image` fields
-(JPEG, PNG, WebP or HEIC, 8 MB each). `AI_NEXT_USER_IDS` (comma-separated, `*` for everyone)
-enables the variant by default; the web client also honours `?ai=next|classic|default`, and the
-Swift app has a hidden Labs setting. `scripts/ai-eval.ts` replays exported production chats
+The assistant uses `AI_MODEL` on OpenRouter (default `meta/muse-wonder`; append `@<provider>` to
+pin one upstream) with `AI_REASONING_EFFORT` (default `minimal`). Its prompt covers meal photos and
+nutrition labels and asks for all searches in one step; searches run in parallel, and a repair step
+retries when the model prints a tool call as text. Voice notes are decoded to 16 kHz WAV with ffmpeg,
+so clients keep uploading m4a/WebM. Multipart `/ai/turn` messages may include up to four `image`
+fields (JPEG, PNG, WebP or HEIC, 8 MB each). `scripts/ai-eval.ts` replays exported production chats
 against candidate models (keep its data outside the repository).
 
 `/ai/turn` runs the AI loop server-side and pauses only when user approval is needed. User approvals are submitted by the client and then the backend resumes the loop.
@@ -122,8 +114,9 @@ Optional:
 - `OPEN_FOOD_FACTS_BASE_URL`
 - `OPEN_FOOD_FACTS_USER_AGENT`
 - `OPEN_FOOD_FACTS_USER_EMAIL`
-- `OPENROUTER_MODEL`
-- `OPENROUTER_PROVIDER_ONLY` (optional; for Gemini 3 Flash use `google-ai-studio` or `google-vertex`; leave unset to let OpenRouter choose sorted by throughput)
+- `OPENROUTER_API_KEY`
+- `AI_MODEL` (OpenRouter model ID, default `meta/muse-wonder`; `<model>@<provider>` pins an upstream)
+- `AI_REASONING_EFFORT` (`minimal` | `low` | `medium` | `high`, default `minimal`)
 - `BETTER_AUTH_URL` (public backend URL; defaults to the production host)
 - `AUTH_TRUSTED_ORIGINS` (comma-separated extra deep-link/web origins; app schemes are always trusted)
 - `WEB_ORIGINS` (comma-separated browser origins allowed to call the API with credentials)
@@ -204,7 +197,7 @@ is no demo or scripted fallback. Local state is preserved between launches. Set
 Amp portal URL for auth and trusted origins; an origin argument or
 `WEB_PREVIEW_ORIGIN` overrides it. Optional live provider credentials already in
 the environment enable their corresponding AI and search behavior:
-`GOOGLE_AI_STUDIO_API_KEY` for AI, and the existing MFP credentials for MyFitnessPal.
+`OPENROUTER_API_KEY` for AI, and the existing MFP credentials for MyFitnessPal.
 Open Food Facts uses its real upstream service. Email codes are logged locally;
 the preview disables outgoing email and production telemetry.
 

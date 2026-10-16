@@ -42,22 +42,26 @@ final class CaloricSwiftUITests: XCTestCase {
         app.buttons["Settings"].tap()
         guard app.staticTexts[login.email].waitForExistence(timeout: 5) else { throw XCTSkip("The simulator must be signed into the isolated verification account.") }
         app.buttons["Close Settings"].tap()
+        app.buttons["ai-composer"].tap()
         let composer = app.textFields["ai-composer"]
+        XCTAssertTrue(composer.waitForExistence(timeout: 5))
         composer.tap(); composer.typeText("No busques alimentos. Respondé exactamente: prueba IA correcta")
         app.buttons["Send message"].tap()
         XCTAssertTrue(app.staticTexts["prueba IA correcta"].waitForExistence(timeout: 30))
-        XCTAssertTrue(app.staticTexts["Thinking…"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(app.descendants(matching: .any)["ai-activity"].waitForNonExistence(timeout: 5))
         capture("Production AI response finished in Swift", app)
         composer.tap(); composer.typeText("Comí 100 gramos de pechuga de pollo al almuerzo")
         app.buttons["Send message"].tap()
-        XCTAssertTrue(app.buttons["Approve"].firstMatch.waitForExistence(timeout: 60))
-        XCTAssertTrue(app.staticTexts["Thinking…"].waitForNonExistence(timeout: 5))
-        XCTAssertTrue(app.buttons["Approve"].firstMatch.isEnabled)
+        let approve = app.buttons["ai-approve-all"]
+        XCTAssertTrue(approve.waitForExistence(timeout: 60))
+        XCTAssertTrue(app.descendants(matching: .any)["ai-activity"].waitForNonExistence(timeout: 5))
+        XCTAssertTrue(approve.isEnabled)
         capture("Production AI food suggestion ready to approve", app)
-        app.buttons["Approve"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Approved and logged."].firstMatch.waitForExistence(timeout: 5))
+        approve.tap()
+        XCTAssertTrue(app.staticTexts["Added 1 food"].firstMatch.waitForExistence(timeout: 5))
         capture("Production AI approval saved in Swift diary", app)
-        app.buttons["Hide the food assistant conversation"].tap()
+        let grab = app.staticTexts["Assistant"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        grab.press(forDuration: 0.05, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 600)), withVelocity: .fast, thenHoldForDuration: 0)
         XCTAssertTrue(app.cells.firstMatch.waitForExistence(timeout: 5))
         app.buttons["Settings"].tap()
         let signOut = app.buttons["Sign Out"].firstMatch
@@ -92,20 +96,13 @@ final class CaloricSwiftUITests: XCTestCase {
         }
     }
 
-    func testClassicAssistantIsDefaultWithoutAttachments() {
-        let app = launch(["-ai-variant-classic"])
-        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
-        XCTAssertTrue(app.buttons["voice-microphone"].exists)
-        XCTAssertFalse(app.buttons["ai-attach"].exists)
-    }
-
-    func testNextAssistantSheetEditsAndAddsSuggestions() {
-        let app = launch(["-ai-variant-next", "-seed-chat-next"])
-        XCTAssertTrue(app.descendants(matching: .any)["ai-next-panel"].waitForExistence(timeout: 5))
+    func testAssistantSheetEditsAndAddsSuggestions() {
+        let app = launch(["-seed-chat"])
+        XCTAssertTrue(app.descendants(matching: .any)["ai-panel"].waitForExistence(timeout: 5))
         let approve = app.buttons["ai-approve-all"]
         XCTAssertTrue(approve.waitForExistence(timeout: 3))
         XCTAssertEqual(approve.label, "Add 2 · 310 kcal")
-        capture("next 01 sheet approvals", app)
+        capture("assistant 01 sheet approvals", app)
         app.buttons.matching(identifier: "ai-suggestion-toggle").element(boundBy: 1).tap()
         XCTAssertEqual(approve.label, "Add 1 · 180 kcal", "Unticked foods are left out")
         let increase = app.buttons.matching(identifier: "Increase portion").firstMatch
@@ -116,7 +113,7 @@ final class CaloricSwiftUITests: XCTestCase {
         let lunch = app.buttons["Lunch"].firstMatch
         XCTAssertTrue(lunch.waitForExistence(timeout: 3))
         lunch.tap()
-        capture("next 02 edited approvals", app)
+        capture("assistant 02 edited approvals", app)
         approve.tap()
         XCTAssertTrue(app.staticTexts["Lunch · 2 1/2 portions"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Added 1 food"].exists)
@@ -125,33 +122,33 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(app.buttons["ai-message-image"].waitForExistence(timeout: 3))
         app.buttons["ai-search-chip"].tap()
         XCTAssertTrue(app.staticTexts["Poached egg"].waitForExistence(timeout: 3))
-        capture("next 03 large sheet with photo and search", app)
+        capture("assistant 03 large sheet with photo and search", app)
         app.buttons["ai-message-image"].tap()
         XCTAssertTrue(app.buttons["Close photo"].waitForExistence(timeout: 3))
         app.buttons["Close photo"].tap()
         app.buttons["ai-new-chat"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["ai-empty-state"].waitForExistence(timeout: 3))
-        capture("next 04 compact empty sheet", app)
+        capture("assistant 04 compact empty sheet", app)
         let grab = app.staticTexts["Assistant"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         grab.press(forDuration: 0.05, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 400)), withVelocity: .fast, thenHoldForDuration: 0)
-        XCTAssertTrue(waitForDisappearance(app.descendants(matching: .any)["ai-next-panel"]), "Swiping the sheet down closes it")
+        XCTAssertTrue(waitForDisappearance(app.descendants(matching: .any)["ai-panel"]), "Swiping the sheet down closes it")
         XCTAssertTrue(app.staticTexts["Fried egg"].waitForExistence(timeout: 3), "The approved food is in the diary")
     }
 
-    func testNextAssistantPhotosKeepVoiceAndSend() {
-        let app = launch(["-ai-variant-next", "-seed-ai-attachments", "-ui-test-voice"])
+    func testAssistantPhotosKeepVoiceAndSend() {
+        let app = launch(["-seed-ai-attachments", "-ui-test-voice"])
         let thumbnails = app.buttons.matching(identifier: "ai-attachment-thumbnail")
         XCTAssertTrue(thumbnails.firstMatch.waitForExistence(timeout: 5))
         XCTAssertEqual(thumbnails.count, 2)
         XCTAssertTrue(app.buttons["Send message"].exists, "Photos alone can be sent")
         let microphone = app.buttons["voice-microphone"]
         XCTAssertTrue(microphone.exists, "A voice note can still go with the photos")
-        capture("next 05 photos with mic and send", app)
+        capture("assistant 05 photos with mic and send", app)
         let start = microphone.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         start.press(forDuration: 0.8, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -90)))
         XCTAssertTrue(app.staticTexts["Recording locked"].waitForExistence(timeout: 3), app.debugDescription)
         XCTAssertEqual(thumbnails.count, 2, "Photos stay attached while recording")
-        capture("next 06 recording with photos", app)
+        capture("assistant 06 recording with photos", app)
         app.buttons["Cancel voice recording"].tap()
         XCTAssertTrue(microphone.waitForExistence(timeout: 3))
         XCTAssertEqual(thumbnails.count, 2)
@@ -162,11 +159,11 @@ final class CaloricSwiftUITests: XCTestCase {
         app.buttons["ai-composer"].tap()
         XCTAssertTrue(app.descendants(matching: .any)["ai-empty-state"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
-        capture("next 07 sheet opened from home field", app)
+        capture("assistant 07 sheet opened from home field", app)
     }
 
-    func testNextAssistantLibraryPhotoOpensSheet() {
-        let app = launch(["-ai-variant-next"])
+    func testAssistantLibraryPhotoOpensSheet() {
+        let app = launch()
         app.buttons["ai-attach"].tap()
         XCTAssertTrue(app.buttons["Photo Library"].waitForExistence(timeout: 3))
         app.buttons["Photo Library"].tap()
@@ -175,25 +172,9 @@ final class CaloricSwiftUITests: XCTestCase {
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.17, dy: 0.47)).tap()
         sleep(1)
         app.coordinate(withNormalizedOffset: CGVector(dx: 0.905, dy: 0.165)).tap()
-        XCTAssertTrue(app.descendants(matching: .any)["ai-next-panel"].waitForExistence(timeout: 10), "Picking a photo opens the assistant")
+        XCTAssertTrue(app.descendants(matching: .any)["ai-panel"].waitForExistence(timeout: 10), "Picking a photo opens the assistant")
         XCTAssertTrue(app.buttons.matching(identifier: "ai-attachment-thumbnail").firstMatch.waitForExistence(timeout: 10))
-        capture("next 08 library photo in sheet", app)
-    }
-
-    func testSettingsLabsAppearsOnlyAfterSevenVersionTaps() {
-        let app = launch()
-        app.buttons["Settings"].tap()
-        let version = app.staticTexts["settings-version"]
-        for _ in 0..<4 where !version.isHittable { app.swipeUp() }
-        XCTAssertTrue(version.waitForExistence(timeout: 3))
-        XCTAssertFalse(app.staticTexts["Labs"].exists)
-        for _ in 0..<6 { version.tap() }
-        XCTAssertFalse(app.staticTexts["Labs"].exists)
-        version.tap()
-        XCTAssertTrue(app.staticTexts["Labs"].waitForExistence(timeout: 3))
-        app.swipeUp()
-        capture("next 11 settings labs", app)
-        XCTAssertTrue(app.buttons.matching(NSPredicate(format: "label CONTAINS %@", "Default")).firstMatch.exists)
+        capture("assistant 08 library photo in sheet", app)
     }
 
     func testHomeScrollPerformance() {
@@ -223,7 +204,7 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Recents"].exists)
         app.buttons.matching(NSPredicate(format: "label BEGINSWITH %@", "Grilled chicken,")).firstMatch.tap()
         app.buttons["Add to Breakfast"].tap()
-        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["ai-composer"].waitForExistence(timeout: 3))
         app.buttons["Settings"].tap()
         XCTAssertTrue(app.textFields["Daily calorie goal"].waitForExistence(timeout: 3))
         XCTAssertTrue(app.staticTexts["Macro Ratios"].exists)
@@ -318,7 +299,7 @@ final class CaloricSwiftUITests: XCTestCase {
 
     func testVoiceLockCancelWithoutInstructionalHints() {
         let app = launch(["-ui-test-voice", "-seed-long-diary"])
-        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["ai-composer"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Hold the mic to record · Release to send"].exists)
         let microphone = app.buttons["voice-microphone"]
         XCTAssertTrue(microphone.exists)
@@ -333,7 +314,7 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Send voice message"].exists)
         let cancelStart = microphone.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         cancelStart.press(forDuration: 0.8, thenDragTo: cancelStart.withOffset(CGVector(dx: -110, dy: 0)))
-        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["ai-composer"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Recording"].exists)
         XCTAssertFalse(app.staticTexts["Voice message"].exists)
     }
@@ -348,7 +329,7 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(microphone.waitForExistence(timeout: 3))
         let cancel = microphone.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
         cancel.press(forDuration: 0.05, thenDragTo: cancel.withOffset(CGVector(dx: -110, dy: 0)), withVelocity: .fast, thenHoldForDuration: 0)
-        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["ai-composer"].waitForExistence(timeout: 3))
         XCTAssertFalse(app.staticTexts["Recording locked"].exists)
         XCTAssertFalse(app.buttons["Send voice message"].exists)
     }
@@ -386,28 +367,31 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(diary.waitForExistence(timeout: 3))
         let top = diary.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.12))
         top.press(forDuration: 0.05, thenDragTo: top.withOffset(CGVector(dx: 0, dy: 480)), withVelocity: .fast, thenHoldForDuration: 0)
-        XCTAssertTrue(app.textFields["ai-composer"].waitForExistence(timeout: 3), "Pulling down at the top should dismiss the card")
+        XCTAssertTrue(app.buttons["ai-composer"].waitForExistence(timeout: 3), "Pulling down at the top should dismiss the card")
         XCTAssertFalse(app.buttons["Close friend's day"].exists)
     }
 
     func testGlassComposerSwitchesControlsAndPreservesConversation() {
         let app = launch(["-seed-chat"])
-        let response = app.staticTexts["Try a chicken bowl with rice and vegetables."]
-        XCTAssertTrue(response.waitForExistence(timeout: 3))
+        let panel = app.descendants(matching: .any)["ai-panel"]
+        XCTAssertTrue(app.buttons["ai-search-chip"].waitForExistence(timeout: 5))
         capture("Liquid Glass conversation and composer", app)
         let composer = app.textFields["ai-composer"]
         composer.tap(); composer.typeText("Add lunch")
         XCTAssertTrue(app.buttons["Send message"].waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["voice-microphone"].exists)
+        XCTAssertFalse(panel.buttons["voice-microphone"].exists)
         capture("Liquid Glass composer with keyboard and send button", app)
         composer.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 9))
-        XCTAssertTrue(app.buttons["voice-microphone"].waitForExistence(timeout: 3))
-        XCTAssertFalse(app.buttons["Send message"].exists)
-        app.buttons["Hide the food assistant conversation"].tap()
-        XCTAssertFalse(response.exists)
-        composer.tap()
-        XCTAssertTrue(response.waitForExistence(timeout: 3), "Collapsing the glass panel must preserve its conversation")
-        app.buttons["Hide the food assistant conversation"].tap()
+        XCTAssertTrue(panel.buttons["voice-microphone"].waitForExistence(timeout: 3))
+        XCTAssertFalse(panel.buttons["Send message"].exists)
+        let grab = app.staticTexts["Assistant"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        grab.press(forDuration: 0.05, thenDragTo: grab.withOffset(CGVector(dx: 0, dy: 600)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(waitForDisappearance(panel))
+        app.buttons["ai-composer"].tap()
+        XCTAssertTrue(app.buttons["ai-search-chip"].waitForExistence(timeout: 3), "Closing the sheet must preserve its conversation")
+        let again = app.staticTexts["Assistant"].coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+        again.press(forDuration: 0.05, thenDragTo: again.withOffset(CGVector(dx: 0, dy: 600)), withVelocity: .fast, thenHoldForDuration: 0)
+        XCTAssertTrue(waitForDisappearance(panel))
         app.cells["Edit Grilled chicken"].tap()
         XCTAssertTrue(app.buttons["Close details"].waitForExistence(timeout: 3), "The empty area around glass controls must pass taps to the diary")
         app.buttons["Done"].tap()
@@ -415,7 +399,7 @@ final class CaloricSwiftUITests: XCTestCase {
         XCTAssertTrue(app.buttons["Close Settings"].waitForExistence(timeout: 3))
         capture("Native Settings navigation and toolbar", app)
         app.buttons["Close Settings"].tap()
-        XCTAssertTrue(composer.waitForExistence(timeout: 3))
+        XCTAssertTrue(app.buttons["ai-composer"].waitForExistence(timeout: 3))
     }
 
     func testMacroDividerDragUsesStableCoordinates() {

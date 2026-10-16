@@ -350,7 +350,6 @@ export const aiSessions = pgTable(
     pendingApprovals: jsonb("pending_approvals").notNull(),
     // Assistant flavour the session was created with ("next" = shadow-flagged
     // experimental model with photo input). Null means the classic assistant.
-    variant: text("variant"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow().notNull(),
   },

@@ -94,22 +94,13 @@ export const systemPrompt = [
   "If the exact variant is unavailable, prefer a plausible generic match over a conflicting brand or variant.",
   "Before requesting approval, verify that every requested food appears exactly once, explicit meal buckets are preserved, no unmentioned foods were added, and each portion correctly converts the requested amount into the selected entry's serving units.",
   "When you answer, keep the wording concise and practical.",
-].join(" ");
-
-// Extra guidance for the experimental assistant, which also accepts photos.
-export const nextSystemPrompt = [
-  systemPrompt,
   "Users may attach photos of meals, plates, nutrition labels, packaging, or menus, with or without text or audio.",
   "For a meal photo, identify each distinct food and estimate its amount from visual cues such as plate size, utensils, and packaging; state the estimate briefly in each suggestion's reason.",
   "For a nutrition label or package, read the brand, product name, and serving size and search for that exact product.",
   "If a photo shows no food or is too unclear to estimate, ask one short clarifying question instead of guessing.",
   "Never output raw transcripts, timestamps, or internal reasoning. Reply in the user's language.",
-].join(" ");
-
-// Asks for the two-step shape (all searches at once, then approvals) to cut
-// model round trips, which dominate latency on reasoning models.
-export const fastSystemPrompt = [
-  nextSystemPrompt,
+  // The two-step shape (all searches at once, then approvals) cuts model round
+  // trips, which dominate latency on reasoning models.
   "Speed matters: in your first reply, call searchFoods once for every item at the same time (parallel tool calls), then call requestFoodApprovals in your next reply.",
   "Only search again when every result for an item is clearly wrong.",
 ].join(" ");
@@ -131,8 +122,8 @@ function createToolResultMessage(toolCall: SessionToolCall, value: unknown): Mod
   };
 }
 
-// Gemini sometimes prints a tool call as text ("call:default_api:searchFoods{…}")
-// or leaks its thought header instead of calling the function.
+// Models sometimes print a tool call as text ("call:default_api:searchFoods{…}")
+// or leak a thought header instead of calling the function.
 const leakedToolCallPattern = /default_api[:.]|^\s*(call:|thought\b|<thought|model\s*\n)/i;
 const leakDetectionChars = 24;
 
@@ -149,7 +140,6 @@ async function requestAiSdkTurn(
     onAssistantDelta?: (text: string) => void;
     signal?: AbortSignal;
     nudge?: boolean;
-    detectLeaks?: boolean;
     onUsage?: (usage: StepUsage) => void;
   },
 ): Promise<{
@@ -178,9 +168,9 @@ async function requestAiSdkTurn(
 
   let assistantText = "";
   let leaked = false;
-  // With leak detection on, hold the first characters back until they can be
-  // classified so a leaked tool call never reaches the client.
-  let released = !options?.detectLeaks;
+  // Hold the first characters back until they can be classified so a leaked
+  // tool call never reaches the client.
+  let released = false;
 
   for await (const chunk of result.fullStream) {
     if (chunk.type === "text-delta" && chunk.text) {
@@ -367,12 +357,6 @@ export async function runAssistantLoop(
     search: FoodSearch;
     onEvent?: (event: AgentEvent) => void;
     signal?: AbortSignal;
-    // Retry a step (at most twice) when the model leaks a tool call as text or
-    // stops silently after searching instead of suggesting foods.
-    repair?: boolean;
-    // Start every search of a step at once instead of one after another. Result
-    // IDs are still assigned in tool-call order, so the transcript is unchanged.
-    parallelSearch?: boolean;
     // Token usage and, for OpenRouter, billed cost of every model call.
     onUsage?: (usage: StepUsage) => void;
   },
@@ -387,7 +371,6 @@ export async function runAssistantLoop(
   for (let step = 0; step < 8; step += 1) {
     const turn = await requestAiSdkTurn(session, options.assistant, {
       nudge,
-      detectLeaks: options.repair,
       onUsage: options.onUsage,
       signal: options.signal,
       onAssistantDelta: (text) => {
@@ -402,15 +385,17 @@ export async function runAssistantLoop(
       },
     });
 
+    // Retry a step (at most twice) when the model leaks a tool call as text or
+    // stops silently after searching instead of suggesting foods.
     const stalled = turn.toolCalls.length === 0 && (turn.leaked || (searched && !turn.assistantText.trim()));
-    if (options.repair && stalled && repairs < 2) {
+    if (stalled && repairs < 2) {
       repairs += 1;
       nudge = true;
       continue;
     }
     nudge = false;
 
-    if (turn.assistantText.trim() && !(options.repair && turn.leaked)) {
+    if (turn.assistantText.trim() && !turn.leaked) {
       emit({
         kind: "assistant",
         text: turn.assistantText,
@@ -423,16 +408,16 @@ export async function runAssistantLoop(
       return;
     }
 
+    // Start every search of a step at once. Result IDs are still assigned in
+    // tool-call order, so the transcript is the same as running them in turn.
     const prefetched = new Map<string, Promise<FoodSearchResult[]>>();
-    if (options.parallelSearch) {
-      for (const toolCall of turn.toolCalls) {
-        const parsedArgs = toolCall.toolName === "searchFoods" ? SearchFoodsToolArgsSchema.safeParse(toolCall.input) : null;
-        if (!parsedArgs?.success) continue;
-        const pending = options.search(parsedArgs.data.query, parsedArgs.data.limit ?? 6, options.signal);
-        // Observed below in order; this only silences calls skipped after an approval.
-        pending.catch(() => {});
-        prefetched.set(toolCall.toolCallId, pending);
-      }
+    for (const toolCall of turn.toolCalls) {
+      const parsedArgs = toolCall.toolName === "searchFoods" ? SearchFoodsToolArgsSchema.safeParse(toolCall.input) : null;
+      if (!parsedArgs?.success) continue;
+      const pending = options.search(parsedArgs.data.query, parsedArgs.data.limit ?? 6, options.signal);
+      // Observed below in order; this only silences calls skipped after an approval.
+      pending.catch(() => {});
+      prefetched.set(toolCall.toolCallId, pending);
     }
 
     for (const toolCall of turn.toolCalls) {
