@@ -1,0 +1,4 @@
+# Deploy-time secrets (read by alchemy via effect/Config)
+.env*
+# Built web assets
+dist/

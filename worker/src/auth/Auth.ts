@@ -25,10 +25,14 @@ const make = Effect.gen(function* () {
   // cookies stay valid; other stages get an auto-provisioned random secret.
   const secret = yield* Config.Redacted("BETTER_AUTH_SECRET").pipe(Config.option);
   const extraOrigins = yield* csv("AUTH_TRUSTED_ORIGINS");
+  // Public origin for callback URLs; production sets it in deploy:prod. Without
+  // it Better Auth derives the origin from each request (fine on workers.dev).
+  const baseURL = yield* Config.String("BETTER_AUTH_URL").pipe(Config.option);
   const email = yield* Email;
 
   return yield* BetterAuth({
     ...(Option.isSome(secret) ? { secret: secret.value } : {}),
+    ...(Option.isSome(baseURL) ? { baseURL: baseURL.value } : {}),
     trustedOrigins: ["https://caloric.mati.lol", ...APP_SCHEMES, ...extraOrigins],
     // Railway issued `__Secure-` cookies, and the iOS app replays the stored
     // cookie name verbatim; keep issuing (and reading) the same name.

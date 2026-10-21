@@ -272,7 +272,10 @@ const make = Effect.gen(function* () {
           glob(anmatProducts.rnpa, pattern),
         ),
       )
-      .orderBy(desc(anmatProducts.importedAt), desc(anmatProducts.id));
+      .orderBy(desc(anmatProducts.importedAt), desc(anmatProducts.id))
+      // Ranking happens in memory; cap very broad queries to keep D1 responses
+      // and Worker memory bounded.
+      .limit(5000);
     return rows;
   }, withRuntime);
 

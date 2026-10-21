@@ -12,12 +12,13 @@ import { Database } from "./db/Database.ts";
 import { Db } from "./db/Db.ts";
 import { Email } from "./email/Email.ts";
 import { InvalidRequest } from "./api/InvalidRequest.ts";
-import { AiHandlers } from "./ai/http.ts";
+import { AiHandlers, AiRoutes } from "./ai/http.ts";
 import { AudioTranscoder } from "./audio/AudioTranscoder.ts";
 import { AudioTranscoderLive, MfpLoginLive } from "./container/Live.ts";
 import { MfpLogin } from "./mfp/MfpLogin.ts";
 import { HealthHandlers } from "./health/http.ts";
 import { MfpHandlers } from "./mfp/http.ts";
+import { FoodSearchLive } from "./search/FoodSearchLive.ts";
 import { SearchHandlers } from "./search/http.ts";
 import { SocialHandlers } from "./social/http.ts";
 import { SyncHandlers } from "./sync/http.ts";
@@ -46,11 +47,15 @@ export default class Api extends Cloudflare.Worker<Api>()(
       ),
       // Better Auth owns everything under /api/auth (sign-in, OTP, session).
       HttpRouter.add("*", "/api/auth/*", auth.fetch),
+      // Multipart turns and the resumable SSE stream (also binds the AiSession
+      // Durable Object that runs turns).
+      AiRoutes,
     );
 
     return {
       fetch: yield* HttpRouter.toHttpEffect(
         routes.pipe(
+          Layer.provide(FoodSearchLive),
           Layer.provide([
             Db.layer,
             Layer.succeed(Auth, auth),
