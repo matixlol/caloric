@@ -23,12 +23,12 @@ const make = Effect.gen(function* () {
           .select({ id: userFoodEntries.id, data: userFoodEntries.data, updatedAt: userFoodEntries.updatedAt })
           .from(userFoodEntries)
           .where(and(eq(userFoodEntries.userId, userId), isNull(userFoodEntries.deletedAt)))
-          .orderBy(asc(userFoodEntries.updatedAt)),
+          .orderBy(asc(userFoodEntries.updatedAt), asc(userFoodEntries.id)),
         db
           .select({ id: userRecipes.id, data: userRecipes.data, updatedAt: userRecipes.updatedAt })
           .from(userRecipes)
           .where(and(eq(userRecipes.userId, userId), isNull(userRecipes.deletedAt)))
-          .orderBy(asc(userRecipes.updatedAt)),
+          .orderBy(asc(userRecipes.updatedAt), asc(userRecipes.id)),
         db
           .select({ data: userSettings.data, updatedAt: userSettings.updatedAt })
           .from(userSettings)

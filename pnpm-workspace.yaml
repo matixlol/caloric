@@ -5,3 +5,7 @@ packages:
   - worker
 patchedDependencies:
   react-native-sortables@1.9.4: patches/react-native-sortables@1.9.4.patch
+overrides:
+  # alchemy auto-installs @prisma/dev (optional peer), which pins an older hono;
+  # a second hono copy breaks @hono/otel in backend/.
+  hono: 4.12.14

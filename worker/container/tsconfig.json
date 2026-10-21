@@ -1,0 +1,19 @@
+{
+  // Editor/CI check for the in-container server (deps live only in the image:
+  // `npm ci` here in a scratch copy, then `npx tsc -p .`). Node runs the .ts
+  // files directly, so only erasable TypeScript syntax is allowed.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "NodeNext",
+    "moduleResolution": "NodeNext",
+    "lib": ["ES2023", "DOM", "DOM.Iterable"],
+    "types": ["node"],
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "erasableSyntaxOnly": true,
+    "verbatimModuleSyntax": true
+  },
+  "include": ["src"]
+}

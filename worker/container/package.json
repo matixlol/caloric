@@ -1,0 +1,14 @@
+{
+  "name": "caloric-container",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "start": "node src/main.ts"
+  },
+  "dependencies": {
+    "rebrowser-playwright": "1.52.0"
+  }
+}
