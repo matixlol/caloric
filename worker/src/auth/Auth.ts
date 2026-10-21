@@ -22,7 +22,8 @@ const csv = (name: string) =>
 
 const make = Effect.gen(function* () {
   // Production reuses the Railway backend's secret so existing session
-  // cookies stay valid; other stages get an auto-provisioned random secret.
+  // cookies stay valid (alchemy.run.ts refuses a prod deploy without it);
+  // other stages may omit it and get an auto-provisioned random secret.
   const secret = yield* Config.Redacted("BETTER_AUTH_SECRET").pipe(Config.option);
   const extraOrigins = yield* csv("AUTH_TRUSTED_ORIGINS");
   // Public origin for callback URLs; production sets it in deploy:prod. Without

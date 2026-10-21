@@ -11,7 +11,7 @@ import { MFP_BASE_URL, MfpClient, type MfpSearchParams } from "../providers/myfi
 import { MfpSession } from "../providers/myfitnesspal/MfpSession.ts";
 import { OpenFoodFactsClient } from "../providers/openFoodFacts/OpenFoodFactsClient.ts";
 import { ProviderConfig } from "../providers/ProviderConfig.ts";
-import { FoodNutrition, type FoodSearchResult, type SearchSource } from "./FoodSearch.ts";
+import { FoodNutrition, FoodSearchError, type FoodSearchResult, type SearchSource } from "./FoodSearch.ts";
 import {
   compact,
   computeOpenFoodFactsHasMore,
@@ -176,9 +176,18 @@ const make = Effect.gen(function* () {
 
   // MFP first, then Open Food Facts. ANMAT is intentionally excluded from
   // unified results for now. Fails only when both sources fail.
+  // Like Promise.allSettled in backend/: a source that dies unexpectedly counts
+  // as failed rather than taking the other source's results down with it.
+  const settle = <A, E, R>(effect: Effect.Effect<A, E, R>) =>
+    Effect.result(
+      effect.pipe(
+        Effect.catchDefect((cause) => Effect.fail(new FoodSearchError({ message: "Unexpected search failure", cause }))),
+      ),
+    );
+
   const searchUnified = Effect.fn("FoodSearch.searchUnified")(function* (query: string, limit: number) {
     const [mfpResult, offResult] = yield* Effect.all(
-      [Effect.result(searchMfp(query, limit, 1)), Effect.result(searchOpenFoodFacts(query, limit, 1))],
+      [settle(searchMfp(query, limit, 1)), settle(searchOpenFoodFacts(query, limit, 1))],
       { concurrency: 2 },
     );
     if (Result.isFailure(mfpResult)) {

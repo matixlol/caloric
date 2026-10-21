@@ -13,6 +13,7 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { Authentication } from "../src/api/Authentication.ts";
 import { Unauthorized } from "../src/api/Errors.ts";
 import { InvalidRequest } from "../src/api/InvalidRequest.ts";
+import { UnexpectedErrors } from "../src/api/UnexpectedErrors.ts";
 import { Db } from "../src/db/Db.ts";
 import { anmatProductDerivedData, anmatProducts, mfpAuthSessions } from "../src/db/schema.ts";
 import { MfpGroup } from "../src/mfp/Api.ts";
@@ -97,7 +98,7 @@ const makeEnv = (respond: Respond = defaultRespond, config: Record<string, strin
   const login = Layer.succeed(
     MfpLogin,
     MfpLogin.of({
-      login: Effect.sync(() => {
+      login: () => Effect.sync(() => {
         logins.count += 1;
         return {
           cookieHeader: `session=${logins.count}`,
@@ -368,13 +369,13 @@ const NUTELLA = Uint8Array.from(
 const NO_MATCHES = NUTELLA.slice(0, 26).map((byte, index) => (index === 19 ? 0x01 : byte));
 
 // Same API id as the app's, so the app's handler layers plug in.
-class TestApi extends HttpApi.make("caloric").add(SearchGroup).add(MfpGroup).middleware(InvalidRequest) {}
+class TestApi extends HttpApi.make("caloric").add(SearchGroup).add(MfpGroup).middleware(InvalidRequest).middleware(UnexpectedErrors) {}
 
 const makeHandler = (env: ReturnType<typeof makeEnv>) => {
   const deny = Layer.succeed(Authentication, Authentication.of(() => Effect.fail(Unauthorized.instance())));
   const app = HttpApiBuilder.layer(TestApi).pipe(
     Layer.provide([SearchHandlers, MfpHandlers]),
-    Layer.provide([deny, InvalidRequest.layer]),
+    Layer.provide([deny, InvalidRequest.layer, UnexpectedErrors.layer]),
     Layer.provide(env.deps),
     Layer.provide(HttpServer.layerServices),
   );

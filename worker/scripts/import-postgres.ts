@@ -111,17 +111,42 @@ const json = (value: Value): string | null => (value === null ? null : JSON.stri
 // D1 caps a request at ~100 KB of SQL; keep batches comfortably below that.
 const MAX_BATCH_BYTES = 90_000;
 
+// How a row that already exists in D1 is treated. Never INSERT OR REPLACE:
+// SQLite runs it as delete + insert, which cascades (e.g. deleting a user's
+// sessions) on re-runs.
+type OnConflict =
+  | { readonly key: ReadonlyArray<string>; readonly keep: "existing" }
+  | { readonly key: ReadonlyArray<string>; readonly keep: "incoming" }
+  | { readonly key: ReadonlyArray<string>; readonly keep: "newer"; readonly updatedAt: string };
+
+const quote = (column: string) => `"${column}"`;
+
+const upsert = (target: string, mapped: Record<string, Value>, onConflict: OnConflict) => {
+  const columns = Object.keys(mapped);
+  const insert = `INSERT INTO "${target}" (${columns.map(quote).join(", ")}) VALUES (${columns
+    .map((column) => literal(mapped[column]))
+    .join(", ")}) ON CONFLICT (${onConflict.key.map(quote).join(", ")})`;
+  if (onConflict.keep === "existing") return `${insert} DO NOTHING`;
+  const set = columns
+    .filter((column) => !onConflict.key.includes(column))
+    .map((column) => `${quote(column)} = excluded.${quote(column)}`)
+    .join(", ");
+  return onConflict.keep === "incoming"
+    ? `${insert} DO UPDATE SET ${set}`
+    : `${insert} DO UPDATE SET ${set} WHERE excluded.${quote(onConflict.updatedAt)} >= "${target}".${quote(onConflict.updatedAt)}`;
+};
+
 const copy = async (options: {
   source: string;
   target: string;
   query: postgres.PendingQuery<Row[]>;
   map: (row: Row) => Record<string, Value>;
-  // Upsert only when the incoming row is at least as new (diary tables).
-  newerWins?: { key: ReadonlyArray<string>; updatedAt: string };
+  onConflict: OnConflict;
 }) => {
   let batch: string[] = [];
   let batchBytes = 0;
   let copied = 0;
+  let oversized = 0;
   const flush = async () => {
     await execute(batch);
     batch = [];
@@ -129,19 +154,11 @@ const copy = async (options: {
   };
   for await (const rows of options.query.cursor(500)) {
     for (const row of rows) {
-      const mapped = options.map(row);
-      const columns = Object.keys(mapped);
-      const values = columns.map((column) => literal(mapped[column])).join(", ");
-      const names = columns.map((column) => `"${column}"`).join(", ");
-      const statement = options.newerWins
-        ? `INSERT INTO "${options.target}" (${names}) VALUES (${values}) ON CONFLICT (${options.newerWins.key
-            .map((column) => `"${column}"`)
-            .join(", ")}) DO UPDATE SET ${columns
-            .filter((column) => !options.newerWins!.key.includes(column))
-            .map((column) => `"${column}" = excluded."${column}"`)
-            .join(", ")} WHERE excluded."${options.newerWins.updatedAt}" >= "${options.target}"."${options.newerWins.updatedAt}"`
-        : `INSERT OR REPLACE INTO "${options.target}" (${names}) VALUES (${values})`;
-      if (statement.length > MAX_BATCH_BYTES) throw new Error(`A ${options.target} row exceeds the D1 statement size limit`);
+      const statement = upsert(options.target, options.map(row), options.onConflict);
+      if (statement.length > MAX_BATCH_BYTES) {
+        oversized += 1;
+        continue;
+      }
       if (batchBytes + statement.length > MAX_BATCH_BYTES) await flush();
       batch.push(statement);
       batchBytes += statement.length + 2;
@@ -149,7 +166,9 @@ const copy = async (options: {
     }
   }
   await flush();
-  console.log(`${options.source} → ${options.target}: ${copied} rows`);
+  console.log(
+    `${options.source} → ${options.target}: ${copied} rows${oversized ? ` (skipped ${oversized} rows over the D1 statement size)` : ""}`,
+  );
 };
 
 // --- Tables ------------------------------------------------------------------
@@ -160,6 +179,7 @@ try {
   await copy({
     source: "user",
     target: "user",
+    onConflict: { key: ["id"], keep: "existing" },
     query: sql`SELECT * FROM "user" ORDER BY id`,
     map: (row) => ({
       id: row.id,
@@ -174,6 +194,7 @@ try {
   await copy({
     source: "account",
     target: "account",
+    onConflict: { key: ["id"], keep: "existing" },
     query: sql`SELECT * FROM account ORDER BY id`,
     map: (row) => ({
       id: row.id,
@@ -196,6 +217,7 @@ try {
   await copy({
     source: "session",
     target: "session",
+    onConflict: { key: ["id"], keep: "existing" },
     query: sql`SELECT * FROM session WHERE expires_at > now() ORDER BY id`,
     map: (row) => ({
       id: row.id,
@@ -214,7 +236,7 @@ try {
       source: table,
       target: table,
       query: sql`SELECT * FROM ${sql(table)} ORDER BY user_id, id`,
-      newerWins: { key: ["user_id", "id"], updatedAt: "updated_at" },
+      onConflict: { key: ["user_id", "id"], keep: "newer", updatedAt: "updated_at" },
       map: (row) => ({
         user_id: row.user_id,
         id: row.id,
@@ -228,13 +250,14 @@ try {
     source: "user_settings",
     target: "user_settings",
     query: sql`SELECT * FROM user_settings ORDER BY user_id`,
-    newerWins: { key: ["user_id"], updatedAt: "updated_at" },
+    onConflict: { key: ["user_id"], keep: "newer", updatedAt: "updated_at" },
     map: (row) => ({ user_id: row.user_id, data: json(row.data), updated_at: millis(row.updated_at) }),
   });
 
   await copy({
     source: "social_profiles",
     target: "social_profiles",
+    onConflict: { key: ["user_id"], keep: "newer", updatedAt: "updated_at" },
     query: sql`SELECT * FROM social_profiles ORDER BY user_id`,
     map: (row) => ({
       user_id: row.user_id,
@@ -247,6 +270,7 @@ try {
   await copy({
     source: "friendships",
     target: "friendships",
+    onConflict: { key: ["id"], keep: "newer", updatedAt: "updated_at" },
     query: sql`SELECT * FROM friendships ORDER BY id`,
     map: (row) => ({
       id: row.id,
@@ -263,14 +287,18 @@ try {
   await copy({
     source: "ai_sessions",
     target: "ai_sessions",
-    query: sql`SELECT * FROM ai_sessions ORDER BY id`,
+    onConflict: { key: ["id"], keep: "existing" },
+    query: sql`SELECT id, user_id, search_result_counter, created_at, updated_at FROM ai_sessions ORDER BY id`,
+    // Only the session ids carry over: backend/'s AI SDK conversation format
+    // isn't the Worker's (it restarts the conversation), and photo-laden rows
+    // exceed D1's statement size.
     map: (row) => ({
       id: row.id,
       user_id: row.user_id,
-      conversation: json(row.conversation),
+      conversation: "[]",
       search_result_counter: row.search_result_counter,
-      search_results_by_local_id: json(row.search_results_by_local_id),
-      pending_approvals: json(row.pending_approvals),
+      search_results_by_local_id: "{}",
+      pending_approvals: "{}",
       created_at: millis(row.created_at),
       updated_at: millis(row.updated_at),
     }),
@@ -280,6 +308,7 @@ try {
   await copy({
     source: "mfp_auth_sessions",
     target: "mfp_auth_sessions",
+    onConflict: { key: ["provider"], keep: "newer", updatedAt: "updated_at" },
     query: sql`SELECT * FROM mfp_auth_sessions ORDER BY id`,
     map: (row) => ({
       id: row.id,
@@ -298,6 +327,7 @@ try {
   await copy({
     source: "anmat_product_html_blobs",
     target: "anmat_products",
+    onConflict: { key: ["id"], keep: "incoming" },
     query: sql`
       SELECT id, source_path, ingest_source, run_key, detail_key, token, query, query_index, page,
         wrapper_url, content_url, search_mode, province, rnpa, denominacion, nombre_fantasia, marca,
@@ -332,6 +362,7 @@ try {
   await copy({
     source: "anmat_product_derived_data",
     target: "anmat_product_derived_data",
+    onConflict: { key: ["id"], keep: "incoming" },
     query: sql`SELECT * FROM anmat_product_derived_data ORDER BY id`,
     map: (row) => ({
       id: row.id,
@@ -360,6 +391,7 @@ try {
     await copy({
       source: "mfp_search_responses",
       target: "mfp_search_responses",
+      onConflict: { key: ["id"], keep: "existing" },
       query: sql`SELECT * FROM mfp_search_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
@@ -378,6 +410,7 @@ try {
     await copy({
       source: "mfp_food_detail_responses",
       target: "mfp_food_detail_responses",
+      onConflict: { key: ["id"], keep: "existing" },
       query: sql`SELECT * FROM mfp_food_detail_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
@@ -394,6 +427,7 @@ try {
     await copy({
       source: "mfp_barcode_responses",
       target: "mfp_barcode_responses",
+      onConflict: { key: ["id"], keep: "existing" },
       query: sql`SELECT * FROM mfp_barcode_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
@@ -409,6 +443,7 @@ try {
     await copy({
       source: "open_food_facts_search_responses",
       target: "open_food_facts_search_responses",
+      onConflict: { key: ["id"], keep: "existing" },
       query: sql`SELECT * FROM open_food_facts_search_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,

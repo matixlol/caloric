@@ -1,11 +1,12 @@
 import { RuntimeContext } from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
+import type { HttpEffect } from "alchemy/Http";
 import * as LanguageModel from "effect/ai/LanguageModel";
 import * as Prompt from "effect/ai/Prompt";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
-import type * as Stream from "effect/Stream";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import { FoodSearch } from "../search/FoodSearch.ts";
 import { runAssistantLoop } from "./Agent.ts";
 import {
@@ -13,10 +14,10 @@ import {
   AiStoreError,
   type StartTurnInput,
   type TurnLookup,
-  type TurnMessage,
 } from "./Domain.ts";
 import { AssistantModelLive } from "./Model.ts";
 import { AiSessionStore } from "./SessionStore.ts";
+import { turnEventStream } from "./Sse.ts";
 import { makeTurnRunner, type TurnStorage } from "./Turns.ts";
 
 // One Durable Object per AI session (addressed by session id). It is the only
@@ -28,8 +29,7 @@ export interface AiSessionObjectShape {
   // session and starts the turn. Fails when the session isn't the user's.
   readonly startTurn: (input: StartTurnInput) => Effect.Effect<void, AiSessionNotFound | AiStoreError>;
   readonly lookupTurn: (turnId: string, userId: string) => Effect.Effect<TurnLookup>;
-  // Messages after `cursor` (callers check ownership with lookupTurn first).
-  readonly attachTurn: (turnId: string, cursor: number) => Stream.Stream<TurnMessage>;
+  readonly fetch: HttpEffect<Cloudflare.DurableObjectState | RuntimeContext>;
   readonly alarm: (info?: Cloudflare.AlarmInvocationInfo) => Effect.Effect<void>;
 }
 
@@ -106,7 +106,17 @@ export const AiSessionObjectLive = AiSessionObject.make(
       return {
         startTurn,
         lookupTurn: runner.lookup,
-        attachTurn: runner.attach,
+        // GET /attach?turnId=&cursor= streams the turn as SSE (messages after
+        // `cursor`; callers check ownership with lookupTurn first). Served over
+        // fetch rather than RPC: Alchemy closes an RPC call's scope when it
+        // returns, which would cut a live stream short.
+        fetch: Effect.gen(function* () {
+          const request = yield* HttpServerRequest.HttpServerRequest;
+          const params = new URL(request.url, "http://ai-session").searchParams;
+          const turnId = params.get("turnId") ?? "";
+          const cursor = Number(params.get("cursor") ?? Number.NaN);
+          return turnEventStream(turnId, runner.attach(turnId, Number.isFinite(cursor) ? cursor : -1));
+        }),
         alarm: () => runner.alarm.pipe(Effect.catchCause((cause) => Effect.logError("ai.turn_alarm_failed", cause))),
       } satisfies AiSessionObjectShape;
     });

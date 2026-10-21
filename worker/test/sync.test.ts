@@ -54,4 +54,30 @@ describe("SyncRepository", () => {
         expect(other.foodEntries).toEqual([]);
       }),
     ));
+
+  test("pushes many rows across statements and keeps the newest copy of a repeated id", () =>
+    run(
+      Effect.gen(function* () {
+        const sync = yield* SyncRepository;
+        const rows = Array.from({ length: 100 }, (_, index) => ({ id: `e${index}`, updatedAt: 10, data: entry(`Food ${index}`) }));
+        const first = yield* sync.push("u1", { foodEntries: rows, recipes: [] });
+        expect(first.acceptedFoodEntryIds.length).toBe(100);
+
+        const second = yield* sync.push("u1", {
+          foodEntries: [
+            { id: "e1", updatedAt: 20, data: entry("Newer") },
+            { id: "e1", updatedAt: 15, data: entry("Older duplicate") },
+            { id: "e2", updatedAt: 5, data: entry("Stale") },
+          ],
+          recipes: [],
+        });
+        expect(second.acceptedFoodEntryIds).toEqual(["e1"]);
+
+        const snapshot = yield* sync.bootstrap("u1");
+        const byId = new Map(snapshot.foodEntries.map((row) => [row.id, row]));
+        expect(snapshot.foodEntries.length).toBe(100);
+        expect(byId.get("e1")?.data.foodName).toBe("Newer");
+        expect(byId.get("e2")?.data.foodName).toBe("Food 2");
+      }),
+    ));
 });

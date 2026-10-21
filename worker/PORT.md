@@ -72,7 +72,8 @@ AI_MODEL/AI_REASONING_EFFORT/OPEN_FOOD_FACTS_*/AUTH_TRUSTED_ORIGINS overrides) a
 its public DATABASE_URL; and the Cloudflare token extended with
 Zone → Workers Routes: Edit and DNS: Edit on mati.lol.
 
-1. Write the env values to `worker/.env.prod` (gitignored).
+1. Write the env values to `worker/.env.prod` (gitignored). Don't keep a plain
+   `worker/.env`: Alchemy reads it for every stage. Dev config is `.env.dev`.
 2. `bun run deploy:prod:staged` — prod on workers.dev only; the domain can't
    attach while the Railway CNAME exists.
 3. `DATABASE_URL=<railway> bun run import:postgres --stage prod --with-caches`.

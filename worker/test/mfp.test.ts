@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Logger from "effect/Logger";
@@ -32,7 +31,7 @@ describe("MfpSession", () => {
   test("uses the stored session without logging in", async () => {
     let logins = 0;
     const auth = await run(
-      { login: Effect.sync(() => (logins += 1, loginResult("fresh"))) },
+      { login: () => Effect.sync(() => (logins += 1, loginResult("fresh"))) },
       Effect.gen(function* () {
         const db = yield* Db;
         yield* db
@@ -46,40 +45,26 @@ describe("MfpSession", () => {
     expect(logins).toBe(0);
   });
 
-  test("shares one in-flight browser login between concurrent refreshes and persists it", async () => {
-    let logins = 0;
-    const gate = Deferred.makeUnsafe<void>();
-    const login = {
-      login: Effect.gen(function* () {
-        logins += 1;
-        yield* Deferred.await(gate);
-        return loginResult(`session=${logins}`);
-      }),
-    };
-    const [results, stored] = await run(
-      login,
+  test("passes the stored session's refresh time to the login and persists the result", async () => {
+    const seen: Array<number> = [];
+    const [auth, stored] = await run(
+      { login: ({ newerThan }) => Effect.sync(() => (seen.push(newerThan), loginResult("session=2"))) },
       Effect.gen(function* () {
-        const session = yield* MfpSession;
-        const refresh = session.getAuth({ forceRefresh: true });
-        const [results] = yield* Effect.all(
-          [
-            Effect.all([refresh, refresh, refresh], { concurrency: "unbounded" }),
-            Effect.sleep("10 millis").pipe(Effect.andThen(Deferred.succeed(gate, undefined))),
-          ],
-          { concurrency: "unbounded" },
-        );
         const db = yield* Db;
-        return [results, yield* db.select().from(mfpAuthSessions)] as const;
+        yield* db
+          .insert(mfpAuthSessions)
+          .values({ provider: "myfitnesspal", cookieHeader: "session=1", refreshedAt: new Date(1_000) });
+        const auth = yield* (yield* MfpSession).getAuth({ forceRefresh: true });
+        return [auth, yield* db.select().from(mfpAuthSessions)] as const;
       }),
     );
 
-    expect(logins).toBe(1);
-    const expected = { cookieHeader: "session=1", authorization: "Bearer eyJ_head.eyJ_body.sig_nature" };
-    expect(results).toEqual([expected, expected, expected]);
+    expect(seen).toEqual([1_000]);
+    expect(auth).toEqual({ cookieHeader: "session=2", authorization: "Bearer eyJ_head.eyJ_body.sig_nature" });
     expect(stored).toHaveLength(1);
     expect(stored[0]).toMatchObject({
       provider: "myfitnesspal",
-      cookieHeader: "session=1",
+      cookieHeader: "session=2",
       authorization: "Bearer eyJ_head.eyJ_body.sig_nature",
       storageState: { cookies: [{ name: "a" }], origins: [] },
       sessionStorage: { token: "x" },
@@ -90,12 +75,13 @@ describe("MfpSession", () => {
     let logins = 0;
     const [first, second] = await run(
       {
-        login: Effect.suspend(() => {
-          logins += 1;
-          return logins === 1
-            ? Effect.fail(new MfpLoginError({ message: "captcha" }))
-            : Effect.succeed(loginResult("ok=1"));
-        }),
+        login: () =>
+          Effect.suspend(() => {
+            logins += 1;
+            return logins === 1
+              ? Effect.fail(new MfpLoginError({ message: "captcha" }))
+              : Effect.succeed(loginResult("ok=1"));
+          }),
       },
       Effect.gen(function* () {
         const session = yield* MfpSession;
@@ -111,7 +97,7 @@ describe("MfpSession", () => {
 
   test("rejects logins without storage state", async () => {
     const error = await run(
-      { login: Effect.succeed(loginResult("c=1", { storageState: null })) },
+      { login: () => Effect.succeed(loginResult("c=1", { storageState: null })) },
       Effect.flatMap(MfpSession, (session) => Effect.flip(session.getAuth({ forceRefresh: true }))),
     );
     expect(error.message).toBe("MyFitnessPal refresh finished without storage state.");

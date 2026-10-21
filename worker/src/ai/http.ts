@@ -4,7 +4,6 @@ import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
-import * as Stream from "effect/Stream";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -16,7 +15,7 @@ import { AudioTranscoder } from "../audio/AudioTranscoder.ts";
 import { Auth } from "../auth/Auth.ts";
 import { aiSessionId } from "../ids.ts";
 import { systemMessage, systemPrompt } from "./Agent.ts";
-import type { TurnMessage, UserMessagePart } from "./Domain.ts";
+import type { UserMessagePart } from "./Domain.ts";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "./RecentLogContext.ts";
 import { AiSessionObject, AiSessionObjectLive } from "./SessionObject.ts";
 import { AiSessionStore } from "./SessionStore.ts";
@@ -69,18 +68,12 @@ const authUnavailable = () =>
   });
 const sessionNotFound = () => new TurnRejected({ status: 403, body: { error: "Session not found for this user" } });
 
-const sseFrame = (message: TurnMessage | { readonly type: "turn"; readonly turnId: string }) =>
-  message.type === "done" ? "data: [DONE]\n\n" : `data: ${JSON.stringify(message)}\n\n`;
-
-// The turn id frame, then the session object's messages; ends after `done`.
-const sseResponse = (turnId: string, messages: Stream.Stream<TurnMessage, unknown>) =>
-  HttpServerResponse.stream(
-    Stream.concat(Stream.succeed({ type: "turn" as const, turnId }), messages).pipe(
-      Stream.takeUntil((message) => message.type === "done"),
-      Stream.map(sseFrame),
-      Stream.encodeText,
+// The session object serves the turn's SSE stream itself (see SessionObject.ts).
+const attachTurn = (session: { readonly fetch: (request: HttpServerRequest.HttpServerRequest) => Effect.Effect<HttpServerResponse.HttpServerResponse, unknown> }, turnId: string, cursor: number) =>
+  session.fetch(
+    HttpServerRequest.fromWeb(
+      new Request(`http://ai-session/attach?turnId=${encodeURIComponent(turnId)}&cursor=${cursor}`),
     ),
-    { contentType: "text/event-stream; charset=utf-8", headers: { "cache-control": "no-cache, no-transform" } },
   );
 
 const toDataUrl = (mediaType: string, bytes: Uint8Array) => `data:${mediaType};base64,${Base64.encode(bytes)}`;
@@ -150,7 +143,7 @@ export const AiRoutes = HttpRouter.use(
         .startTurn({ turnId, sessionId: parsed.sessionId, userId, message, media })
         .pipe(Effect.catchTag("AiSessionNotFound", () => Effect.fail(sessionNotFound())));
       yield* Effect.annotateCurrentSpan({ "app.ai.turn_id": turnId, "app.ai.image_count": images.length });
-      return sseResponse(turnId, session.attachTurn(turnId, -1));
+      return yield* attachTurn(session, turnId, -1);
     });
 
     const resumeTurn = Effect.gen(function* () {
@@ -172,7 +165,7 @@ export const AiRoutes = HttpRouter.use(
 
       const rawCursor = (yield* HttpServerRequest.ParsedSearchParams).cursor;
       const cursor = Number(Array.isArray(rawCursor) ? rawCursor[0] : (rawCursor ?? Number.NaN));
-      return sseResponse(turnId, session.attachTurn(turnId, Number.isFinite(cursor) ? cursor : -1));
+      return yield* attachTurn(session, turnId, Number.isFinite(cursor) ? cursor : -1);
     });
 
     const respond =

@@ -16,12 +16,13 @@ export const MfpLoginLive = Layer.effect(
   Effect.gen(function* () {
     const browsers = yield* MfpBrowser;
     return MfpLogin.of({
-      login: Effect.suspend(() => browsers.getByName(MFP_BROWSER_INSTANCE).login()).pipe(
-        Effect.mapError((error: unknown) =>
-          error instanceof MfpLoginError ? error : new MfpLoginError({ message: describe(error), cause: error }),
+      login: (options) =>
+        browsers.getByName(MFP_BROWSER_INSTANCE).login(options.newerThan).pipe(
+          Effect.mapError((error: unknown) =>
+            error instanceof MfpLoginError ? error : new MfpLoginError({ message: describe(error), cause: error }),
+          ),
+          Effect.withSpan("MfpLogin.login"),
         ),
-        Effect.withSpan("MfpLogin.login"),
-      ),
     });
   }),
 ).pipe(Layer.provide(MfpBrowserLive));

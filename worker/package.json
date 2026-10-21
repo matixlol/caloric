@@ -8,7 +8,7 @@
     "test": "bun test",
     "db:generate": "drizzle-kit generate",
     "build:web": "bun scripts/build-web.ts",
-    "deploy:dev": "bun scripts/build-web.ts && ALCHEMY_STAGE=dev alchemy deploy --profile caloric --yes",
+    "deploy:dev": "bun scripts/build-web.ts && ALCHEMY_STAGE=dev alchemy deploy --profile caloric --env-file .env.dev --yes",
     "deploy:prod": "bun scripts/build-web.ts && ALCHEMY_STAGE=prod BETTER_AUTH_URL=https://backend.caloric.mati.lol CUSTOM_DOMAIN=backend.caloric.mati.lol alchemy deploy --profile caloric --env-file .env.prod",
     "import:postgres": "bun scripts/import-postgres.ts",
     "deploy:prod:staged": "bun scripts/build-web.ts && ALCHEMY_STAGE=prod BETTER_AUTH_URL=https://backend.caloric.mati.lol alchemy deploy --profile caloric --env-file .env.prod"

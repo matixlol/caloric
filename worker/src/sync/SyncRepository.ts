@@ -48,34 +48,58 @@ const make = Effect.gen(function* () {
   }, withRuntime);
 
   // Last-writer-wins upserts: a write applies when it is at least as new as
-  // the stored row. RETURNING yields a row only when the write applied.
-  const pushFoodEntry = (userId: string, row: FoodEntryRow) => {
-    const values = { data: row.data, updatedAt: new Date(row.updatedAt), deletedAt: toDate(row.deletedAt) };
-    return db
-      .insert(userFoodEntries)
-      .values({ userId, id: row.id, ...values })
-      .onConflictDoUpdate({
-        target: [userFoodEntries.userId, userFoodEntries.id],
-        set: values,
-        setWhere: lte(userFoodEntries.updatedAt, sql`excluded.updated_at`),
-      })
-      .returning({ id: userFoodEntries.id })
-      .pipe(Effect.map((rows) => rows.length > 0));
+  // the stored row, and RETURNING yields only the rows that applied. Rows go
+  // in multi-row statements (D1 allows 100 bound parameters per statement and
+  // 1,000 statements per request); each row binds 5 parameters.
+  const ROWS_PER_STATEMENT = 19;
+
+  // A statement can't upsert the same key twice, so a push that repeats an id
+  // keeps only its newest copy (what sequential last-writer-wins would leave).
+  const newestById = <R extends { readonly id: string; readonly updatedAt: number }>(rows: ReadonlyArray<R>) => {
+    const newest = new Map<string, R>();
+    for (const row of rows) {
+      const current = newest.get(row.id);
+      if (!current || row.updatedAt >= current.updatedAt) newest.set(row.id, row);
+    }
+    return [...newest.values()];
   };
 
-  const pushRecipe = (userId: string, row: RecipeRow) => {
-    const values = { data: row.data, updatedAt: new Date(row.updatedAt), deletedAt: toDate(row.deletedAt) };
-    return db
-      .insert(userRecipes)
-      .values({ userId, id: row.id, ...values })
-      .onConflictDoUpdate({
-        target: [userRecipes.userId, userRecipes.id],
-        set: values,
-        setWhere: lte(userRecipes.updatedAt, sql`excluded.updated_at`),
-      })
-      .returning({ id: userRecipes.id })
-      .pipe(Effect.map((rows) => rows.length > 0));
-  };
+  const chunks = <A>(items: ReadonlyArray<A>) =>
+    Array.from({ length: Math.ceil(items.length / ROWS_PER_STATEMENT) }, (_, index) =>
+      items.slice(index * ROWS_PER_STATEMENT, (index + 1) * ROWS_PER_STATEMENT),
+    );
+
+  const pushRows = <R extends FoodEntryRow | RecipeRow>(
+    table: typeof userFoodEntries | typeof userRecipes,
+    userId: string,
+    rows: ReadonlyArray<R>,
+  ) =>
+    Effect.forEach(
+      chunks(newestById(rows)),
+      (chunk) =>
+        db
+          .insert(table)
+          .values(
+            chunk.map((row) => ({
+              userId,
+              id: row.id,
+              data: row.data as never,
+              updatedAt: new Date(row.updatedAt),
+              deletedAt: toDate(row.deletedAt),
+            })),
+          )
+          .onConflictDoUpdate({
+            target: [table.userId, table.id],
+            set: {
+              data: sql`excluded.data`,
+              updatedAt: sql`excluded.updated_at`,
+              deletedAt: sql`excluded.deleted_at`,
+            },
+            setWhere: lte(table.updatedAt, sql`excluded.updated_at`),
+          })
+          .returning({ id: table.id }),
+      { concurrency: 1 },
+    ).pipe(Effect.map((results) => results.flat().map((row) => row.id)));
 
   const pushSettings = (userId: string, row: SettingsRow) => {
     const values = { data: row.data, updatedAt: new Date(row.updatedAt) };
@@ -91,14 +115,6 @@ const make = Effect.gen(function* () {
       .pipe(Effect.map((rows) => rows.length > 0));
   };
 
-  const acceptedIds = <R extends { readonly id: string }, E>(
-    rows: ReadonlyArray<R>,
-    write: (row: R) => Effect.Effect<boolean, E>,
-  ) =>
-    Effect.forEach(rows, (row) => write(row).pipe(Effect.map((accepted) => (accepted ? [row.id] : []))), {
-      concurrency: 1,
-    }).pipe(Effect.map((ids) => ids.flat()));
-
   const push = Effect.fn("SyncRepository.push")(function* (
     userId: string,
     body: {
@@ -107,8 +123,8 @@ const make = Effect.gen(function* () {
       readonly settings?: SettingsRow | null;
     },
   ) {
-    const acceptedFoodEntryIds = yield* acceptedIds(body.foodEntries, (row) => pushFoodEntry(userId, row));
-    const acceptedRecipeIds = yield* acceptedIds(body.recipes, (row) => pushRecipe(userId, row));
+    const acceptedFoodEntryIds = yield* pushRows(userFoodEntries, userId, body.foodEntries);
+    const acceptedRecipeIds = yield* pushRows(userRecipes, userId, body.recipes);
     const acceptedSettings = body.settings ? yield* pushSettings(userId, body.settings) : false;
     return { acceptedFoodEntryIds, acceptedRecipeIds, acceptedSettings };
   }, withRuntime);

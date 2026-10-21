@@ -1,6 +1,5 @@
 import { eq } from "drizzle-orm";
 import * as Context from "effect/Context";
-import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
@@ -35,22 +34,29 @@ const make = Effect.gen(function* () {
   const readStored = Effect.fn("MfpSession.readStored")(
     function* () {
       const [row] = yield* db
-        .select({ authorization: mfpAuthSessions.authorization, cookieHeader: mfpAuthSessions.cookieHeader })
+        .select({
+          authorization: mfpAuthSessions.authorization,
+          cookieHeader: mfpAuthSessions.cookieHeader,
+          refreshedAt: mfpAuthSessions.refreshedAt,
+        })
         .from(mfpAuthSessions)
         .where(eq(mfpAuthSessions.provider, MFP_PROVIDER))
         .limit(1);
       const cookieHeader = row?.cookieHeader?.trim();
-      return cookieHeader
-        ? Option.some({ authorization: normalizeAuthorization(row?.authorization, true), cookieHeader })
-        : Option.none<MfpRequestAuth>();
+      return {
+        refreshedAt: row?.refreshedAt.getTime() ?? 0,
+        auth: cookieHeader
+          ? Option.some({ authorization: normalizeAuthorization(row?.authorization, true), cookieHeader })
+          : Option.none<MfpRequestAuth>(),
+      };
     },
     withRuntime,
     Effect.mapError((cause) => new MfpSessionError({ message: "Failed to read the stored MFP session", cause })),
   );
 
   const refreshNow = Effect.fn("MfpSession.refresh")(
-    function* () {
-      const result = yield* login.login;
+    function* (newerThan: number) {
+      const result = yield* login.login({ newerThan });
       yield* Schema.decodeUnknownEffect(StorageState)(result.storageState).pipe(
         Effect.mapError(
           (cause) => new MfpSessionError({ message: "MyFitnessPal refresh finished without storage state.", cause }),
@@ -82,38 +88,16 @@ const make = Effect.gen(function* () {
     ),
   );
 
-  // Browser logins are slow and cost a captcha solve, so concurrent callers in
-  // this isolate share one in-flight refresh. The refresh itself runs
-  // uninterruptibly so a disconnecting initiator doesn't fail the others.
-  let inflight: Deferred.Deferred<MfpRequestAuth, MfpSessionError> | undefined;
-  const refresh = Effect.suspend(() => {
-    const current = inflight;
-    if (current) {
-      return Deferred.await(current);
-    }
-    const deferred = Deferred.makeUnsafe<MfpRequestAuth, MfpSessionError>();
-    inflight = deferred;
-    return refreshNow().pipe(
-      Effect.exit,
-      Effect.flatMap((exit) => {
-        inflight = undefined;
-        return Deferred.done(deferred, exit);
-      }),
-      Effect.uninterruptible,
-      Effect.andThen(Deferred.await(deferred)),
-    );
-  });
-
   // The stored session, or a fresh browser login when there is none (or the
   // caller saw MFP reject the stored one).
   const getAuth = Effect.fn("MfpSession.getAuth")(function* (options?: { readonly forceRefresh?: boolean }) {
-    if (!options?.forceRefresh) {
-      const stored = yield* readStored();
-      if (Option.isSome(stored)) {
-        return stored.value;
-      }
+    const stored = yield* readStored();
+    if (!options?.forceRefresh && Option.isSome(stored.auth)) {
+      return stored.auth.value;
     }
-    return yield* refresh;
+    // Concurrent refreshes share one browser login in the MfpBrowser object,
+    // which may also hand back a login newer than the stored session.
+    return yield* refreshNow(stored.refreshedAt);
   });
 
   return { getAuth };

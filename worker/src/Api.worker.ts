@@ -12,6 +12,7 @@ import { Database } from "./db/Database.ts";
 import { Db } from "./db/Db.ts";
 import { Email } from "./email/Email.ts";
 import { InvalidRequest } from "./api/InvalidRequest.ts";
+import { UnexpectedErrors } from "./api/UnexpectedErrors.ts";
 import { AiHandlers, AiRoutes } from "./ai/http.ts";
 import { AudioTranscoder } from "./audio/AudioTranscoder.ts";
 import { AudioTranscoderLive, MfpLoginLive } from "./container/Live.ts";
@@ -43,7 +44,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
     const routes = Layer.mergeAll(
       HttpApiBuilder.layer(ApiSpec).pipe(
         Layer.provide([HealthHandlers, SyncHandlers, SocialHandlers, SearchHandlers, MfpHandlers, AiHandlers]),
-        Layer.provide([AuthenticationLive, InvalidRequest.layer]),
+        Layer.provide([AuthenticationLive, InvalidRequest.layer, UnexpectedErrors.layer]),
       ),
       // Better Auth owns everything under /api/auth (sign-in, OTP, session).
       HttpRouter.add("*", "/api/auth/*", auth.fetch),

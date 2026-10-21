@@ -23,7 +23,8 @@ export class MfpLogin extends Context.Service<
   MfpLogin,
   {
     // Signs in to MyFitnessPal in a real browser (proxy + 2captcha) and
-    // returns the session. Slow (tens of seconds); callers persist the result.
-    readonly login: Effect.Effect<MfpLoginResult, MfpLoginError>;
+    // returns the session. Slow (minutes); callers persist the result. A login
+    // finished after `newerThan` (epoch ms) may be returned instead of a new one.
+    readonly login: (options: { readonly newerThan: number }) => Effect.Effect<MfpLoginResult, MfpLoginError>;
   }
 >()("caloric/mfp/MfpLogin") {}

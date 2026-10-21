@@ -6,28 +6,39 @@ import * as Layer from "effect/Layer";
 import * as Schema from "effect/Schema";
 import { Db, withRuntime } from "../db/Db.ts";
 import { aiSessions } from "../db/schema.ts";
-import type { SessionState } from "./Agent.ts";
+import { type SessionState, systemMessage, systemPrompt } from "./Agent.ts";
 import { AiStoreError, type SearchResultFood } from "./Domain.ts";
 
 // Conversations are stored as Effect AI's encoded `Prompt` (JSON). D1 caps a
 // row at 2 MB, and photos/voice notes are inlined as base64, so oversized
-// conversations drop their media (replaced by a note) before being stored.
+// conversations drop media (replaced by a note), oldest messages first, until
+// they fit. Search results the assistant can still refer to are capped too.
 const conversationByteBudget = 1_500_000;
+const maxStoredSearchResults = 300;
 const mediaPlaceholder = "(An attachment was sent here; it is no longer available.)";
 
 const encodePrompt = Schema.encodeEffect(Prompt.Prompt);
 const decodePrompt = Schema.decodeUnknownEffect(Prompt.Prompt);
 
-const withoutMedia = (messages: ReadonlyArray<Prompt.Message>): Array<Prompt.Message> =>
-  messages.map((message) =>
-    message.role === "user" && message.content.some((part) => part.type === "file")
-      ? Prompt.makeMessage("user", {
-          content: message.content.map((part) =>
-            part.type === "file" ? Prompt.makePart("text", { text: mediaPlaceholder }) : part,
-          ),
-        })
-      : message,
-  );
+const hasMedia = (message: Prompt.Message) =>
+  message.role === "user" && message.content.some((part) => part.type === "file");
+
+const withoutMedia = (message: Prompt.Message): Prompt.Message =>
+  hasMedia(message) && message.role === "user"
+    ? Prompt.makeMessage("user", {
+        content: message.content.map((part) =>
+          part.type === "file" ? Prompt.makePart("text", { text: mediaPlaceholder }) : part,
+        ),
+      })
+    : message;
+
+// Insertion order is the order the assistant saw them; keep the newest.
+const recentSearchResults = <A>(results: Record<string, A>): Record<string, A> => {
+  const entries = Object.entries(results);
+  return entries.length <= maxStoredSearchResults
+    ? results
+    : Object.fromEntries(entries.slice(entries.length - maxStoredSearchResults));
+};
 
 const byteLength = (value: unknown) => new TextEncoder().encode(JSON.stringify(value)).byteLength;
 
@@ -37,10 +48,14 @@ const make = Effect.gen(function* () {
   const db = yield* Db;
 
   const encodeConversation = Effect.fnUntraced(function* (messages: ReadonlyArray<Prompt.Message>) {
-    const encoded = yield* encodePrompt(Prompt.fromMessages(messages));
-    return byteLength(encoded) <= conversationByteBudget
-      ? encoded
-      : yield* encodePrompt(Prompt.fromMessages(withoutMedia(messages)));
+    const kept = [...messages];
+    let encoded = yield* encodePrompt(Prompt.fromMessages(kept));
+    for (let index = 0; index < kept.length && byteLength(encoded) > conversationByteBudget; index++) {
+      if (!hasMedia(kept[index]!)) continue;
+      kept[index] = withoutMedia(kept[index]!);
+      encoded = yield* encodePrompt(Prompt.fromMessages(kept));
+    }
+    return encoded;
   });
 
   const create = Effect.fn("AiSessionStore.create")(
@@ -86,11 +101,18 @@ const make = Effect.gen(function* () {
         .where(and(eq(aiSessions.id, sessionId), eq(aiSessions.userId, userId)))
         .limit(1);
       if (!row) return null;
-      const prompt = yield* decodePrompt(row.conversation);
+      // Sessions imported from backend/ carry no usable conversation (its AI
+      // SDK message format doesn't decode); they continue from a fresh one.
+      const conversation = yield* decodePrompt(row.conversation).pipe(
+        Effect.map((prompt) => [...prompt.content]),
+        Effect.catchTag("SchemaError", () =>
+          Effect.logInfo("ai.session_conversation_reset").pipe(Effect.as([systemMessage(systemPrompt)])),
+        ),
+      );
       return {
         id: sessionId,
         userId,
-        conversation: [...prompt.content],
+        conversation,
         searchResultCounter: row.searchResultCounter,
         // Written only by `save` below from the agent's own state.
         searchResultsByLocalId: (row.searchResultsByLocalId ?? {}) as Record<string, SearchResultFood>,
@@ -109,7 +131,7 @@ const make = Effect.gen(function* () {
         .set({
           conversation: yield* encodeConversation(session.conversation),
           searchResultCounter: session.searchResultCounter,
-          searchResultsByLocalId: session.searchResultsByLocalId,
+          searchResultsByLocalId: recentSearchResults(session.searchResultsByLocalId),
           pendingApprovals: {},
           updatedAt: new Date(),
         })

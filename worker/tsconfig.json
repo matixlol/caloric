@@ -12,5 +12,5 @@
     "exactOptionalPropertyTypes": false,
     "types": ["@cloudflare/workers-types", "bun"]
   },
-  "include": ["alchemy.run.ts", "drizzle.config.ts", "src", "test"]
+  "include": ["alchemy.run.ts", "drizzle.config.ts", "src", "test", "scripts"]
 }

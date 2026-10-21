@@ -8,6 +8,7 @@ import type * as HttpClientResponse from "effect/http/HttpClientResponse";
 import * as HttpIncomingMessage from "effect/http/HttpIncomingMessage";
 import { AudioTranscodeError } from "../audio/AudioTranscoder.ts";
 import { MfpLoginError, MfpLoginResult } from "../mfp/MfpLogin.ts";
+import { makeLoginCoordinator } from "./LoginCoordinator.ts";
 import { CONTAINER_PORT, MfpContainer } from "./MfpContainer.ts";
 
 // Every caller uses this one object, so there is one container and one
@@ -18,6 +19,8 @@ const LOGIN_TIMEOUT = Duration.minutes(5);
 const AUDIO_TIMEOUT = Duration.seconds(90);
 // The container stops (scales to zero) after this long without calls.
 const IDLE_TIMEOUT = Duration.minutes(10);
+// A finished login is handed to later callers for this long (see LoginCoordinator).
+const REUSE_LOGIN_WITHIN = Duration.minutes(10);
 
 const ContainerErrorBody = Schema.Struct({ error: Schema.String });
 
@@ -29,7 +32,7 @@ const describe = (cause: unknown) =>
 export class MfpBrowser extends Cloudflare.DurableObject<
   MfpBrowser,
   {
-    readonly login: () => Effect.Effect<MfpLoginResult, MfpLoginError>;
+    readonly login: (newerThan: number) => Effect.Effect<MfpLoginResult, MfpLoginError>;
     readonly toWav: (audio: Uint8Array, mediaType: string) => Effect.Effect<Uint8Array, AudioTranscodeError>;
   }
 >()("MfpBrowser", { errors: [MfpLoginError, AudioTranscodeError] }) {}
@@ -37,6 +40,7 @@ export class MfpBrowser extends Cloudflare.DurableObject<
 export const MfpBrowserLive = MfpBrowser.make(
   Effect.gen(function* () {
     const container = yield* MfpContainer;
+    const state = yield* Cloudflare.DurableObjectState;
 
     return Effect.gen(function* () {
       const runtime = yield* RuntimeContext;
@@ -54,7 +58,7 @@ export const MfpBrowserLive = MfpBrowser.make(
           Effect.orElseSucceed(() => `container responded ${response.status}`),
         );
 
-      const login = Effect.fn("MfpBrowser.login")(
+      const runLogin = Effect.fn("MfpBrowser.runLogin")(
         function* () {
           const response = yield* send(HttpClientRequest.post(`http://container/mfp/login`));
           if (response.status !== 200) {
@@ -93,6 +97,17 @@ export const MfpBrowserLive = MfpBrowser.make(
         ),
         Effect.provideService(RuntimeContext, runtime),
       );
+
+      const inRuntime = <A, E, R>(effect: Effect.Effect<A, E, R>) => Effect.provideService(effect, RuntimeContext, runtime);
+      const login = makeLoginCoordinator({
+        run: runLogin(),
+        storage: {
+          get: inRuntime(state.storage.get<{ at: number; result: MfpLoginResult }>("lastLogin")).pipe(Effect.orDie),
+          put: (login) => inRuntime(state.storage.put("lastLogin", login)).pipe(Effect.orDie),
+        },
+        keepAlive: (running) => inRuntime(state.waitUntil(running)),
+        reuseWithin: Duration.toMillis(REUSE_LOGIN_WITHIN),
+      });
 
       return { login, toWav };
     });
