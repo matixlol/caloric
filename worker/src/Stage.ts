@@ -1,7 +1,9 @@
-// The deploy target, from ALCHEMY_STAGE (the `deploy:*` scripts set it). Only
-// meaningful at deploy time; inside the running Worker it is always false.
-export const stage = globalThis.process?.env?.ALCHEMY_STAGE;
-export const isProduction = stage === "prod";
+// Deploy-time settings from the environment (the `deploy:*` scripts set them).
+// Only meaningful while deploying; inside the running Worker they're unset.
+const env = globalThis.process?.env ?? {};
 
-// Production keeps backend/'s hostname so the iOS app needs no update.
-export const PRODUCTION_DOMAIN = "backend.caloric.mati.lol";
+export const isProduction = env.ALCHEMY_STAGE === "prod";
+
+// Custom domain to attach. Production uses backend/'s hostname so the iOS app
+// needs no update; `deploy:prod:staged` leaves it off (workers.dev only).
+export const customDomain = env.CUSTOM_DOMAIN || undefined;

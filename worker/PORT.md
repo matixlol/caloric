@@ -44,8 +44,47 @@ until cutover; nothing here changes it.
 
 ## Status
 
-- Phase 1 done: `dev` stage deployed (`bun alchemy deploy --profile caloric --stage dev`).
-  Health, Better Auth (`/api/auth/*`), `/sync/bootstrap` and `/sync/push` verified with curl.
+Everything in backend/ is ported and deployed to the `dev` stage
+(`bun run deploy:dev`, https://caloric-api-dev-gc2bvpxw6mrtqmaq.mati-8c1.workers.dev):
+health, auth, sync, social, search/barcode/ANMAT, MFP session + container login,
+AI assistant (Durable Object turns, voice via the container), and the web app.
+
+Rehearsed against a local copy of backend/ (Postgres in OrbStack, preview seed):
+`scripts/import-postgres.ts` copied it into dev D1, and a session cookie issued
+by backend/ authenticated against the Worker. `scripts/contract-check.ts`
+matched every read-only endpoint. Not exercised for real yet (no credentials on
+dev): an OpenRouter model call and a MyFitnessPal browser login.
+
+## Running it
+
+- `bun run test`, `bun run typecheck` in worker/.
+- `bun run deploy:dev` builds the web app and deploys the `dev` stage.
+- Container images build with the local Docker CLI (OrbStack); put
+  `~/.local/bin` on PATH (docker and buildx are linked there).
+- Logs: `ALCHEMY_STAGE=dev bun alchemy logs --profile caloric --since 10m`.
+
+## Cutover runbook (prod)
+
+Needs: Railway's Postgres reachable again; the Railway env values
+(BETTER_AUTH_SECRET, OPENROUTER_API_KEY, RESEND_API_KEY, MFP_USERNAME,
+MFP_PASSWORD, MFP_GUEST_ACCESS_TOKEN, MFP_PROXY_URL, TWO_CAPTCHA_API_KEY, plus any
+AI_MODEL/AI_REASONING_EFFORT/OPEN_FOOD_FACTS_*/AUTH_TRUSTED_ORIGINS overrides) and
+its public DATABASE_URL; and the Cloudflare token extended with
+Zone → Workers Routes: Edit and DNS: Edit on mati.lol.
+
+1. Write the env values to `worker/.env.prod` (gitignored).
+2. `bun run deploy:prod:staged` — prod on workers.dev only; the domain can't
+   attach while the Railway CNAME exists.
+3. `DATABASE_URL=<railway> bun run import:postgres --stage prod --with-caches`.
+4. `bun scripts/contract-check.ts --old https://backend.caloric.mati.lol --new <prod workers.dev url> --cookie '<a real session cookie>'`
+   must report all responses matching.
+5. Delete the `backend` CNAME (-> xgdpng89.up.railway.app) in the mati.lol zone,
+   then `bun run deploy:prod` (attaches backend.caloric.mati.lol).
+6. Re-run step 3 to pick up writes that reached Railway during the switch
+   (diary rows are last-writer-wins, so this is safe).
+7. Smoke test the iOS app: still signed in, diary syncs, search, assistant, voice.
+8. Keep Railway running a few days. Rollback: remove the Worker's custom domain
+   and recreate the CNAME.
 
 ## Notes
 
@@ -54,6 +93,12 @@ until cutover; nothing here changes it.
   Worker supplies the real context per request (`withRuntime` in `src/db/Db.ts`).
 - Auth cookies must stay `__Secure-better-auth.session_token` (`useSecureCookies`)
   and prod must reuse Railway's `BETTER_AUTH_SECRET`, or every iOS user is signed out.
-- Auth tables use Better Auth's default camelCase columns; the Postgres import has
-  to map backend/'s snake_case columns onto them.
-- Validation failures return 400 with an empty body (backend/ sent `{"error": "..."}`).
+- Better Auth owns and migrates its tables (camelCase columns); the import maps
+  backend/'s snake_case columns onto them.
+- AI turn ids embed the session id (`ai_turn_<turn>_<session>`) so the stream
+  route can reach the session's Durable Object.
+- The container (standard-1, 4 GiB) serves both MFP logins and voice-note
+  transcoding and sleeps after 10 idle minutes. Recording WAV on device would
+  take voice notes off the container.
+- Observability is Workers Logs (on by default); Sentry was not carried over.
+- `/mfp/session/refresh` now requires a signed-in user.

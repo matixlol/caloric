@@ -3,7 +3,10 @@
 //   DATABASE_URL=postgres://... bun scripts/import-postgres.ts --stage dev [--profile caloric]
 //     [--with-caches] [--dry-run <file.sql>]
 //
-// Rows are upserted (INSERT OR REPLACE), so re-running refreshes the copy.
+// Rows are upserted, so re-running refreshes the copy. Diary tables are
+// last-writer-wins on updated_at (like /sync/push), so a re-run right after the
+// DNS switch picks up writes that reached Railway late without clobbering newer
+// writes the Worker already accepted.
 // Better Auth's tables use its camelCase D1 columns (ISO dates, 0/1 booleans);
 // app tables store epoch milliseconds and JSON text. Provider response caches
 // are skipped unless --with-caches is passed; they refill on demand.
@@ -113,6 +116,8 @@ const copy = async (options: {
   target: string;
   query: postgres.PendingQuery<Row[]>;
   map: (row: Row) => Record<string, Value>;
+  // Upsert only when the incoming row is at least as new (diary tables).
+  newerWins?: { key: ReadonlyArray<string>; updatedAt: string };
 }) => {
   let batch: string[] = [];
   let batchBytes = 0;
@@ -126,9 +131,16 @@ const copy = async (options: {
     for (const row of rows) {
       const mapped = options.map(row);
       const columns = Object.keys(mapped);
-      const statement = `INSERT OR REPLACE INTO "${options.target}" (${columns.map((c) => `"${c}"`).join(", ")}) VALUES (${columns
-        .map((column) => literal(mapped[column]))
-        .join(", ")})`;
+      const values = columns.map((column) => literal(mapped[column])).join(", ");
+      const names = columns.map((column) => `"${column}"`).join(", ");
+      const statement = options.newerWins
+        ? `INSERT INTO "${options.target}" (${names}) VALUES (${values}) ON CONFLICT (${options.newerWins.key
+            .map((column) => `"${column}"`)
+            .join(", ")}) DO UPDATE SET ${columns
+            .filter((column) => !options.newerWins!.key.includes(column))
+            .map((column) => `"${column}" = excluded."${column}"`)
+            .join(", ")} WHERE excluded."${options.newerWins.updatedAt}" >= "${options.target}"."${options.newerWins.updatedAt}"`
+        : `INSERT OR REPLACE INTO "${options.target}" (${names}) VALUES (${values})`;
       if (statement.length > MAX_BATCH_BYTES) throw new Error(`A ${options.target} row exceeds the D1 statement size limit`);
       if (batchBytes + statement.length > MAX_BATCH_BYTES) await flush();
       batch.push(statement);
@@ -202,6 +214,7 @@ try {
       source: table,
       target: table,
       query: sql`SELECT * FROM ${sql(table)} ORDER BY user_id, id`,
+      newerWins: { key: ["user_id", "id"], updatedAt: "updated_at" },
       map: (row) => ({
         user_id: row.user_id,
         id: row.id,
@@ -215,6 +228,7 @@ try {
     source: "user_settings",
     target: "user_settings",
     query: sql`SELECT * FROM user_settings ORDER BY user_id`,
+    newerWins: { key: ["user_id"], updatedAt: "updated_at" },
     map: (row) => ({ user_id: row.user_id, data: json(row.data), updated_at: millis(row.updated_at) }),
   });
 

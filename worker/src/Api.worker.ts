@@ -22,7 +22,7 @@ import { FoodSearchLive } from "./search/FoodSearchLive.ts";
 import { SearchHandlers } from "./search/http.ts";
 import { SocialHandlers } from "./social/http.ts";
 import { SyncHandlers } from "./sync/http.ts";
-import { isProduction, PRODUCTION_DOMAIN } from "./Stage.ts";
+import { customDomain } from "./Stage.ts";
 
 export default class Api extends Cloudflare.Worker<Api>()(
   "Api",
@@ -31,7 +31,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
     // Built by scripts/build-web.ts. Asset paths (/, /web/*, /.well-known/*)
     // are answered by Cloudflare's asset layer before the Worker runs.
     assets: "./dist/public",
-    ...(isProduction ? { domain: PRODUCTION_DOMAIN } : {}),
+    ...(customDomain ? { domain: customDomain } : {}),
     compatibility: { flags: ["nodejs_compat"], date: "2026-10-01" },
   },
   Effect.gen(function* () {
