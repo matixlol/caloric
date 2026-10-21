@@ -52,8 +52,11 @@ AI assistant (Durable Object turns, voice via the container), and the web app.
 Rehearsed against a local copy of backend/ (Postgres in OrbStack, preview seed):
 `scripts/import-postgres.ts` copied it into dev D1, and a session cookie issued
 by backend/ authenticated against the Worker. `scripts/contract-check.ts`
-matched every read-only endpoint. Not exercised for real yet (no credentials on
-dev): an OpenRouter model call and a MyFitnessPal browser login.
+matched every read-only endpoint. AI turns were checked live on dev with a
+temporary scripted model: streaming, disconnect + resume with a cursor, and
+replay. Not exercised for real yet (no credentials on dev): an OpenRouter model
+call and a MyFitnessPal browser login (the container itself runs on Cloudflare
+and transcodes voice notes).
 
 ## Running it
 
