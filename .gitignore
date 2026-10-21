@@ -57,3 +57,6 @@ app-example
 .amp/portals/*
 
 __pycache__
+
+# Alchemy local state and logs
+.alchemy/

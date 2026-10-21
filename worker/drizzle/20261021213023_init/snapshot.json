@@ -1,0 +1,1965 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "id": "c8cc2d98-907d-4f14-b5bc-826bfe16f694",
+  "prevIds": [
+    "00000000-0000-0000-0000-000000000000"
+  ],
+  "ddl": [
+    {
+      "name": "ai_sessions",
+      "entityType": "tables"
+    },
+    {
+      "name": "anmat_live_search_requests",
+      "entityType": "tables"
+    },
+    {
+      "name": "anmat_product_derived_data",
+      "entityType": "tables"
+    },
+    {
+      "name": "anmat_products",
+      "entityType": "tables"
+    },
+    {
+      "name": "friendships",
+      "entityType": "tables"
+    },
+    {
+      "name": "mfp_auth_sessions",
+      "entityType": "tables"
+    },
+    {
+      "name": "mfp_barcode_responses",
+      "entityType": "tables"
+    },
+    {
+      "name": "mfp_food_detail_responses",
+      "entityType": "tables"
+    },
+    {
+      "name": "mfp_search_responses",
+      "entityType": "tables"
+    },
+    {
+      "name": "open_food_facts_search_responses",
+      "entityType": "tables"
+    },
+    {
+      "name": "social_profiles",
+      "entityType": "tables"
+    },
+    {
+      "name": "user_food_entries",
+      "entityType": "tables"
+    },
+    {
+      "name": "user_recipes",
+      "entityType": "tables"
+    },
+    {
+      "name": "user_settings",
+      "entityType": "tables"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "conversation",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "1",
+      "generated": null,
+      "name": "search_result_counter",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "search_results_by_local_id",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "pending_approvals",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "ai_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "anmat_live_search_requests"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query",
+      "entityType": "columns",
+      "table": "anmat_live_search_requests"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "anmat_live_search_requests"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "product_id",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "nutrition_found",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "serving_text",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "serving_quantity",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "serving_unit",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "calories",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "protein_grams",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "carbs_grams",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "fat_grams",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "fiber_grams",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sugars_grams",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "sodium_mg",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "true",
+      "generated": null,
+      "name": "ean_attempted",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'html_parsed'",
+      "generated": null,
+      "name": "ean_status",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ean",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ean_source",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "ean_candidates",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "parsed_at",
+      "entityType": "columns",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "source_path",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": "'disk_import'",
+      "generated": null,
+      "name": "ingest_source",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "run_key",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "detail_key",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "token",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query_index",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "page",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "wrapper_url",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "content_url",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "search_mode",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "province",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "rnpa",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "denominacion",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "nombre_fantasia",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "marca",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "titular",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "estado",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "html_key",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "html_sha256",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "saved_at",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "imported_at",
+      "entityType": "columns",
+      "table": "anmat_products"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "requester_user_id",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "recipient_user_id",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_a_id",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_b_id",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "status",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "friendships"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "provider",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "storage_state",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "session_storage",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "authorization",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "cookie_header",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "refreshed_at",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "barcode",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfp_url",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfp_status",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "result_code",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "blob",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_body",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_json",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "search_response_id",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "food_id",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "version",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfp_url",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfp_status",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_json",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_text",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "offset",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "max_items",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "country_code",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "resource_type",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfp_url",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "mfp_status",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_json",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_text",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "mfp_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": true,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "query",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "page",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "page_size",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "off_url",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "off_status",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_json",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "response_text",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "social_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "display_name",
+      "entityType": "columns",
+      "table": "social_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "friend_code",
+      "entityType": "columns",
+      "table": "social_profiles"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "created_at",
+      "entityType": "columns",
+      "table": "social_profiles"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "social_profiles"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "user_food_entries"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "user_food_entries"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "user_food_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "user_food_entries"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "table": "user_food_entries"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "user_recipes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "id",
+      "entityType": "columns",
+      "table": "user_recipes"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "user_recipes"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "user_recipes"
+    },
+    {
+      "type": "integer",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "deleted_at",
+      "entityType": "columns",
+      "table": "user_recipes"
+    },
+    {
+      "type": "text",
+      "notNull": false,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "user_id",
+      "entityType": "columns",
+      "table": "user_settings"
+    },
+    {
+      "type": "text",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "data",
+      "entityType": "columns",
+      "table": "user_settings"
+    },
+    {
+      "type": "integer",
+      "notNull": true,
+      "autoincrement": false,
+      "default": null,
+      "generated": null,
+      "name": "updated_at",
+      "entityType": "columns",
+      "table": "user_settings"
+    },
+    {
+      "columns": [
+        "product_id"
+      ],
+      "tableTo": "anmat_products",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_anmat_product_derived_data_product_id_anmat_products_id_fk",
+      "entityType": "fks",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "columns": [
+        "requester_user_id"
+      ],
+      "tableTo": "social_profiles",
+      "columnsTo": [
+        "user_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_friendships_requester_user_id_social_profiles_user_id_fk",
+      "entityType": "fks",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        "recipient_user_id"
+      ],
+      "tableTo": "social_profiles",
+      "columnsTo": [
+        "user_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_friendships_recipient_user_id_social_profiles_user_id_fk",
+      "entityType": "fks",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        "user_a_id"
+      ],
+      "tableTo": "social_profiles",
+      "columnsTo": [
+        "user_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_friendships_user_a_id_social_profiles_user_id_fk",
+      "entityType": "fks",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        "user_b_id"
+      ],
+      "tableTo": "social_profiles",
+      "columnsTo": [
+        "user_id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_friendships_user_b_id_social_profiles_user_id_fk",
+      "entityType": "fks",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        "search_response_id"
+      ],
+      "tableTo": "mfp_search_responses",
+      "columnsTo": [
+        "id"
+      ],
+      "onUpdate": "NO ACTION",
+      "onDelete": "CASCADE",
+      "nameExplicit": false,
+      "name": "fk_mfp_food_detail_responses_search_response_id_mfp_search_responses_id_fk",
+      "entityType": "fks",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "columns": [
+        "user_id",
+        "id"
+      ],
+      "nameExplicit": true,
+      "name": "user_food_entries_pk",
+      "entityType": "pks",
+      "table": "user_food_entries"
+    },
+    {
+      "columns": [
+        "user_id",
+        "id"
+      ],
+      "nameExplicit": true,
+      "name": "user_recipes_pk",
+      "entityType": "pks",
+      "table": "user_recipes"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "ai_sessions_pk",
+      "table": "ai_sessions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "anmat_live_search_requests_pk",
+      "table": "anmat_live_search_requests",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "anmat_product_derived_data_pk",
+      "table": "anmat_product_derived_data",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "anmat_products_pk",
+      "table": "anmat_products",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "friendships_pk",
+      "table": "friendships",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "mfp_auth_sessions_pk",
+      "table": "mfp_auth_sessions",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "mfp_barcode_responses_pk",
+      "table": "mfp_barcode_responses",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "mfp_food_detail_responses_pk",
+      "table": "mfp_food_detail_responses",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "mfp_search_responses_pk",
+      "table": "mfp_search_responses",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "id"
+      ],
+      "nameExplicit": false,
+      "name": "open_food_facts_search_responses_pk",
+      "table": "open_food_facts_search_responses",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "nameExplicit": false,
+      "name": "social_profiles_pk",
+      "table": "social_profiles",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        "user_id"
+      ],
+      "nameExplicit": false,
+      "name": "user_settings_pk",
+      "table": "user_settings",
+      "entityType": "pks"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "ai_sessions_user_updated_at_idx",
+      "entityType": "indexes",
+      "table": "ai_sessions"
+    },
+    {
+      "columns": [
+        {
+          "value": "query",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_live_search_requests_query_created_at_idx",
+      "entityType": "indexes",
+      "table": "anmat_live_search_requests"
+    },
+    {
+      "columns": [
+        {
+          "value": "product_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_product_derived_data_product_uidx",
+      "entityType": "indexes",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "columns": [
+        {
+          "value": "nutrition_found",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_product_derived_data_nutrition_found_idx",
+      "entityType": "indexes",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "columns": [
+        {
+          "value": "ean_status",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_product_derived_data_ean_status_idx",
+      "entityType": "indexes",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "columns": [
+        {
+          "value": "ean",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_product_derived_data_ean_idx",
+      "entityType": "indexes",
+      "table": "anmat_product_derived_data"
+    },
+    {
+      "columns": [
+        {
+          "value": "source_path",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_products_source_path_uidx",
+      "entityType": "indexes",
+      "table": "anmat_products"
+    },
+    {
+      "columns": [
+        {
+          "value": "ingest_source",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_products_ingest_source_idx",
+      "entityType": "indexes",
+      "table": "anmat_products"
+    },
+    {
+      "columns": [
+        {
+          "value": "detail_key",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_products_detail_key_idx",
+      "entityType": "indexes",
+      "table": "anmat_products"
+    },
+    {
+      "columns": [
+        {
+          "value": "rnpa",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_products_rnpa_idx",
+      "entityType": "indexes",
+      "table": "anmat_products"
+    },
+    {
+      "columns": [
+        {
+          "value": "marca",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_products_marca_idx",
+      "entityType": "indexes",
+      "table": "anmat_products"
+    },
+    {
+      "columns": [
+        {
+          "value": "denominacion",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "anmat_products_denominacion_idx",
+      "entityType": "indexes",
+      "table": "anmat_products"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_a_id",
+          "isExpression": false
+        },
+        {
+          "value": "user_b_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "friendships_pair_uidx",
+      "entityType": "indexes",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        {
+          "value": "requester_user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "friendships_requester_idx",
+      "entityType": "indexes",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        {
+          "value": "recipient_user_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "friendships_recipient_idx",
+      "entityType": "indexes",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_a_id",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "friendships_user_a_status_idx",
+      "entityType": "indexes",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_b_id",
+          "isExpression": false
+        },
+        {
+          "value": "status",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "friendships_user_b_status_idx",
+      "entityType": "indexes",
+      "table": "friendships"
+    },
+    {
+      "columns": [
+        {
+          "value": "provider",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "mfp_auth_sessions_provider_uidx",
+      "entityType": "indexes",
+      "table": "mfp_auth_sessions"
+    },
+    {
+      "columns": [
+        {
+          "value": "barcode",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "mfp_barcode_responses_barcode_created_at_idx",
+      "entityType": "indexes",
+      "table": "mfp_barcode_responses"
+    },
+    {
+      "columns": [
+        {
+          "value": "search_response_id",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "mfp_food_detail_responses_search_response_id_idx",
+      "entityType": "indexes",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "columns": [
+        {
+          "value": "food_id",
+          "isExpression": false
+        },
+        {
+          "value": "version",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "mfp_food_detail_responses_food_version_idx",
+      "entityType": "indexes",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "columns": [
+        {
+          "value": "search_response_id",
+          "isExpression": false
+        },
+        {
+          "value": "food_id",
+          "isExpression": false
+        },
+        {
+          "value": "version",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "mfp_food_detail_responses_search_food_version_uidx",
+      "entityType": "indexes",
+      "table": "mfp_food_detail_responses"
+    },
+    {
+      "columns": [
+        {
+          "value": "query",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "mfp_search_responses_query_created_at_idx",
+      "entityType": "indexes",
+      "table": "mfp_search_responses"
+    },
+    {
+      "columns": [
+        {
+          "value": "query",
+          "isExpression": false
+        },
+        {
+          "value": "created_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "open_food_facts_search_responses_query_created_at_idx",
+      "entityType": "indexes",
+      "table": "open_food_facts_search_responses"
+    },
+    {
+      "columns": [
+        {
+          "value": "friend_code",
+          "isExpression": false
+        }
+      ],
+      "isUnique": true,
+      "where": null,
+      "origin": "manual",
+      "name": "social_profiles_friend_code_uidx",
+      "entityType": "indexes",
+      "table": "social_profiles"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "user_food_entries_user_updated_at_idx",
+      "entityType": "indexes",
+      "table": "user_food_entries"
+    },
+    {
+      "columns": [
+        {
+          "value": "user_id",
+          "isExpression": false
+        },
+        {
+          "value": "updated_at",
+          "isExpression": false
+        }
+      ],
+      "isUnique": false,
+      "where": null,
+      "origin": "manual",
+      "name": "user_recipes_user_updated_at_idx",
+      "entityType": "indexes",
+      "table": "user_recipes"
+    }
+  ],
+  "renames": []
+}

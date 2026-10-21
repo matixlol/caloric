@@ -5,6 +5,7 @@
   "workspaces": [
     "mobile",
     "backend",
-    "data-model"
+    "data-model",
+    "worker"
   ]
 }
