@@ -44,6 +44,15 @@ until cutover; nothing here changes it.
 
 ## Status
 
+Production moved to the Worker on 2026-10-22 at 04:01 UTC: `backend.caloric.mati.lol`
+is the `prod` stage's custom domain (the Railway CNAME is gone; it was
+`backend CNAME xgdpng89.up.railway.app`, DNS only). Railway's Postgres was
+unreachable from Oct 21 18:14 UTC until 03:55 UTC; it was dumped (backup in
+`~/.config/caloric/backups/`), imported with caches, contract-checked against
+backend/ running on the copy (all match, using a cookie signed with Railway's
+secret), and smoke-tested live (search, an AI turn through OpenRouter). No writes
+reached Railway between the dump and the switch.
+
 Everything in backend/ is ported and deployed to the `dev` stage
 (`bun run deploy:dev`, https://caloric-api-dev-gc2bvpxw6mrtqmaq.mati-8c1.workers.dev):
 health, auth, sync, social, search/barcode/ANMAT, MFP session + container login,
@@ -76,13 +85,16 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
    `.env.dev`. After Railway's Oct 21 environment-variable leak,
    `BETTER_AUTH_SECRET` is new and Railway's is `BETTER_AUTH_PREVIOUS_SECRET`;
    set `BETTER_AUTH_PREVIOUS_SECRET_UNTIL` to cutover + 8 days (see Notes).
-2. `bun run deploy:prod:staged` — prod on workers.dev only; the domain can't
-   attach while the Railway CNAME exists.
+2. Deploy prod without `CUSTOM_DOMAIN` (workers.dev only; the domain can't
+   attach while the Railway CNAME exists). The `deploy:prod:staged` script was
+   removed after cutover: deploying prod without the domain now detaches it.
 3. `DATABASE_URL=<railway> bun run import:postgres --stage prod --with-caches`.
 4. `bun scripts/contract-check.ts --old https://backend.caloric.mati.lol --new <prod workers.dev url> --cookie '<a real session cookie>'`
    must report all responses matching.
 5. Delete the `backend` CNAME (-> xgdpng89.up.railway.app) in the mati.lol zone,
-   then `bun run deploy:prod` (attaches backend.caloric.mati.lol).
+   then `bun run deploy:prod` (attaches backend.caloric.mati.lol). The hostname
+   is two levels deep, so Universal SSL doesn't cover it; the custom domain's
+   own certificate took about two minutes, during which TLS handshakes fail.
 6. Re-run step 3 to pick up writes that reached Railway during the switch
    (diary rows are last-writer-wins, so this is safe).
 7. Smoke test the iOS app: still signed in, diary syncs, search, assistant, voice.
