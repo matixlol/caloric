@@ -114,7 +114,10 @@ const MAX_BATCH_BYTES = 90_000;
 // How a row that already exists in D1 is treated. Never INSERT OR REPLACE:
 // SQLite runs it as delete + insert, which cascades (e.g. deleting a user's
 // sessions) on re-runs.
+// `key: "any"` skips a row that collides with D1 on any unique index (caches,
+// where the Worker may already have cached the same response under a new id).
 type OnConflict =
+  | { readonly key: "any"; readonly keep: "existing" }
   | { readonly key: ReadonlyArray<string>; readonly keep: "existing" }
   | { readonly key: ReadonlyArray<string>; readonly keep: "incoming" }
   | { readonly key: ReadonlyArray<string>; readonly keep: "newer"; readonly updatedAt: string };
@@ -123,9 +126,11 @@ const quote = (column: string) => `"${column}"`;
 
 const upsert = (target: string, mapped: Record<string, Value>, onConflict: OnConflict) => {
   const columns = Object.keys(mapped);
-  const insert = `INSERT INTO "${target}" (${columns.map(quote).join(", ")}) VALUES (${columns
+  const values = `INSERT INTO "${target}" (${columns.map(quote).join(", ")}) VALUES (${columns
     .map((column) => literal(mapped[column]))
-    .join(", ")}) ON CONFLICT (${onConflict.key.map(quote).join(", ")})`;
+    .join(", ")})`;
+  if (onConflict.key === "any") return `${values} ON CONFLICT DO NOTHING`;
+  const insert = `${values} ON CONFLICT (${onConflict.key.map(quote).join(", ")})`;
   if (onConflict.keep === "existing") return `${insert} DO NOTHING`;
   const set = columns
     .filter((column) => !onConflict.key.includes(column))
@@ -391,7 +396,7 @@ try {
     await copy({
       source: "mfp_search_responses",
       target: "mfp_search_responses",
-      onConflict: { key: ["id"], keep: "existing" },
+      onConflict: { key: "any", keep: "existing" },
       query: sql`SELECT * FROM mfp_search_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
@@ -410,7 +415,7 @@ try {
     await copy({
       source: "mfp_food_detail_responses",
       target: "mfp_food_detail_responses",
-      onConflict: { key: ["id"], keep: "existing" },
+      onConflict: { key: "any", keep: "existing" },
       query: sql`SELECT * FROM mfp_food_detail_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
@@ -427,7 +432,7 @@ try {
     await copy({
       source: "mfp_barcode_responses",
       target: "mfp_barcode_responses",
-      onConflict: { key: ["id"], keep: "existing" },
+      onConflict: { key: "any", keep: "existing" },
       query: sql`SELECT * FROM mfp_barcode_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
@@ -443,7 +448,7 @@ try {
     await copy({
       source: "open_food_facts_search_responses",
       target: "open_food_facts_search_responses",
-      onConflict: { key: ["id"], keep: "existing" },
+      onConflict: { key: "any", keep: "existing" },
       query: sql`SELECT * FROM open_food_facts_search_responses ORDER BY id`,
       map: (row) => ({
         id: row.id,
