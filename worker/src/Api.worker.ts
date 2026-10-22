@@ -8,6 +8,7 @@ import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { Api as ApiSpec } from "./api/Api.ts";
 import { Auth, AuthenticationLive } from "./auth/Auth.ts";
+import { withLegacySessionCookies } from "./auth/LegacySessionCookie.ts";
 import { Database } from "./db/Database.ts";
 import { Db } from "./db/Db.ts";
 import { Email } from "./email/Email.ts";
@@ -53,20 +54,20 @@ export default class Api extends Cloudflare.Worker<Api>()(
       AiRoutes,
     );
 
-    return {
-      fetch: yield* HttpRouter.toHttpEffect(
-        routes.pipe(
-          Layer.provide(FoodSearchLive),
-          Layer.provide([
-            Db.layer,
-            Layer.succeed(Auth, auth),
-            Layer.succeed(MfpLogin, mfpLogin),
-            Layer.succeed(AudioTranscoder, audio),
-          ]),
-          Layer.provide(Http.Platform),
-        ),
+    const app = yield* HttpRouter.toHttpEffect(
+      routes.pipe(
+        Layer.provide(FoodSearchLive),
+        Layer.provide([
+          Db.layer,
+          Layer.succeed(Auth, auth),
+          Layer.succeed(MfpLogin, mfpLogin),
+          Layer.succeed(AudioTranscoder, audio),
+        ]),
+        Layer.provide(Http.Platform),
       ),
-    };
+    );
+
+    return { fetch: yield* withLegacySessionCookies(app) };
   }).pipe(
     Effect.provide(Auth.layer),
     Effect.provide(Layer.mergeAll(MfpLoginLive, AudioTranscoderLive)),

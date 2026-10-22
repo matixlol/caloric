@@ -68,15 +68,14 @@ and transcodes voice notes).
 
 ## Cutover runbook (prod)
 
-Needs: Railway's Postgres reachable again; the Railway env values
-(BETTER_AUTH_SECRET, OPENROUTER_API_KEY, RESEND_API_KEY, MFP_USERNAME,
-MFP_PASSWORD, MFP_GUEST_ACCESS_TOKEN, MFP_PROXY_URL, TWO_CAPTCHA_API_KEY, plus any
-AI_MODEL/AI_REASONING_EFFORT/OPEN_FOOD_FACTS_*/AUTH_TRUSTED_ORIGINS overrides) and
-its public DATABASE_URL; and the Cloudflare token extended with
-Zone → Workers Routes: Edit and DNS: Edit on mati.lol.
+Needs: a copy of Railway's Postgres, `worker/.env.prod`, and the Cloudflare
+token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes).
 
-1. Write the env values to `worker/.env.prod` (gitignored). Don't keep a plain
-   `worker/.env`: Alchemy reads it for every stage. Dev config is `.env.dev`.
+1. `worker/.env.prod` (gitignored) holds the Railway backend's values. Don't keep
+   a plain `worker/.env`: Alchemy reads it for every stage. Dev config is
+   `.env.dev`. After Railway's Oct 21 environment-variable leak,
+   `BETTER_AUTH_SECRET` is new and Railway's is `BETTER_AUTH_PREVIOUS_SECRET`;
+   set `BETTER_AUTH_PREVIOUS_SECRET_UNTIL` to cutover + 8 days (see Notes).
 2. `bun run deploy:prod:staged` — prod on workers.dev only; the domain can't
    attach while the Railway CNAME exists.
 3. `DATABASE_URL=<railway> bun run import:postgres --stage prod --with-caches`.
@@ -95,8 +94,12 @@ Zone → Workers Routes: Edit and DNS: Edit on mati.lol.
 - HttpApi handlers and middleware can't declare Alchemy's per-request
   `RuntimeContext`; D1 code provides `RuntimeContext.phantom` (type-only) and the
   Worker supplies the real context per request (`withRuntime` in `src/db/Db.ts`).
-- Auth cookies must stay `__Secure-better-auth.session_token` (`useSecureCookies`)
-  and prod must reuse Railway's `BETTER_AUTH_SECRET`, or every iOS user is signed out.
+- Auth cookies must stay `__Secure-better-auth.session_token` (`useSecureCookies`).
+  Cookies signed with Railway's secret are re-signed with the new one until
+  `BETTER_AUTH_PREVIOUS_SECRET_UNTIL` (`src/auth/LegacySessionCookie.ts`); the
+  iOS app picks the new cookie up from get-session on launch/resume. Sessions
+  last 7 days from last use, so after the window anyone left is signed out
+  anyway. Remove both `PREVIOUS` values once it has passed.
 - Better Auth owns and migrates its tables (camelCase columns); the import maps
   backend/'s snake_case columns onto them.
 - AI turn ids embed the session id (`ai_turn_<turn>_<session>`) so the stream
