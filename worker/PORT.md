@@ -53,6 +53,13 @@ backend/ running on the copy (all match, using a cookie signed with Railway's
 secret), and smoke-tested live (search, an AI turn through OpenRouter). No writes
 reached Railway between the dump and the switch.
 
+Railway after cutover: the backend's deployment is removed (no auto-deploys:
+its watch patterns match nothing) and Postgres is stopped; `postgres-volume`
+(545 MB) is kept. The project token can't delete services, so deleting the
+`backend` service is left for the dashboard. To read the old data again,
+redeploy the Postgres service (`postgres-ssl:17`, config in
+`~/.config/caloric/railway-postgres-config-before.json`).
+
 Everything in backend/ is ported and deployed to the `dev` stage
 (`bun run deploy:dev`, https://caloric-api-dev-gc2bvpxw6mrtqmaq.mati-8c1.workers.dev):
 health, auth, sync, social, search/barcode/ANMAT, MFP session + container login,
@@ -99,7 +106,7 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
    (diary rows are last-writer-wins, so this is safe).
 7. Smoke test the iOS app: still signed in, diary syncs, search, assistant, voice.
 8. Keep Railway running a few days. Rollback: remove the Worker's custom domain
-   and recreate the CNAME.
+   and recreate the CNAME. (Done: Railway is now stopped, see Status.)
 
 ## Notes
 
@@ -119,5 +126,15 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
 - The container (standard-1, 4 GiB) serves both MFP logins and voice-note
   transcoding and sleeps after 10 idle minutes. Recording WAV on device would
   take voice notes off the container.
+- The Worker runs in `gcp:us-east1` (targeted placement), not at the edge.
+  D1's primary is in Miami (`served_by_colo` in D1 query metadata), users are
+  in Argentina, and every D1 query from EZE is a ~150ms round trip. Measured
+  from EZE: get-session 330 -> 275ms, sync/bootstrap 495 -> 310ms, /health
+  20 -> 200ms. Smart Placement wouldn't move it: it only considers locations
+  the Worker already runs in, and traffic is almost all EZE.
+- Better Auth's runtime schema check is off (`validateSchema: false`). It is
+  memoized per database client, but Alchemy builds one per request, so it
+  introspected every table (a D1 round trip per PRAGMA) on every auth call:
+  ~500ms on /api/auth/* and every authenticated route.
 - Observability is Workers Logs (on by default); Sentry was not carried over.
 - `/mfp/session/refresh` now requires a signed-in user.

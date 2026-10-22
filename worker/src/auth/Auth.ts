@@ -37,7 +37,12 @@ const make = Effect.gen(function* () {
     trustedOrigins: ["https://caloric.mati.lol", ...APP_SCHEMES, ...extraOrigins],
     // Railway issued `__Secure-` cookies, and the iOS app replays the stored
     // cookie name verbatim; keep issuing (and reading) the same name.
-    advanced: { useSecureCookies: true },
+    //
+    // Alchemy builds a Better Auth instance (and D1 client) per request, so the
+    // runtime schema check — memoized per client — would introspect every table
+    // on every auth request, one D1 round trip per PRAGMA. Deploys already
+    // migrate the auth schema (BetterAuthMigrate).
+    advanced: { useSecureCookies: true, database: { validateSchema: false } },
     // Password login is what App Store review uses; accounts are invite-only,
     // so there is no email-verification gate.
     emailAndPassword: { enabled: true, requireEmailVerification: false },

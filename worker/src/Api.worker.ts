@@ -34,6 +34,14 @@ export default class Api extends Cloudflare.Worker<Api>()(
     // are answered by Cloudflare's asset layer before the Worker runs.
     assets: "./dist/public",
     ...(customDomain ? { domain: customDomain } : {}),
+    // Run next to D1 instead of at the edge: authenticated requests make
+    // several sequential D1 queries, and from Argentina each one is a round
+    // trip to the database's primary in Miami (ENAM). No cloud region is in
+    // Miami; gcp:us-east1 measured fastest (sync/bootstrap ~500ms -> ~310ms
+    // from EZE) at the cost of ~170ms on requests that skip D1. Smart Placement
+    // can't do this: it only picks among locations the Worker already runs in,
+    // and nearly all traffic arrives at EZE. Static assets stay at the edge.
+    placement: { region: "gcp:us-east1" },
     compatibility: { flags: ["nodejs_compat"], date: "2026-10-01" },
   },
   Effect.gen(function* () {
