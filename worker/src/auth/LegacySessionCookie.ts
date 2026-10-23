@@ -14,7 +14,7 @@ import * as HttpServerResponse from "effect/http/HttpServerResponse";
 // resume); browsers and the Expo client from any response. Sessions last 7 days
 // from their last use, so a window of 8 days covers every live session.
 
-const SESSION_COOKIE_NAMES = ["__Secure-better-auth.session_token", "better-auth.session_token"];
+export const SESSION_COOKIE_NAMES = ["__Secure-better-auth.session_token", "better-auth.session_token"];
 // Better Auth's default session lifetime (session.expiresIn).
 const SESSION_MAX_AGE_SECONDS = 7 * 24 * 60 * 60;
 

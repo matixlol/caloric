@@ -24,7 +24,8 @@ import {
   mergeFoodResults,
   rankAnmatRows,
 } from "./mapping.ts";
-import { type CachedResponse, SearchRepository } from "./SearchRepository.ts";
+import { type CachedResponse, detailKeyOf, SearchRepository } from "./SearchRepository.ts";
+import { Background } from "../Background.ts";
 
 export interface SourceSearchResult {
   readonly foods: ReadonlyArray<FoodSearchResult>;
@@ -73,59 +74,65 @@ const make = Effect.gen(function* () {
   const mfp = yield* MfpClient;
   const mfpBarcode = yield* MfpBarcodeClient;
   const openFoodFacts = yield* OpenFoodFactsClient;
+  const background = yield* Background;
 
   const cacheCutoff = Effect.map(
     Clock.currentTimeMillis,
     (now) => new Date(now - Duration.toMillis(config.searchCacheTtl)),
   );
 
-  // Detail for one search item: cached when fresh, otherwise fetched. Failed
-  // fetches are recorded with status 0 so the search still renders.
-  const resolveDetail = Effect.fn("FoodSearch.resolveDetail")(function* (
-    searchResponseId: number,
-    key: DetailKey,
-    cutoff: Date,
-  ) {
-    const cached = yield* repository.findMfpDetail(key.foodId, key.version, cutoff);
-    const response: CachedResponse = cached
-      ? cached
-      : yield* mfp.fetchFoodDetail(key.foodId, key.version).pipe(
-          Effect.catch((error) =>
-            Effect.logWarning("mfp.detail.fetch_failed", error).pipe(
-              Effect.as({
-                status: 0,
-                url: `${MFP_BASE_URL}/api/services/foods/${key.foodId}?version=${key.version}`,
-                json: null,
-                text: error.message,
-              }),
-            ),
-          ),
-        );
-    yield* repository.saveMfpDetail(searchResponseId, key, response);
-    return { ...key, status: response.status, data: response.json } satisfies MfpDetailPayload;
-  });
+  // A detail fetched from MFP. Failed fetches count as status 0, so the search
+  // still renders.
+  const fetchDetail = (key: DetailKey) =>
+    mfp.fetchFoodDetail(key.foodId, key.version).pipe(
+      Effect.catch((error) =>
+        Effect.logWarning("mfp.detail.fetch_failed", error).pipe(
+          Effect.as<CachedResponse>({
+            status: 0,
+            url: `${MFP_BASE_URL}/api/services/foods/${key.foodId}?version=${key.version}`,
+            json: null,
+            text: error.message,
+          }),
+        ),
+      ),
+    );
 
-  // One MFP search page plus item details, through the response caches.
+  // One MFP search page plus item details, through the response caches. A
+  // cache hit is one D1 round trip (the search and its details together);
+  // saving fresh responses happens after the response is sent.
   const executeMfpSearch = Effect.fn("FoodSearch.executeMfpSearch")(function* (params: MfpSearchParams) {
     const cutoff = yield* cacheCutoff;
     const cached = yield* repository.findMfpSearch(params, cutoff);
-    let searchResponseId: number;
-    let search: CachedResponse;
-    if (cached) {
-      searchResponseId = cached.id;
-      search = cached;
-    } else {
-      search = yield* mfp.searchNutrition(params);
-      searchResponseId = yield* repository.saveMfpSearch(params, search);
-    }
-    if (!search.json) {
-      return { search, details: [] };
-    }
-    const details = yield* Effect.forEach(
-      extractDetailKeys(search.json),
-      (key) => resolveDetail(searchResponseId, key, cutoff),
+    const search: CachedResponse = cached ? cached.search : yield* mfp.searchNutrition(params);
+    const keys = search.json ? extractDetailKeys(search.json) : [];
+
+    // Details not saved with this search may still be cached from others.
+    const known = new Map(cached?.details);
+    const unlinked = keys.filter((key) => !known.has(detailKeyOf(key)));
+    const elsewhere = yield* repository.findMfpDetails(unlinked, cutoff);
+    const fetched = yield* Effect.forEach(
+      unlinked.filter((key) => !elsewhere.has(detailKeyOf(key))),
+      (key) => fetchDetail(key).pipe(Effect.map((response) => ({ ...key, response }))),
       { concurrency: config.detailConcurrency },
     );
+    for (const [key, response] of elsewhere) known.set(key, response);
+    for (const { response, ...key } of fetched) known.set(detailKeyOf(key), response);
+
+    // Link every detail this search shows that wasn't linked to it yet.
+    const toLink = unlinked.map((key) => ({ ...key, response: known.get(detailKeyOf(key))! }));
+    if (!cached || toLink.length > 0) {
+      yield* background.run(
+        Effect.gen(function* () {
+          const searchResponseId = cached ? cached.search.id : yield* repository.saveMfpSearch(params, search);
+          yield* repository.saveMfpDetails(searchResponseId, toLink);
+        }),
+      );
+    }
+
+    const details = keys.map((key) => {
+      const response = known.get(detailKeyOf(key))!;
+      return { ...key, status: response.status, data: response.json } satisfies MfpDetailPayload;
+    });
     return { search, details };
   });
 
@@ -161,7 +168,7 @@ const make = Effect.gen(function* () {
       response = cached;
     } else {
       response = yield* openFoodFacts.search(params);
-      yield* repository.saveOpenFoodFactsSearch(params, response);
+      yield* background.run(repository.saveOpenFoodFactsSearch(params, response));
     }
     return {
       foods: mapOpenFoodFactsSearchResults(response.status, response.json).slice(0, limit),
@@ -233,14 +240,16 @@ const make = Effect.gen(function* () {
     }
 
     const response = yield* mfpBarcode.lookup(barcode);
-    yield* repository.saveBarcode({
-      barcode,
-      url: response.url,
-      status: response.status,
-      resultCode: response.data?.resultCode ?? null,
-      body: response.body,
-      json: response.data,
-    });
+    yield* background.run(
+      repository.saveBarcode({
+        barcode,
+        url: response.url,
+        status: response.status,
+        resultCode: response.data?.resultCode ?? null,
+        body: response.body,
+        json: response.data,
+      }),
+    );
     const data = response.data;
     if (!data) {
       return { _tag: "UpstreamFailed" } satisfies BarcodeLookup;

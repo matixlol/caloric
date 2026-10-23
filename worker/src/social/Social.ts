@@ -13,7 +13,13 @@ import type {
   SocialProfile,
 } from "./Domain.ts";
 import { SocialConflict } from "./Errors.ts";
-import { FRIENDSHIP_ACCEPTED, FRIENDSHIP_PENDING, type ProfileRow, SocialRepository } from "./SocialRepository.ts";
+import {
+  FRIENDSHIP_ACCEPTED,
+  FRIENDSHIP_PENDING,
+  type OverviewRows,
+  type ProfileRow,
+  SocialRepository,
+} from "./SocialRepository.ts";
 
 const FRIEND_CODE_LENGTH = 6;
 const FRIEND_CODE_ALPHABET = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ";
@@ -71,6 +77,9 @@ const compareDayEntries = (a: FriendDailyFoodEntry, b: FriendDailyFoodEntry) =>
   a.createdAt - b.createdAt ||
   a.id.localeCompare(b.id);
 
+// Each request reads (and writes) the database in one round trip: a D1 batch
+// in SocialRepository. Only a user's first visit, which creates their
+// profile, takes more.
 const make = Effect.gen(function* () {
   const repository = yield* SocialRepository;
 
@@ -85,9 +94,8 @@ const make = Effect.gen(function* () {
         if (nextDisplayName === existing.displayName) {
           return existing;
         }
-        const updatedAt = new Date();
-        yield* repository.updateDisplayName(userId, nextDisplayName, updatedAt);
-        return { ...existing, displayName: nextDisplayName, updatedAt };
+        yield* repository.rename(userId, nextDisplayName);
+        return { ...existing, displayName: nextDisplayName };
       }
       const created = yield* repository.insertProfile({
         userId,
@@ -101,28 +109,22 @@ const make = Effect.gen(function* () {
     return yield* new FriendCodeUnavailable();
   });
 
-  const profilesById = Effect.fn("Social.profilesById")(function* (userIds: ReadonlyArray<string>) {
-    const rows = userIds.length > 0 ? yield* repository.findProfiles(userIds) : [];
-    const byId = new Map<string, ProfileRow>(rows.map((row) => [row.userId, row]));
-    return (userId: string): SocialProfile => ({
-      userId,
-      displayName: byId.get(userId)?.displayName ?? DEFAULT_DISPLAY_NAME,
-    });
-  });
-
-  const overview = Effect.fn("Social.overview")(function* (userId: string) {
-    const [profile, rows] = yield* Effect.all([ensureProfile(userId), repository.listFriendships(userId)], {
-      concurrency: "unbounded",
-    });
-    const otherUserId = (row: (typeof rows)[number]) => (row.userAId === userId ? row.userBId : row.userAId);
-    const profileFor = yield* profilesById([...new Set(rows.map(otherUserId))]);
+  // The overview from its rows. A user without a profile yet gets one (a user
+  // without a profile has no friendships: they reference profiles).
+  const present = Effect.fn("Social.present")(function* (userId: string, rows: OverviewRows, displayName?: string) {
+    const profile: ProfileRow = rows.profile ?? (yield* ensureProfile(userId, displayName));
+    const otherUserId = (row: OverviewRows["friendships"][number]) =>
+      row.friendship.userAId === userId ? row.friendship.userBId : row.friendship.userAId;
+    const names = new Map(rows.friendships.map((row) => [otherUserId(row), row.otherDisplayName]));
+    const profileFor = (id: string): SocialProfile => ({ userId: id, displayName: names.get(id) ?? DEFAULT_DISPLAY_NAME });
 
     const friends: Array<SocialOverview["friends"][number]> = [];
     const incomingRequests: Array<SocialOverview["incomingRequests"][number]> = [];
     const outgoingRequests: Array<SocialOverview["outgoingRequests"][number]> = [];
-    for (const row of rows) {
+    for (const { friendship: row } of rows.friendships) {
+      const other = row.userAId === userId ? row.userBId : row.userAId;
       if (row.status === FRIENDSHIP_ACCEPTED) {
-        friends.push({ ...profileFor(otherUserId(row)), since: row.updatedAt.getTime() });
+        friends.push({ ...profileFor(other), since: row.updatedAt.getTime() });
       } else if (row.status === FRIENDSHIP_PENDING) {
         const request = { id: row.id, createdAt: row.createdAt.getTime() };
         if (row.recipientUserId === userId) {
@@ -141,93 +143,86 @@ const make = Effect.gen(function* () {
     } satisfies SocialOverview;
   });
 
+  const overview = Effect.fn("Social.overview")(function* (userId: string) {
+    return yield* present(userId, yield* repository.overview(userId));
+  });
+
+  // No name (or a blank one) keeps the current one.
   const updateProfile = Effect.fn("Social.updateProfile")(function* (userId: string, displayName?: string) {
-    yield* ensureProfile(userId, displayName);
-    return yield* overview(userId);
+    const name = displayName?.replace(/\s+/g, " ").trim();
+    if (!name) {
+      return yield* overview(userId);
+    }
+    return yield* present(userId, yield* repository.rename(userId, name), name);
   });
 
   // Sending a request to someone who already asked you accepts theirs.
   const sendFriendRequest = Effect.fn("Social.sendFriendRequest")(function* (userId: string, rawFriendCode: string) {
-    yield* ensureProfile(userId);
     const friendCode = normalizeFriendCode(rawFriendCode);
-    if (!friendCode) {
-      return yield* new BadRequest({ error: "Invalid friend code" });
-    }
-    const recipient = yield* repository.findProfileByFriendCode(friendCode);
-    if (!recipient) {
-      return yield* new NotFound({ error: "Friend code not found" });
-    }
-    if (recipient.userId === userId) {
-      return yield* new BadRequest({ error: "You cannot add yourself" });
-    }
-
     // A second pass only happens when a concurrent request for the same pair
     // was inserted between our read and our insert.
     for (let attempt = 0; attempt < 2; attempt += 1) {
-      const existing = yield* repository.findFriendship(userId, recipient.userId);
+      const target = yield* repository.friendRequestTarget(userId, friendCode);
+      if (!target.profile) {
+        yield* ensureProfile(userId);
+      }
+      if (!friendCode) {
+        return yield* new BadRequest({ error: "Invalid friend code" });
+      }
+      const { recipient, existing } = target;
+      if (!recipient) {
+        return yield* new NotFound({ error: "Friend code not found" });
+      }
+      if (recipient.userId === userId) {
+        return yield* new BadRequest({ error: "You cannot add yourself" });
+      }
       if (existing?.status === FRIENDSHIP_ACCEPTED) {
         return yield* new SocialConflict({ error: "Already friends" });
       }
       if (existing?.recipientUserId === userId) {
-        yield* repository.acceptRequest(existing.id, userId);
-        return yield* overview(userId);
+        return yield* present(userId, yield* repository.acceptRequest(existing.id, userId));
       }
       if (existing) {
         break;
       }
-      const inserted = yield* repository.insertFriendRequest({
+      const result = yield* repository.insertFriendRequest({
         id: friendshipId(),
         requesterUserId: userId,
         recipientUserId: recipient.userId,
       });
-      if (inserted) {
-        return yield* overview(userId);
+      if (result.inserted) {
+        return yield* present(userId, result.overview);
       }
     }
     return yield* new SocialConflict({ error: "Friend request already pending" });
   });
 
   const acceptFriendRequest = Effect.fn("Social.acceptFriendRequest")(function* (userId: string, requestId: string) {
-    yield* repository.acceptRequest(requestId, userId);
-    return yield* overview(userId);
+    return yield* present(userId, yield* repository.acceptRequest(requestId, userId));
   });
 
   const ignoreFriendRequest = Effect.fn("Social.ignoreFriendRequest")(function* (userId: string, requestId: string) {
-    yield* repository.deleteRequest(requestId, userId);
-    return yield* overview(userId);
+    return yield* present(userId, yield* repository.deleteRequest(requestId, userId));
   });
 
   const removeFriend = Effect.fn("Social.removeFriend")(function* (userId: string, friendUserId: string) {
-    yield* repository.deleteFriendship(userId, friendUserId);
-    return yield* overview(userId);
+    return yield* present(userId, yield* repository.deleteFriendship(userId, friendUserId));
   });
 
   const dailySummaries = Effect.fn("Social.dailySummaries")(function* (userId: string, dateKey: string) {
-    const friendUserIds = yield* repository.listAcceptedFriendIds(userId);
-    if (friendUserIds.length === 0) {
-      return { summaries: [] };
-    }
-
-    const [profileFor, entries, settingsRows] = yield* Effect.all(
-      [
-        profilesById(friendUserIds),
-        repository.listFoodEntriesForDay(friendUserIds, dateKey),
-        repository.listSettings(friendUserIds),
-      ],
-      { concurrency: "unbounded" },
-    );
-    const settingsByUserId = new Map(settingsRows.map((row) => [row.userId, row.data]));
+    const { friends, entries, settings } = yield* repository.friendsDay(userId, dateKey);
+    const settingsByUserId = new Map(settings.map((row) => [row.userId, row.data]));
     const entriesByUserId = new Map<string, Array<(typeof entries)[number]>>();
     for (const row of entries) {
       entriesByUserId.set(row.userId, [...(entriesByUserId.get(row.userId) ?? []), row]);
     }
 
-    const summaries = friendUserIds
-      .map((friendUserId) =>
+    const summaries = friends
+      .map((friend) =>
         summarizeDay(
-          { ...profileFor(friendUserId), dateKey },
-          settingsByUserId.get(friendUserId),
-          entriesByUserId.get(friendUserId) ?? [],
+          { userId: friend.userId, displayName: friend.displayName ?? DEFAULT_DISPLAY_NAME, dateKey },
+          settingsByUserId.get(friend.userId),
+          entriesByUserId.get(friend.userId) ?? [],
         ),
       )
       .sort((a, b) => b.calories - a.calories || a.displayName.localeCompare(b.displayName));
@@ -235,24 +230,20 @@ const make = Effect.gen(function* () {
   });
 
   const friendDay = Effect.fn("Social.friendDay")(function* (userId: string, friendUserId: string, dateKey: string) {
-    if (!(yield* repository.isAcceptedFriend(userId, friendUserId))) {
+    const { friend, entries, settings: settingsRows } = yield* repository.friendDay(userId, friendUserId, dateKey);
+    if (!friend) {
       return yield* new NotFound({ error: "Friend not found" });
     }
-
-    const [profileFor, entryRows, settingsRows] = yield* Effect.all(
-      [
-        profilesById([friendUserId]),
-        repository.listFoodEntriesForDay([friendUserId], dateKey),
-        repository.listSettings([friendUserId]),
-      ],
-      { concurrency: "unbounded" },
-    );
     const settings = settingsRows[0]?.data;
 
     return {
-      summary: summarizeDay({ ...profileFor(friendUserId), dateKey }, settings, entryRows),
+      summary: summarizeDay(
+        { userId: friendUserId, displayName: friend.displayName ?? DEFAULT_DISPLAY_NAME, dateKey },
+        settings,
+        entries,
+      ),
       settings: settings ?? null,
-      entries: entryRows
+      entries: entries
         .map((row): FriendDailyFoodEntry => ({ id: row.id, updatedAt: row.updatedAt.getTime(), ...row.data }))
         .sort(compareDayEntries),
     } satisfies FriendDailyDayResponse;

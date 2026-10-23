@@ -4,6 +4,7 @@ import * as Effect from "effect/Effect";
 import * as Base64 from "effect/encoding/Base64";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as Result from "effect/Result";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import * as HttpServerResponse from "effect/http/HttpServerResponse";
@@ -12,7 +13,7 @@ import { Api } from "../api/Api.ts";
 import { CurrentUser } from "../api/Authentication.ts";
 import { UpstreamFailure } from "../api/Errors.ts";
 import { AudioTranscoder } from "../audio/AudioTranscoder.ts";
-import { Auth } from "../auth/Auth.ts";
+import { Auth, currentUserId as sessionUserId } from "../auth/Auth.ts";
 import { aiSessionId } from "../ids.ts";
 import { systemMessage, systemPrompt } from "./Agent.ts";
 import type { UserMessagePart } from "./Domain.ts";
@@ -86,14 +87,14 @@ export const AiRoutes = HttpRouter.use(
     const sessions = yield* AiSessionObject;
 
     const currentUserId = Effect.fnUntraced(function* (request: HttpServerRequest.HttpServerRequest) {
-      // Explicit headers: the ambient-request form would read the body, which
-      // the turn route still needs.
-      const session = yield* auth.getSession(new Headers(request.headers as Record<string, string>)).pipe(
+      // Explicit headers (inside sessionUserId): the ambient-request form would
+      // read the body, which the turn route still needs.
+      const userId = yield* sessionUserId(auth, request).pipe(
         Effect.tapCause((cause) => Effect.logError("auth.session_lookup_failed", cause)),
         Effect.mapError(authUnavailable),
       );
-      if (!session) return yield* unauthorized();
-      return session.user.id;
+      if (!userId) return yield* unauthorized();
+      return userId;
     });
 
     // Several audio-native models only accept WAV/MP3/FLAC, so phones keep
@@ -113,26 +114,39 @@ export const AiRoutes = HttpRouter.use(
       const request = yield* HttpServerRequest.HttpServerRequest;
       const userId = yield* currentUserId(request);
       const parsed = yield* parseTurnRequest(request);
-      if (!(yield* store.exists(parsed.sessionId, userId))) return yield* sessionNotFound();
+      // The ownership check is a D1 round trip; it runs alongside the other
+      // work rather than before it, and still decides first.
+      const owned = store.exists(parsed.sessionId, userId);
 
       if (parsed.action.type === "approval") {
-        // Approval cards are client-local; clear stale server state from older sessions.
-        yield* store.clearPendingApprovals(parsed.sessionId, userId);
+        // Approval cards are client-local; clear stale server state from older
+        // sessions (scoped to this user, so it is harmless if the check fails).
+        const [found] = yield* Effect.all([owned, store.clearPendingApprovals(parsed.sessionId, userId)], {
+          concurrency: "unbounded",
+        });
+        if (!found) return yield* sessionNotFound();
         return json({ status: "ready", events: [] }, 200);
       }
 
       const { message } = parsed.action;
       const images = "images" in parsed ? parsed.images : [];
       const audio = "audio" in parsed ? parsed.audio : undefined;
-      if (!message && !audio && images.length === 0) {
-        return yield* new TurnRejected({ status: 400, body: { error: "action.message, audio, or a photo is required" } });
-      }
-      const media: Array<UserMessagePart> = [];
-      for (const image of images) {
-        const mediaType = yield* validateImage(image);
-        media.push({ type: "image", mediaType, dataUrl: toDataUrl(mediaType, image.bytes) });
-      }
-      if (audio) media.push(yield* encodeAudio(audio));
+      const prepareMedia = Effect.gen(function* () {
+        if (!message && !audio && images.length === 0) {
+          return yield* new TurnRejected({ status: 400, body: { error: "action.message, audio, or a photo is required" } });
+        }
+        const media: Array<UserMessagePart> = [];
+        for (const image of images) {
+          const mediaType = yield* validateImage(image);
+          media.push({ type: "image", mediaType, dataUrl: toDataUrl(mediaType, image.bytes) });
+        }
+        if (audio) media.push(yield* encodeAudio(audio));
+        return media;
+      });
+      const [found, prepared] = yield* Effect.all([owned, Effect.result(prepareMedia)], { concurrency: "unbounded" });
+      if (!found) return yield* sessionNotFound();
+      if (Result.isFailure(prepared)) return yield* Effect.fail(prepared.failure);
+      const media = prepared.success;
 
       const turnId = yield* Option.match(makeTurnId(parsed.sessionId), {
         onNone: () => Effect.fail(sessionNotFound()),

@@ -7,10 +7,11 @@ import * as FetchHttpClient from "effect/http/FetchHttpClient";
 import * as HttpRouter from "effect/http/HttpRouter";
 import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { Api as ApiSpec } from "./api/Api.ts";
-import { Auth, AuthenticationLive } from "./auth/Auth.ts";
+import { Auth, AuthenticationLive, authRoutes } from "./auth/Auth.ts";
 import { withLegacySessionCookies } from "./auth/LegacySessionCookie.ts";
 import { Database } from "./db/Database.ts";
-import { Db } from "./db/Db.ts";
+import { Background } from "./Background.ts";
+import { Db, DbBatch } from "./db/Db.ts";
 import { Email } from "./email/Email.ts";
 import { InvalidRequest } from "./api/InvalidRequest.ts";
 import { UnexpectedErrors } from "./api/UnexpectedErrors.ts";
@@ -34,14 +35,9 @@ export default class Api extends Cloudflare.Worker<Api>()(
     // are answered by Cloudflare's asset layer before the Worker runs.
     assets: "./dist/public",
     ...(customDomain ? { domain: customDomain } : {}),
-    // Run next to D1 instead of at the edge: authenticated requests make
-    // several sequential D1 queries, and from Argentina each one is a round
-    // trip to the database's primary in Miami (ENAM). No cloud region is in
-    // Miami; gcp:us-east1 measured fastest (sync/bootstrap ~500ms -> ~310ms
-    // from EZE) at the cost of ~170ms on requests that skip D1. Smart Placement
-    // can't do this: it only picks among locations the Worker already runs in,
-    // and nearly all traffic arrives at EZE. Static assets stay at the edge.
-    placement: { region: "gcp:us-east1" },
+    // No placement: the Worker runs at the edge (Buenos Aires for our users)
+    // and each request makes at most one D1 round trip to Miami (see Db.ts).
+    // Placement can't put a Worker next to D1 (PORT.md, Notes).
     compatibility: { flags: ["nodejs_compat"], date: "2026-10-01" },
   },
   Effect.gen(function* () {
@@ -56,7 +52,7 @@ export default class Api extends Cloudflare.Worker<Api>()(
         Layer.provide([AuthenticationLive, InvalidRequest.layer, UnexpectedErrors.layer]),
       ),
       // Better Auth owns everything under /api/auth (sign-in, OTP, session).
-      HttpRouter.add("*", "/api/auth/*", auth.fetch),
+      HttpRouter.add("*", "/api/auth/*", authRoutes(auth)),
       // Multipart turns and the resumable SSE stream (also binds the AiSession
       // Durable Object that runs turns).
       AiRoutes,
@@ -67,6 +63,8 @@ export default class Api extends Cloudflare.Worker<Api>()(
         Layer.provide(FoodSearchLive),
         Layer.provide([
           Db.layer,
+          DbBatch.layer,
+          Background.layer,
           Layer.succeed(Auth, auth),
           Layer.succeed(MfpLogin, mfpLogin),
           Layer.succeed(AudioTranscoder, audio),

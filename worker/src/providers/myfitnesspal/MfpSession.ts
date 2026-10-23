@@ -27,11 +27,32 @@ const StorageState = Schema.Struct({
   origins: Schema.Array(Schema.Unknown),
 });
 
+// The stored session only changes when a browser login refreshes it, so each
+// Worker instance reuses what it last read (or saved) for a while instead of
+// reading D1 before every MFP request. A session another instance replaced
+// fails at MFP, and that refresh returns the newer login without a new one.
+const STORED_TTL_MS = 5 * 60 * 1000;
+
+interface Stored {
+  readonly refreshedAt: number;
+  readonly auth: Option.Option<MfpRequestAuth>;
+}
+
 const make = Effect.gen(function* () {
   const db = yield* Db;
   const login = yield* MfpLogin;
+  let remembered: { readonly at: number; readonly stored: Stored } | undefined;
 
-  const readStored = Effect.fn("MfpSession.readStored")(
+  const readStored = Effect.fn("MfpSession.readStored")(function* () {
+    if (remembered && Date.now() - remembered.at < STORED_TTL_MS) {
+      return remembered.stored;
+    }
+    const stored = yield* readStoredRow();
+    remembered = { at: Date.now(), stored };
+    return stored;
+  });
+
+  const readStoredRow = Effect.fn("MfpSession.readStoredRow")(
     function* () {
       const [row] = yield* db
         .select({
@@ -48,7 +69,7 @@ const make = Effect.gen(function* () {
         auth: cookieHeader
           ? Option.some({ authorization: normalizeAuthorization(row?.authorization, true), cookieHeader })
           : Option.none<MfpRequestAuth>(),
-      };
+      } satisfies Stored;
     },
     withRuntime,
     Effect.mapError((cause) => new MfpSessionError({ message: "Failed to read the stored MFP session", cause })),
@@ -80,7 +101,9 @@ const make = Effect.gen(function* () {
         .insert(mfpAuthSessions)
         .values({ provider: MFP_PROVIDER, createdAt: now, ...values })
         .onConflictDoUpdate({ target: mfpAuthSessions.provider, set: values });
-      return { authorization, cookieHeader } satisfies MfpRequestAuth;
+      const auth = { authorization, cookieHeader } satisfies MfpRequestAuth;
+      remembered = { at: Date.now(), stored: { refreshedAt: now.getTime(), auth: Option.some(auth) } };
+      return auth;
     },
     withRuntime,
     Effect.mapError((cause) =>

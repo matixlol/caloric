@@ -3,7 +3,7 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import type { SyncFoodEntryRow, SyncRecipeRow, SyncSettingsRow } from "./Api.ts";
-import { Db, withRuntime } from "../db/Db.ts";
+import { type BatchDb, type Batch, Db, DbBatch, withRuntime } from "../db/Db.ts";
 import { userFoodEntries, userRecipes, userSettings } from "../db/schema.ts";
 import { USER_SETTINGS_ROW_ID } from "../domain/Diary.ts";
 
@@ -15,6 +15,7 @@ const toDate = (millis: number | null | undefined) => (typeof millis === "number
 
 const make = Effect.gen(function* () {
   const db = yield* Db;
+  const batch = yield* DbBatch;
 
   const bootstrap = Effect.fn("SyncRepository.bootstrap")(function* (userId: string) {
     const [foodEntries, recipes, settings] = yield* Effect.all(
@@ -49,8 +50,9 @@ const make = Effect.gen(function* () {
 
   // Last-writer-wins upserts: a write applies when it is at least as new as
   // the stored row, and RETURNING yields only the rows that applied. Rows go
-  // in multi-row statements (D1 allows 100 bound parameters per statement and
-  // 1,000 statements per request); each row binds 5 parameters.
+  // in multi-row statements (D1 allows 100 bound parameters per statement);
+  // each row binds 5 parameters. A push is one D1 batch: one round trip, and
+  // it applies entirely or not at all.
   const ROWS_PER_STATEMENT = 19;
 
   // A statement can't upsert the same key twice, so a push that repeats an id
@@ -69,41 +71,37 @@ const make = Effect.gen(function* () {
       items.slice(index * ROWS_PER_STATEMENT, (index + 1) * ROWS_PER_STATEMENT),
     );
 
-  const pushRows = <R extends FoodEntryRow | RecipeRow>(
+  const upsertRows = (
+    q: BatchDb,
     table: typeof userFoodEntries | typeof userRecipes,
     userId: string,
-    rows: ReadonlyArray<R>,
+    rows: ReadonlyArray<FoodEntryRow | RecipeRow>,
   ) =>
-    Effect.forEach(
-      chunks(newestById(rows)),
-      (chunk) =>
-        db
-          .insert(table)
-          .values(
-            chunk.map((row) => ({
-              userId,
-              id: row.id,
-              data: row.data as never,
-              updatedAt: new Date(row.updatedAt),
-              deletedAt: toDate(row.deletedAt),
-            })),
-          )
-          .onConflictDoUpdate({
-            target: [table.userId, table.id],
-            set: {
-              data: sql`excluded.data`,
-              updatedAt: sql`excluded.updated_at`,
-              deletedAt: sql`excluded.deleted_at`,
-            },
-            setWhere: lte(table.updatedAt, sql`excluded.updated_at`),
-          })
-          .returning({ id: table.id }),
-      { concurrency: 1 },
-    ).pipe(Effect.map((results) => results.flat().map((row) => row.id)));
+    q
+      .insert(table)
+      .values(
+        rows.map((row) => ({
+          userId,
+          id: row.id,
+          data: row.data as never,
+          updatedAt: new Date(row.updatedAt),
+          deletedAt: toDate(row.deletedAt),
+        })),
+      )
+      .onConflictDoUpdate({
+        target: [table.userId, table.id],
+        set: {
+          data: sql`excluded.data`,
+          updatedAt: sql`excluded.updated_at`,
+          deletedAt: sql`excluded.deleted_at`,
+        },
+        setWhere: lte(table.updatedAt, sql`excluded.updated_at`),
+      })
+      .returning({ id: table.id });
 
-  const pushSettings = (userId: string, row: SettingsRow) => {
+  const upsertSettings = (q: BatchDb, userId: string, row: SettingsRow) => {
     const values = { data: row.data, updatedAt: new Date(row.updatedAt) };
-    return db
+    return q
       .insert(userSettings)
       .values({ userId, ...values })
       .onConflictDoUpdate({
@@ -111,8 +109,7 @@ const make = Effect.gen(function* () {
         set: values,
         setWhere: lte(userSettings.updatedAt, sql`excluded.updated_at`),
       })
-      .returning({ userId: userSettings.userId })
-      .pipe(Effect.map((rows) => rows.length > 0));
+      .returning({ userId: userSettings.userId });
   };
 
   const push = Effect.fn("SyncRepository.push")(function* (
@@ -123,11 +120,30 @@ const make = Effect.gen(function* () {
       readonly settings?: SettingsRow | null;
     },
   ) {
-    const acceptedFoodEntryIds = yield* pushRows(userFoodEntries, userId, body.foodEntries);
-    const acceptedRecipeIds = yield* pushRows(userRecipes, userId, body.recipes);
-    const acceptedSettings = body.settings ? yield* pushSettings(userId, body.settings) : false;
-    return { acceptedFoodEntryIds, acceptedRecipeIds, acceptedSettings };
-  }, withRuntime);
+    const foodEntryChunks = chunks(newestById(body.foodEntries));
+    const recipeChunks = chunks(newestById(body.recipes));
+    const settings = body.settings ?? undefined;
+    if (foodEntryChunks.length + recipeChunks.length === 0 && !settings) {
+      return { acceptedFoodEntryIds: [], acceptedRecipeIds: [], acceptedSettings: false };
+    }
+
+    const results = (yield* batch.run(
+      (q) =>
+        [
+          ...foodEntryChunks.map((rows) => upsertRows(q, userFoodEntries, userId, rows)),
+          ...recipeChunks.map((rows) => upsertRows(q, userRecipes, userId, rows)),
+          ...(settings ? [upsertSettings(q, userId, settings)] : []),
+        ] as unknown as Batch,
+    )) as unknown as ReadonlyArray<ReadonlyArray<{ readonly id?: string }>>;
+
+    const ids = (from: number, count: number) =>
+      results.slice(from, from + count).flatMap((rows) => rows.map((row) => row.id!));
+    return {
+      acceptedFoodEntryIds: ids(0, foodEntryChunks.length),
+      acceptedRecipeIds: ids(foodEntryChunks.length, recipeChunks.length),
+      acceptedSettings: settings ? (results[results.length - 1]?.length ?? 0) > 0 : false,
+    };
+  });
 
   return { bootstrap, push };
 });

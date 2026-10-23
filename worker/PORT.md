@@ -126,12 +126,28 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
 - The container (standard-1, 4 GiB) serves both MFP logins and voice-note
   transcoding and sleeps after 10 idle minutes. Recording WAV on device would
   take voice notes off the container.
-- The Worker runs in `gcp:us-east1` (targeted placement), not at the edge.
-  D1's primary is in Miami (`served_by_colo` in D1 query metadata), users are
-  in Argentina, and every D1 query from EZE is a ~150ms round trip. Measured
-  from EZE: get-session 330 -> 275ms, sync/bootstrap 495 -> 310ms, /health
-  20 -> 200ms. Smart Placement wouldn't move it: it only considers locations
-  the Worker already runs in, and traffic is almost all EZE.
+- Every D1 query is a round trip to the database's primary in Miami: ~145ms
+  from Buenos Aires (EZE), where our users' requests arrive. Placement can't
+  remove that. Smart Placement only picks locations the Worker already runs
+  in (all EZE); cloud regions land in Atlanta at best (~22ms per query); and
+  even a Durable Object in Miami pays ~10ms per D1 query (measured Oct 23).
+  So the Worker runs at the edge and every request makes at most one D1 round
+  trip:
+  - Independent reads run concurrently (`Effect.all`).
+  - Writes and the reads that show their result go as one D1 batch
+    (`DbBatch` in `src/db/Db.ts`; also atomic). `sync/push` is one batch;
+    social reads friend lists through subqueries instead of a first query.
+  - Better Auth joins session and user (`advanced.database.joins`), and the
+    user a session cookie resolves to is cached per data center for 5 minutes
+    (`src/auth/SessionCache.ts`); POSTs to `/api/auth/*` (sign-out) drop it.
+  - Provider cache writes (search, barcode) run after the response
+    (`Background`, `ctx.waitUntil`), and a cached MFP search reads its details
+    in the same round trip.
+  Measured on dev from EZE (database in Newark): /health 20ms; get-session,
+  sync/bootstrap, sync/push, social/me, social/daily-summaries ~180-200ms
+  (pinned to Atlanta they were 275-310ms; at the edge before this, 450ms+).
+  New handlers should keep to one round trip: a `yield*` on a query that
+  depends on another query's result costs ~145ms.
 - Better Auth's runtime schema check is off (`validateSchema: false`). It is
   memoized per database client, but Alchemy builds one per request, so it
   introspected every table (a D1 round trip per PRAGMA) on every auth call:

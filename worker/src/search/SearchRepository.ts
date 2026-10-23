@@ -3,7 +3,7 @@ import type { SQLiteColumn } from "drizzle-orm/sqlite-core";
 import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
-import { Db, withRuntime } from "../db/Db.ts";
+import { Db, DbBatch, withRuntime } from "../db/Db.ts";
 import {
   anmatLiveSearchRequests,
   anmatProductDerivedData,
@@ -16,7 +16,7 @@ import {
 import { NO_MATCHES, SUCCESS } from "../providers/myfitnesspal/barcodeProtocol.ts";
 import type { MfpSearchParams } from "../providers/myfitnesspal/MfpClient.ts";
 import type { OpenFoodFactsSearchParams } from "../providers/openFoodFacts/OpenFoodFactsClient.ts";
-import type { AnmatRow } from "./mapping.ts";
+import type { AnmatRow, DetailKey } from "./mapping.ts";
 
 // A stored provider response (and the shape fresh responses are saved in).
 export interface CachedResponse {
@@ -53,38 +53,103 @@ const glob = (column: SQLiteColumn, pattern: string): SQL => sql`${column} GLOB 
 
 const successfulStatus = (column: SQLiteColumn) => and(gte(column, 200), lt(column, 300));
 
+export const detailKeyOf = (key: DetailKey) => `${key.foodId}:${key.version}`;
+
+// A fresh, successful cached detail response.
+const freshDetail = (cutoff: Date) =>
+  and(
+    successfulStatus(mfpFoodDetailResponses.mfpStatus),
+    isNotNull(mfpFoodDetailResponses.responseJson),
+    gte(mfpFoodDetailResponses.createdAt, cutoff),
+  );
+
+const detailFields = {
+  foodId: mfpFoodDetailResponses.foodId,
+  version: mfpFoodDetailResponses.version,
+  status: mfpFoodDetailResponses.mfpStatus,
+  url: mfpFoodDetailResponses.mfpUrl,
+  json: mfpFoodDetailResponses.responseJson,
+  text: mfpFoodDetailResponses.responseText,
+};
+
+type DetailRow = CachedResponse & DetailKey;
+
+// Newest row per detail key (rows arrive newest first).
+const byDetailKey = (rows: ReadonlyArray<DetailRow>) => {
+  const result = new Map<string, CachedResponse>();
+  for (const { foodId, version, ...response } of rows) {
+    const key = detailKeyOf({ foodId, version });
+    if (!result.has(key)) result.set(key, response);
+  }
+  return result;
+};
+
+// Fresh, successful cached searches for these parameters.
+const matchingMfpSearch = (params: MfpSearchParams, cutoff: Date) =>
+  and(
+    eq(mfpSearchResponses.query, params.query),
+    eq(mfpSearchResponses.offset, params.offset),
+    eq(mfpSearchResponses.maxItems, params.maxItems),
+    eq(mfpSearchResponses.countryCode, params.countryCode),
+    eq(mfpSearchResponses.resourceType, params.resourceType),
+    successfulStatus(mfpSearchResponses.mfpStatus),
+    isNotNull(mfpSearchResponses.responseJson),
+    gte(mfpSearchResponses.createdAt, cutoff),
+  );
+
+const newestFirst = [desc(mfpSearchResponses.createdAt), desc(mfpSearchResponses.id)] as const;
+
+// D1 binds at most 100 parameters per statement; a detail row binds 7.
+const DETAIL_ROWS_PER_STATEMENT = 14;
+
+const chunksOf = <A>(items: ReadonlyArray<A>, size: number) =>
+  Array.from({ length: Math.ceil(items.length / size) }, (_, index) => items.slice(index * size, (index + 1) * size));
+
 const make = Effect.gen(function* () {
   const db = yield* Db;
+  const batch = yield* DbBatch;
 
+  // The cached search and the fresh details saved with it, in one round trip
+  // (details are linked to every search response that surfaced them).
   const findMfpSearch = Effect.fn("SearchRepository.findMfpSearch")(function* (
     params: MfpSearchParams,
     cutoff: Date,
   ) {
-    const [row] = yield* db
-      .select({
-        id: mfpSearchResponses.id,
-        status: mfpSearchResponses.mfpStatus,
-        url: mfpSearchResponses.mfpUrl,
-        json: mfpSearchResponses.responseJson,
-        text: mfpSearchResponses.responseText,
-      })
-      .from(mfpSearchResponses)
-      .where(
-        and(
-          eq(mfpSearchResponses.query, params.query),
-          eq(mfpSearchResponses.offset, params.offset),
-          eq(mfpSearchResponses.maxItems, params.maxItems),
-          eq(mfpSearchResponses.countryCode, params.countryCode),
-          eq(mfpSearchResponses.resourceType, params.resourceType),
-          successfulStatus(mfpSearchResponses.mfpStatus),
-          isNotNull(mfpSearchResponses.responseJson),
-          gte(mfpSearchResponses.createdAt, cutoff),
-        ),
-      )
-      .orderBy(desc(mfpSearchResponses.createdAt), desc(mfpSearchResponses.id))
-      .limit(1);
-    return row;
-  }, withRuntime);
+    const [searches, details] = yield* batch.run((q) => [
+      q
+        .select({
+          id: mfpSearchResponses.id,
+          status: mfpSearchResponses.mfpStatus,
+          url: mfpSearchResponses.mfpUrl,
+          json: mfpSearchResponses.responseJson,
+          text: mfpSearchResponses.responseText,
+        })
+        .from(mfpSearchResponses)
+        .where(matchingMfpSearch(params, cutoff))
+        .orderBy(...newestFirst)
+        .limit(1),
+      q
+        .select(detailFields)
+        .from(mfpFoodDetailResponses)
+        .where(
+          and(
+            inArray(
+              mfpFoodDetailResponses.searchResponseId,
+              q
+                .select({ id: mfpSearchResponses.id })
+                .from(mfpSearchResponses)
+                .where(matchingMfpSearch(params, cutoff))
+                .orderBy(...newestFirst)
+                .limit(1),
+            ),
+            freshDetail(cutoff),
+          ),
+        )
+        .orderBy(desc(mfpFoodDetailResponses.createdAt), desc(mfpFoodDetailResponses.id)),
+    ]);
+    const search = searches[0];
+    return search ? { search, details: byDetailKey(details as ReadonlyArray<DetailRow>) } : undefined;
+  });
 
   const saveMfpSearch = Effect.fn("SearchRepository.saveMfpSearch")(function* (
     params: MfpSearchParams,
@@ -103,51 +168,58 @@ const make = Effect.gen(function* () {
     return row!.id;
   }, withRuntime);
 
-  const findMfpDetail = Effect.fn("SearchRepository.findMfpDetail")(function* (
-    foodId: string,
-    version: string,
+  // Fresh cached details for any of these keys, newest per key.
+  const findMfpDetails = Effect.fn("SearchRepository.findMfpDetails")(function* (
+    keys: ReadonlyArray<DetailKey>,
     cutoff: Date,
   ) {
-    const [row] = yield* db
-      .select({
-        status: mfpFoodDetailResponses.mfpStatus,
-        url: mfpFoodDetailResponses.mfpUrl,
-        json: mfpFoodDetailResponses.responseJson,
-        text: mfpFoodDetailResponses.responseText,
-      })
-      .from(mfpFoodDetailResponses)
-      .where(
-        and(
-          eq(mfpFoodDetailResponses.foodId, foodId),
-          eq(mfpFoodDetailResponses.version, version),
-          successfulStatus(mfpFoodDetailResponses.mfpStatus),
-          isNotNull(mfpFoodDetailResponses.responseJson),
-          gte(mfpFoodDetailResponses.createdAt, cutoff),
-        ),
-      )
-      .orderBy(desc(mfpFoodDetailResponses.createdAt), desc(mfpFoodDetailResponses.id))
-      .limit(1);
-    return row;
+    if (keys.length === 0) return new Map<string, CachedResponse>();
+    const rows = yield* Effect.forEach(
+      chunksOf(keys, 45),
+      (chunk) =>
+        db
+          .select(detailFields)
+          .from(mfpFoodDetailResponses)
+          .where(
+            and(
+              or(
+                ...chunk.map((key) =>
+                  and(eq(mfpFoodDetailResponses.foodId, key.foodId), eq(mfpFoodDetailResponses.version, key.version)),
+                ),
+              ),
+              freshDetail(cutoff),
+            ),
+          )
+          .orderBy(desc(mfpFoodDetailResponses.createdAt), desc(mfpFoodDetailResponses.id)),
+      { concurrency: "unbounded" },
+    );
+    return byDetailKey(rows.flat() as ReadonlyArray<DetailRow>);
   }, withRuntime);
 
-  // Links a detail response to the search that surfaced it (once per search).
-  const saveMfpDetail = Effect.fn("SearchRepository.saveMfpDetail")(function* (
+  // Links detail responses to the search that surfaced them (once per search).
+  const saveMfpDetails = Effect.fn("SearchRepository.saveMfpDetails")(function* (
     searchResponseId: number,
-    key: { readonly foodId: string; readonly version: string },
-    response: CachedResponse,
+    details: ReadonlyArray<DetailKey & { readonly response: CachedResponse }>,
   ) {
-    yield* db
-      .insert(mfpFoodDetailResponses)
-      .values({
-        searchResponseId,
-        foodId: key.foodId,
-        version: key.version,
-        mfpUrl: response.url,
-        mfpStatus: response.status,
-        responseJson: response.json,
-        responseText: response.text,
-      })
-      .onConflictDoNothing();
+    yield* Effect.forEach(
+      chunksOf(details, DETAIL_ROWS_PER_STATEMENT),
+      (chunk) =>
+        db
+          .insert(mfpFoodDetailResponses)
+          .values(
+            chunk.map(({ foodId, version, response }) => ({
+              searchResponseId,
+              foodId,
+              version,
+              mfpUrl: response.url,
+              mfpStatus: response.status,
+              responseJson: response.json,
+              responseText: response.text,
+            })),
+          )
+          .onConflictDoNothing(),
+      { concurrency: "unbounded", discard: true },
+    );
   }, withRuntime);
 
   const findOpenFoodFactsSearch = Effect.fn("SearchRepository.findOpenFoodFactsSearch")(function* (
@@ -282,8 +354,8 @@ const make = Effect.gen(function* () {
   return {
     findMfpSearch,
     saveMfpSearch,
-    findMfpDetail,
-    saveMfpDetail,
+    findMfpDetails,
+    saveMfpDetails,
     findOpenFoodFactsSearch,
     saveOpenFoodFactsSearch,
     findBarcode,

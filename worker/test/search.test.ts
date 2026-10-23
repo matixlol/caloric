@@ -14,6 +14,7 @@ import { Authentication } from "../src/api/Authentication.ts";
 import { Unauthorized } from "../src/api/Errors.ts";
 import { InvalidRequest } from "../src/api/InvalidRequest.ts";
 import { UnexpectedErrors } from "../src/api/UnexpectedErrors.ts";
+import { Background } from "../src/Background.ts";
 import { Db } from "../src/db/Db.ts";
 import { anmatProductDerivedData, anmatProducts, mfpAuthSessions } from "../src/db/schema.ts";
 import { MfpGroup } from "../src/mfp/Api.ts";
@@ -112,7 +113,7 @@ const makeEnv = (respond: Respond = defaultRespond, config: Record<string, strin
   const configProvider = ConfigProvider.layer(
     ConfigProvider.fromUnknown({ OPEN_FOOD_FACTS_BASE_URL: "https://off.test", ...config }),
   );
-  const deps = Layer.mergeAll(TestDb, http, login, configProvider, Logger.layer([]));
+  const deps = Layer.mergeAll(TestDb, http, login, configProvider, Background.inline, Logger.layer([]));
   return { calls, logins, deps };
 };
 

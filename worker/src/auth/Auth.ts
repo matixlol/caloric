@@ -7,9 +7,11 @@ import * as Context from "effect/Context";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Option from "effect/Option";
+import * as HttpServerRequest from "effect/http/HttpServerRequest";
 import { Authentication, CurrentUser } from "../api/Authentication.ts";
 import { ServiceUnavailable, Unauthorized } from "../api/Errors.ts";
 import { Email, loginCodeEmail } from "../email/Email.ts";
+import { cachedUserId, forgetSession } from "./SessionCache.ts";
 
 // App deep-link schemes (production + dev build) Better Auth must trust.
 const APP_SCHEMES = ["caloric://", "caloric://*", "caloric-dev://", "caloric-dev://*"];
@@ -42,7 +44,10 @@ const make = Effect.gen(function* () {
     // runtime schema check — memoized per client — would introspect every table
     // on every auth request, one D1 round trip per PRAGMA. Deploys already
     // migrate the auth schema (BetterAuthMigrate).
-    advanced: { useSecureCookies: true, database: { validateSchema: false } },
+    //
+    // Joins make a session lookup one query (session joined with its user)
+    // instead of two sequential D1 round trips.
+    advanced: { useSecureCookies: true, database: { validateSchema: false, joins: true } },
     // Password login is what App Store review uses; accounts are invite-only,
     // so there is no email-verification gate.
     emailAndPassword: { enabled: true, requireEmailVerification: false },
@@ -62,20 +67,44 @@ export class Auth extends Context.Service<Auth, Effect.Success<typeof make>>()("
   static readonly layer = Layer.effect(Auth, make);
 }
 
+// The signed-in user's id for a request, or undefined without a valid session.
+// Goes through the edge session cache (SessionCache.ts); Better Auth decides
+// on a miss.
+export const currentUserId = (auth: Auth["Service"], request: HttpServerRequest.HttpServerRequest) =>
+  cachedUserId(
+    request,
+    auth
+      .getSession(new Headers(request.headers as Record<string, string>))
+      .pipe(Effect.map((found) => (found ? { userId: found.user.id, expiresAt: found.session.expiresAt } : null))),
+  );
+
+// Better Auth's own routes. Writes (sign-in, sign-out, session revocation)
+// drop the cached user for the cookie they carried.
+export const authRoutes = (auth: Auth["Service"]) =>
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const response = yield* auth.fetch;
+    if (request.method !== "GET") {
+      yield* forgetSession(request);
+    }
+    return response;
+  });
+
 export const AuthenticationLive = Layer.effect(
   Authentication,
   Effect.gen(function* () {
     const auth = yield* Auth;
     return Authentication.of((httpEffect) =>
       Effect.gen(function* () {
-        const session = yield* auth.getSession().pipe(
+        const request = yield* HttpServerRequest.HttpServerRequest;
+        const userId = yield* currentUserId(auth, request).pipe(
           Effect.tapCause((cause) => Effect.logError("auth.session_lookup_failed", cause)),
           Effect.mapError(() => ServiceUnavailable.fromCode("auth_unavailable")),
         );
-        if (!session) {
+        if (!userId) {
           return yield* Unauthorized.instance();
         }
-        return yield* Effect.provideService(httpEffect, CurrentUser, { id: session.user.id });
+        return yield* Effect.provideService(httpEffect, CurrentUser, { id: userId });
       }).pipe(
         // HttpApi middleware can't declare Alchemy's per-request RuntimeContext;
         // the Worker provides the real one to every request at runtime.
