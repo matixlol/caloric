@@ -143,9 +143,10 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
   - Provider cache writes (search, barcode) run after the response
     (`Background`, `ctx.waitUntil`), and a cached MFP search reads its details
     in the same round trip.
-  Measured on dev from EZE (database in Newark): /health 20ms; get-session,
-  sync/bootstrap, sync/push, social/me, social/daily-summaries ~180-200ms
-  (pinned to Atlanta they were 275-310ms; at the edge before this, 450ms+).
+  Measured on prod from EZE on Oct 23 (medians, before -> after; before was
+  pinned to Atlanta): /health 189 -> 22ms, get-session 239 -> 176ms,
+  sync/bootstrap 278 -> 183ms, sync/push 300 -> 206ms, social/me 270 ->
+  170ms, social/daily-summaries 260 -> 172ms, cached search 499 -> 222ms.
   New handlers should keep to one round trip: a `yield*` on a query that
   depends on another query's result costs ~145ms.
 - Better Auth's runtime schema check is off (`validateSchema: false`). It is
