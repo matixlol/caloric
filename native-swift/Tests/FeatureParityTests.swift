@@ -76,9 +76,17 @@ final class FeatureParityTests: XCTestCase {
     func testQuickAddValidationAndOptionalMacros() {
         XCTAssertEqual(QuickAdd.calories("250.6"), 251)
         for invalid in ["", "NaN", "infinity", "0", "-5", "10001"] { XCTAssertNil(QuickAdd.calories(invalid)) }
-        XCTAssertNil(QuickAdd.nutrition(calories: "250", protein: "-1", carbs: "", fat: ""))
-        let nutrition = QuickAdd.nutrition(calories: "250", protein: "0", carbs: "12.36", fat: "")
-        XCTAssertEqual(nutrition?.protein, 0); XCTAssertEqual(nutrition?.carbs, 12.4); XCTAssertNil(nutrition?.fat)
+        XCTAssertNil(QuickAdd.nutrition(calories: "0", split: UserSettings()))
+        let nutrition = QuickAdd.nutrition(calories: "400", split: UserSettings())
+        XCTAssertEqual(nutrition?.protein, 30); XCTAssertEqual(nutrition?.carbs, 50); XCTAssertEqual(nutrition?.fat, 8.9)
+    }
+    func testQuickAddSplitComesFromExistingMacrosOrDailyRatios() {
+        var daily = UserSettings(); daily.macroProteinPct = 40; daily.macroCarbsPct = 40; daily.macroFatPct = 20
+        XCTAssertEqual(QuickAdd.split(of: Nutrition(calories: 250), fallback: daily), daily)
+        let split = QuickAdd.split(of: Nutrition(calories: 400, protein: 20, carbs: 0, fat: 0), fallback: daily)
+        XCTAssertEqual([split.macroProteinPct, split.macroCarbsPct, split.macroFatPct], [100, 0, 0])
+        let thirds = QuickAdd.split(of: Nutrition(protein: 9, carbs: 9, fat: 4), fallback: daily)
+        XCTAssertEqual(thirds.macroProteinPct + thirds.macroCarbsPct + thirds.macroFatPct, 100)
     }
     func testBarcodeNormalizesUPCAndRejectsInvalidCameraInput() {
         XCTAssertEqual(BarcodeScanner.normalize("012345678905"), "0012345678905")

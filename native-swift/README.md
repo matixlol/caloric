@@ -59,4 +59,6 @@ Build 18 renames the app, widget and iCloud folder to **caloric**, matching App 
 
 Build 19 restyles Settings as a native grouped iOS form: Goals, Macro Ratios and Friends, with Account (sync status, Sync Now, Sign Out) at the bottom. All unit / mock HTTP and 21 UI checks pass.
 
+Build 23 replaces the Quick add gram fields with the Settings macro ratio slider, which starts from your daily ratios and shows grams and percentages for the entered calories.
+
 The widget uses App Group `group.lol.mati.caloric.swift` and bundle ID `lol.mati.caloric.swift.CaloricWidget`. Daily backups use the separate `iCloud.lol.mati.caloric.swift` CloudDocuments container. Camera, microphone and iCloud behavior require verification on a device; simulator tests cover manual barcode entry and synthetic voice gestures. Native app updates ship through TestFlight.

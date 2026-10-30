@@ -5,9 +5,8 @@ struct EntryDetailsView: View {
     @Environment(\.dismiss) private var dismiss
     let entryID: String
     @State private var calories = ""
-    @State private var protein = ""
-    @State private var carbs = ""
-    @State private var fat = ""
+    @State private var split = UserSettings()
+    @State private var loaded: Nutrition?
     @State private var editingRecipe: RecipeRoute?
     @State private var addingIngredient = false
     private var entry: FoodEntry? { store.entries.first { $0.id == entryID }?.data }
@@ -22,8 +21,8 @@ struct EntryDetailsView: View {
                     }
                     Text([entry.meal.label, entry.brand, entry.serving].compactMap { $0 }.joined(separator: " • ")).font(.system(size: 14)).foregroundStyle(.secondary)
                     if entry.isQuickAdd {
-                        QuickAddFields(calories: $calories, protein: $protein, carbs: $carbs, fat: $fat).caloricCard()
-                        if QuickAdd.nutrition(calories: calories, protein: protein, carbs: carbs, fat: fat) == nil { Text("Enter calories from 1 to 10,000 and macros from 0 to 1,000g.").font(.caption).foregroundStyle(.red) }
+                        QuickAddFields(calories: $calories, split: $split).caloricCard()
+                        if QuickAdd.nutrition(calories: calories, split: split) == nil { Text("Enter calories from 1 to 10,000.").font(.caption).foregroundStyle(.red) }
                     } else {
                     PortionControl(value: Binding(get: { self.entry?.portion ?? 1 }, set: { portion in
                         store.perform { try store.update(id: entryID) { $0.portion = portion } }
@@ -68,7 +67,7 @@ struct EntryDetailsView: View {
                         Button { addingIngredient = true } label: { Label("Add to this entry", systemImage: "plus").frame(maxWidth: .infinity).padding(14) }.background(Theme.card, in: RoundedRectangle(cornerRadius: 14))
                     }
                     if let error = store.error { Text(error).font(.caption).foregroundStyle(.red) }
-                    PrimaryButton(title: "Done", enabled: !entry.isQuickAdd || QuickAdd.nutrition(calories: calories, protein: protein, carbs: carbs, fat: fat) != nil) { commitQuick(); dismiss() }
+                    PrimaryButton(title: "Done", enabled: !entry.isQuickAdd || QuickAdd.nutrition(calories: calories, split: split) != nil) { commitQuick(); dismiss() }
                 }.padding(16)
             } else {
                 ContentUnavailableView("Entry not found", systemImage: "fork.knife", description: Text("This log entry was removed or is unavailable."))
@@ -77,11 +76,10 @@ struct EntryDetailsView: View {
         }.background(Theme.background).scrollDismissesKeyboard(.interactively)
             .onAppear {
                 calories = entry?.nutrition?.calories.map { String(Int($0.rounded())) } ?? ""
-                protein = entry?.nutrition?.protein.map { String($0) } ?? ""
-                carbs = entry?.nutrition?.carbs.map { String($0) } ?? ""
-                fat = entry?.nutrition?.fat.map { String($0) } ?? ""
+                split = QuickAdd.split(of: entry?.nutrition, fallback: store.settings)
+                loaded = QuickAdd.nutrition(calories: calories, split: split)
             }
-            .task(id: [calories, protein, carbs, fat]) {
+            .task(id: [calories, "\(split.macroProteinPct)/\(split.macroCarbsPct)/\(split.macroFatPct)"]) {
                 guard entry?.isQuickAdd == true else { return }
                 do { try await Task.sleep(for: .milliseconds(200)); commitQuick() } catch { }
             }
@@ -89,7 +87,8 @@ struct EntryDetailsView: View {
             .sheet(isPresented: $addingIngredient) { if let entry { FoodSearchView(meal: entry.meal, day: entry.dateKey, recipeEntryID: entryID) } }
     }
     private func commitQuick() {
-        guard entry?.isQuickAdd == true, let nutrition = QuickAdd.nutrition(calories: calories, protein: protein, carbs: carbs, fat: fat) else { return }
+        // Only save after an edit, so opening an older calories-only entry doesn't fill in macros.
+        guard entry?.isQuickAdd == true, let nutrition = QuickAdd.nutrition(calories: calories, split: split), nutrition != loaded else { return }
         store.perform { try store.update(id: entryID) { $0.nutrition = nutrition } }
     }
     private func changeIngredient(_ id: String, portion: Double?) {

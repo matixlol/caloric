@@ -94,13 +94,26 @@ enum QuickAdd {
         guard let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)), value.isFinite, value > 0, value <= 10000 else { return nil }
         return value.rounded()
     }
-    static func macro(_ text: String) -> Double? {
-        guard let value = Double(text.trimmingCharacters(in: .whitespacesAndNewlines)), value.isFinite, (0...1000).contains(value) else { return nil }
-        return (value * 10).rounded() / 10
+    /// Grams of a macro that supply `percent` of `calories`, at 4 kcal/g (protein, carbs) or 9 kcal/g (fat).
+    static func grams(_ calories: Double, percent: Int, kcalPerGram: Double) -> Double {
+        (calories * Double(percent) / 100 / kcalPerGram * 10).rounded() / 10
     }
-    static func nutrition(calories: String, protein: String, carbs: String, fat: String) -> Nutrition? {
-        guard let value = Self.calories(calories), [protein, carbs, fat].allSatisfy({ $0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || macro($0) != nil }) else { return nil }
-        return Nutrition(calories: value, protein: macro(protein), carbs: macro(carbs), fat: macro(fat))
+    static func nutrition(calories: String, split: UserSettings) -> Nutrition? {
+        guard let value = Self.calories(calories) else { return nil }
+        return Nutrition(calories: value, protein: grams(value, percent: split.macroProteinPct, kcalPerGram: 4),
+                         carbs: grams(value, percent: split.macroCarbsPct, kcalPerGram: 4), fat: grams(value, percent: split.macroFatPct, kcalPerGram: 9))
+    }
+    /// The calorie split an existing entry's macros imply, falling back to the user's daily ratios when it has none.
+    static func split(of nutrition: Nutrition?, fallback: UserSettings) -> UserSettings {
+        let energy = [(nutrition?.protein ?? 0) * 4, (nutrition?.carbs ?? 0) * 4, (nutrition?.fat ?? 0) * 9].map { max(0, $0) }
+        let total = energy.reduce(0, +)
+        guard total > 0 else { return fallback }
+        let exact = energy.map { $0 / total * 100 }
+        var percents = exact.map { Int($0) }
+        for i in exact.indices.sorted(by: { exact[$0] - Double(percents[$0]) > exact[$1] - Double(percents[$1]) }).prefix(100 - percents.reduce(0, +)) { percents[i] += 1 }
+        var split = fallback
+        (split.macroProteinPct, split.macroCarbsPct, split.macroFatPct) = (percents[0], percents[1], percents[2])
+        return split
     }
 }
 

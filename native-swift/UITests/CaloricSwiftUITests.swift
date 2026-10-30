@@ -440,7 +440,6 @@ final class CaloricSwiftUITests: XCTestCase {
         app.buttons["Add food to Breakfast"].tap()
         app.buttons["Quick add"].tap()
         replace(app.textFields["Quick add calories"], with: "400")
-        app.textFields["Quick add protein"].tap(); app.textFields["Quick add protein"].typeText("20")
         app.buttons["Add quick"].tap()
         XCTAssertTrue(app.cells["Edit Quick add"].waitForExistence(timeout: 3))
         app.cells["Edit Quick add"].tap()

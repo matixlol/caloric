@@ -30,9 +30,7 @@ struct FoodSearchView: View {
     @State private var editingRecipe: RecipeRoute?
     @State private var quick = false
     @State private var calories = "250"
-    @State private var protein = ""
-    @State private var carbs = ""
-    @State private var fat = ""
+    @State private var split = UserSettings()
     @State private var caloriePick: Double?
     @State private var portionPick: Double?
     private let sourceOrder = ["openfoodfacts", "mfp"]
@@ -40,7 +38,7 @@ struct FoodSearchView: View {
     private var hasQuery: Bool { query.trimmingCharacters(in: .whitespacesAndNewlines).count >= 2 }
     private var selectedRecipe: RecipeRecord? { store.recipes.first { $0.id == selectedRecipeID } }
     private var visible: [SearchFood] { provider == "all" ? allFoods : bySource[provider] ?? [] }
-    private var manualNutrition: Nutrition? { QuickAdd.nutrition(calories: calories, protein: protein, carbs: carbs, fat: fat) }
+    private var manualNutrition: Nutrition? { QuickAdd.nutrition(calories: calories, split: split) }
     private var recents: [FoodRecord] {
         var seen = Set<String>()
         let tokens = normalize(query).split(separator: " ")
@@ -138,11 +136,11 @@ struct FoodSearchView: View {
     private var actionBar: some View {
       LiquidGlassGroup {
         VStack(spacing: 10) {
-            if quick { QuickAddFields(calories: $calories, protein: $protein, carbs: $carbs, fat: $fat).caloricCard(padding: 12) }
+            if quick { QuickAddFields(calories: $calories, split: $split).caloricCard(padding: 12) }
             HStack(spacing: 10) {
                 if quick { PrimaryButton(title: "Add quick", enabled: manualNutrition != nil) { addQuick(manualNutrition) } }
                 else { HoldSlideButton(title: ingredientMode ? "Add to recipe" : "Add to \(meal.label)", enabled: selected != nil || selectedRecipe != nil, values: (1...12).map { Double($0) / 4 }, selection: $portionPick, tapped: { add(portion: selectedPortion) }, committed: { add(portion: $0) }) }
-                if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: QuickCalories.values, selection: $caloriePick, tapped: { withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(Nutrition(calories: $0)) }).frame(width: 108) }
+                if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: QuickCalories.values, selection: $caloriePick, tapped: { if !quick { split = store.settings }; withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(Nutrition(calories: $0)) }).frame(width: 108) }
             }
         }.padding(.horizontal, 16).padding(.vertical, 12)
       }

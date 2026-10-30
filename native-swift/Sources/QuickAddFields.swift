@@ -29,21 +29,30 @@ struct SlideValuePicker: View {
 
 struct QuickAddFields: View {
     @Binding var calories: String
-    @Binding var protein: String
-    @Binding var carbs: String
-    @Binding var fat: String
+    @Binding var split: UserSettings
     var body: some View {
+        let kcal = QuickAdd.calories(calories) ?? 0
         VStack(alignment: .leading, spacing: 10) {
             Text("Quick add").font(.headline)
-            field("Calories", value: $calories, placeholder: "250", large: true)
-            HStack(spacing: 8) { field("Protein", value: $protein); field("Carbs", value: $carbs); field("Fat", value: $fat) }
+            VStack(alignment: .leading, spacing: 5) {
+                Text("Calories").font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                TextField("250", text: $calories).keyboardType(.decimalPad).font(.title2.bold()).padding(10).background(Theme.input, in: RoundedRectangle(cornerRadius: 10)).accessibilityLabel("Quick add calories")
+            }
+            HStack(spacing: 10) {
+                legend("Protein", QuickAdd.grams(kcal, percent: split.macroProteinPct, kcalPerGram: 4), Theme.protein)
+                Spacer(minLength: 0)
+                legend("Carbs", QuickAdd.grams(kcal, percent: split.macroCarbsPct, kcalPerGram: 4), Theme.carbs)
+                Spacer(minLength: 0)
+                legend("Fat", QuickAdd.grams(kcal, percent: split.macroFatPct, kcalPerGram: 9), Theme.fat)
+            }.minimumScaleFactor(0.75).lineLimit(1).padding(.top, 4)
+            MacroRatioSlider(settings: $split).frame(height: 52)
         }
     }
-    private func field(_ title: String, value: Binding<String>, placeholder: String = "g", large: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
-            Text(title).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
-            TextField(placeholder, text: value).keyboardType(.decimalPad).font(large ? .title2.bold() : .body).padding(10).background(Theme.input, in: RoundedRectangle(cornerRadius: 10)).accessibilityLabel("Quick add \(title.lowercased())")
-        }.frame(maxWidth: .infinity)
+    private func legend(_ title: String, _ grams: Double, _ color: Color) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(color).frame(width: 8, height: 8)
+            Text("\(title) \(Int(grams.rounded()))g").font(.system(size: 13, weight: .semibold)).monospacedDigit().foregroundStyle(.secondary)
+        }.accessibilityElement(children: .combine).accessibilityIdentifier("Quick add \(title.lowercased())")
     }
 }
 
