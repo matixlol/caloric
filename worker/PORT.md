@@ -91,7 +91,8 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
    a plain `worker/.env`: Alchemy reads it for every stage. Dev config is
    `.env.dev`. After Railway's Oct 21 environment-variable leak,
    `BETTER_AUTH_SECRET` is new and Railway's is `BETTER_AUTH_PREVIOUS_SECRET`;
-   set `BETTER_AUTH_PREVIOUS_SECRET_UNTIL` to cutover + 8 days (see Notes).
+   set `BETTER_AUTH_PREVIOUS_SECRET_UNTIL` to cutover + 8 days (see Notes;
+   removed again on 2026-10-31).
 2. Deploy prod without `CUSTOM_DOMAIN` (workers.dev only; the domain can't
    attach while the Railway CNAME exists). The `deploy:prod:staged` script was
    removed after cutover: deploying prod without the domain now detaches it.
@@ -118,7 +119,9 @@ token (DNS: Edit on mati.lol is enough; custom domains don't need Workers Routes
   `BETTER_AUTH_PREVIOUS_SECRET_UNTIL` (`src/auth/LegacySessionCookie.ts`); the
   iOS app picks the new cookie up from get-session on launch/resume. Sessions
   last 7 days from last use, so after the window anyone left is signed out
-  anyway. Remove both `PREVIOUS` values once it has passed.
+  anyway. Both `PREVIOUS` values were removed on 2026-10-31, so the code is now
+  a no-op. Alchemy planned their removal as "no changes" (env-only edits aren't
+  always diffed), so they were deleted with Cloudflare's Worker secrets API.
 - Better Auth owns and migrates its tables (camelCase columns); the import maps
   backend/'s snake_case columns onto them.
 - AI turn ids embed the session id (`ai_turn_<turn>_<session>`) so the stream
