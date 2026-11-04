@@ -60,11 +60,24 @@ struct MacroBadges: View {
         let n = nutrition?.multiplied(by: multiplier)
         HStack(spacing: 6) {
             if let v = n?.calories { badge("\(Int(v.rounded()).formatted()) kcal", background: Theme.input, foreground: Theme.label) }
-            if let v = n?.protein { badge("P \(grams(v, whole: wholeGrams))", background: Theme.protein, foreground: .white) }
-            if let v = n?.carbs { badge("C \(grams(v, whole: wholeGrams))", background: Theme.carbs, foreground: BrandPalette.ink) }
-            if let v = n?.fat { badge("F \(grams(v, whole: wholeGrams))", background: Theme.fat, foreground: .white) }
+            if n?.protein != nil || n?.carbs != nil || n?.fat != nil {
+                HStack(spacing: 0) {
+                    if let v = n?.protein { segment(v, background: Theme.protein, foreground: .white) }
+                    if let v = n?.carbs { segment(v, background: Theme.carbs, foreground: BrandPalette.ink) }
+                    if let v = n?.fat { segment(v, background: Theme.fat, foreground: .white) }
+                }
+                .clipShape(RoundedRectangle(cornerRadius: 7))
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel([n?.protein.map { "Protein \(grams($0, whole: wholeGrams))" },
+                                     n?.carbs.map { "Carbs \(grams($0, whole: wholeGrams))" },
+                                     n?.fat.map { "Fat \(grams($0, whole: wholeGrams))" }].compactMap { $0 }.joined(separator: ", "))
+            }
             if nutrition?.hasCalorieMismatch == true { Image(systemName: "exclamationmark.circle.fill").font(.system(size: 12)).foregroundStyle(Theme.carbs).accessibilityLabel("Calories and macros differ by more than 15 percent") }
         }.padding(.top, 4).minimumScaleFactor(0.8)
+    }
+    private func segment(_ value: Double, background: Color, foreground: Color) -> some View {
+        Text((wholeGrams ? value.rounded() : value).formatted(.number.precision(.fractionLength(0...1)))).font(.system(size: 11, weight: .bold)).monospacedDigit().lineLimit(1)
+            .padding(.horizontal, 7).padding(.vertical, 4).foregroundStyle(foreground).background(background)
     }
     private func badge(_ text: String, background: Color, foreground: Color) -> some View {
         Text(text).font(.system(size: 11, weight: .bold)).monospacedDigit().lineLimit(1)
