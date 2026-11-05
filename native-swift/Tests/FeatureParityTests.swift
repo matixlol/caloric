@@ -100,6 +100,12 @@ final class FeatureParityTests: XCTestCase {
         XCTAssertEqual(result.count, 60); XCTAssertEqual(Set(result.map(\.canonicalKey)).count, 60)
         XCTAssertEqual(Array(result.prefix(4).map(\.id)), ["0", "20", "1", "21"])
     }
+    func testSearchDecodesMfpVerifiedFlag() throws {
+        let json = #"{"hasMore":false,"foods":[{"id":"mfp:1:v","canonicalKey":"mfp:1:v","source":"mfp","sourceLabel":"MFP","name":"Aduki Beans","brand":"Eden","verified":true},{"id":"mfp:2:v","canonicalKey":"mfp:2:v","source":"mfp","sourceLabel":"MFP","name":"Aduki"}]}"#
+        let foods = try JSONDecoder().decode(SearchResponse.self, from: Data(json.utf8)).foods
+        XCTAssertEqual(foods.map(\.verified), [true, nil])
+        XCTAssertEqual(foods.map(\.accessibilityName), ["Aduki Beans, verified", "Aduki"])
+    }
     func testWidgetPercentagesCanExceedGoalAndUseSelectedMacroRatios() {
         let snapshot = WidgetSnapshot(nutrition: Nutrition(calories: 3300, protein: 300, carbs: 0, fat: 0), settings: UserSettings(calorieGoal: 2200), day: "2026-10-07")
         XCTAssertEqual(snapshot.calorieProgress, 150); XCTAssertEqual(snapshot.proteinProgress, 182)

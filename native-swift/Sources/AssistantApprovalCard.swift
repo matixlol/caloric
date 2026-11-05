@@ -67,7 +67,7 @@ struct AssistantApprovalCard: View {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .top, spacing: 10) {
                     VStack(alignment: .leading, spacing: 3) {
-                        Text(food.name).font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(2)
+                        food.nameText.font(.subheadline.weight(.semibold)).foregroundStyle(Theme.label).lineLimit(2)
                             .strikethrough(suggestion.output?.approved == false, color: .secondary)
                         let meta = [food.sourceLabel, food.brand, food.serving].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · ")
                         if !meta.isEmpty { Text(meta).font(.caption).foregroundStyle(.secondary).lineLimit(1) }

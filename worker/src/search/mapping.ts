@@ -171,10 +171,50 @@ export const mapMfpSearchResults = (
         brand: asString(source.brand_name) ?? asString(item.brand_name),
         serving: formatServing(source.serving_sizes) ?? formatServing(item.serving_sizes),
         nutrition,
+        verified: item.verified === true || source.verified === true ? (true as const) : undefined,
       }),
     );
   }
   return results;
+};
+
+// Lowercased words without accents; trailing plural "s"/"es" is dropped so
+// "beans" matches "bean".
+const searchWords = (value: string): Array<string> =>
+  value
+    .normalize("NFD")
+    .replace(/\p{M}/gu, "")
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((word) => word.length > 0)
+    .map((word) => (word.length > 4 && word.endsWith("es") ? word.slice(0, -2) : word))
+    .map((word) => (word.length > 3 && word.endsWith("s") ? word.slice(0, -1) : word));
+
+// 0 when the name contains every query word, 1 when it contains some, 2 when
+// none (the item matched only on its brand). A query word also matches a
+// longer name word it starts, since search runs while the user types.
+const nameMatchTier = (name: string, queryWords: ReadonlyArray<string>): number => {
+  if (queryWords.length === 0) return 0;
+  const nameWords = searchWords(name);
+  const matched = queryWords.filter((query) =>
+    nameWords.some((word) => word.startsWith(query)),
+  ).length;
+  return matched === queryWords.length ? 0 : matched > 0 ? 1 : 2;
+};
+
+// Reorders one page of MFP results: names matching the query before
+// brand-only matches, and MFP-verified entries first within each group.
+// MFP's own order breaks ties. Only the page is reordered, so pagination
+// windows stay aligned.
+export const rankMfpResults = (
+  foods: ReadonlyArray<FoodSearchResult>,
+  query: string,
+): Array<FoodSearchResult> => {
+  const queryWords = searchWords(query);
+  return foods
+    .map((food, index) => ({ food, index, tier: nameMatchTier(food.name, queryWords), verified: food.verified ? 0 : 1 }))
+    .sort((a, b) => a.tier - b.tier || a.verified - b.verified || a.index - b.index)
+    .map(({ food }) => food);
 };
 
 // --- Open Food Facts -----------------------------------------------------------

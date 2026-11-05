@@ -29,6 +29,8 @@ export const FoodSearchResult = Schema.Struct({
   brand: Schema.optionalKey(Schema.String),
   serving: Schema.optionalKey(Schema.String),
   nutrition: Schema.optionalKey(FoodNutrition),
+  // Present (true) only for entries MyFitnessPal marks as verified.
+  verified: Schema.optionalKey(Schema.Literal(true)),
 });
 export type FoodSearchResult = typeof FoodSearchResult.Type;
 

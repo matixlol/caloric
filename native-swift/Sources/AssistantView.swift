@@ -533,7 +533,7 @@ private struct SearchResultsChip: View {
                     HStack(spacing: 8) {
                         ForEach(message.foods) { food in
                             VStack(alignment: .leading, spacing: 4) {
-                                Text(food.name).font(.footnote.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
+                                food.nameText.font(.footnote.weight(.semibold)).lineLimit(2).multilineTextAlignment(.leading)
                                     .frame(maxWidth: .infinity, alignment: .leading)
                                 Text([food.sourceLabel, food.brand, food.serving].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " · "))
                                     .font(.caption2).foregroundStyle(.secondary).lineLimit(1)

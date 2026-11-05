@@ -219,6 +219,14 @@ struct FoodSearchView: View {
     }
 }
 
+extension SearchFood {
+    /// The food name, followed by a seal for MyFitnessPal-verified entries.
+    var nameText: Text {
+        verified == true ? Text("\(name) \(Text(Image(systemName: "checkmark.seal.fill")).foregroundStyle(Theme.tint))") : Text(name)
+    }
+    var accessibilityName: String { verified == true ? "\(name), verified" : name }
+}
+
 struct FoodSelectionRow: View {
     let food: SearchFood
     var selected = false
@@ -227,13 +235,13 @@ struct FoodSelectionRow: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(food.name).font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
+                    food.nameText.font(.system(size: 16, weight: .semibold)).foregroundStyle(.primary)
                     HStack(spacing: 6) { if let brand = food.brand { Text(brand) }; if !food.sourceLabel.isEmpty { Text(food.sourceLabel).font(.system(size: 10, weight: .bold)) }; if let serving = food.serving { Text(serving) } }.font(.system(size: 12)).foregroundStyle(.secondary)
                     MacroBadges(nutrition: food.nutrition)
                 }
                 Spacer(minLength: 0)
                 if selected { Image(systemName: "checkmark").font(.system(size: 18, weight: .bold)).foregroundStyle(Theme.tint) }
             }.padding(.vertical, 12).frame(maxWidth: .infinity, alignment: .leading).contentShape(Rectangle())
-        }.buttonStyle(.plain).accessibilityLabel("\(food.name), \(food.meta)").accessibilityAddTraits(selected ? .isSelected : [])
+        }.buttonStyle(.plain).accessibilityLabel("\(food.accessibilityName), \(food.meta)").accessibilityAddTraits(selected ? .isSelected : [])
     }
 }

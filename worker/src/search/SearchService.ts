@@ -23,6 +23,7 @@ import {
   mapOpenFoodFactsSearchResults,
   mergeFoodResults,
   rankAnmatRows,
+  rankMfpResults,
 } from "./mapping.ts";
 import { type CachedResponse, detailKeyOf, SearchRepository } from "./SearchRepository.ts";
 import { Background } from "../Background.ts";
@@ -149,7 +150,7 @@ const make = Effect.gen(function* () {
       resourceType: "foods",
     });
     return {
-      foods: mapMfpSearchResults(search.json, details).slice(0, limit),
+      foods: rankMfpResults(mapMfpSearchResults(search.json, details), query).slice(0, limit),
       hasMore: (countSearchItems(search.json) ?? 0) >= maxItems,
     } satisfies SourceSearchResult;
   });

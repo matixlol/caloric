@@ -26,7 +26,14 @@ import { FoodSearchLive } from "../src/search/FoodSearchLive.ts";
 import { SearchHandlers } from "../src/search/http.ts";
 import { ilikeContainsPattern } from "../src/search/SearchRepository.ts";
 import { SearchService } from "../src/search/SearchService.ts";
-import { mergeFoodResults, rankAnmatRows, scoreSearchField, type AnmatRow } from "../src/search/mapping.ts";
+import {
+  mapMfpSearchResults,
+  mergeFoodResults,
+  rankAnmatRows,
+  rankMfpResults,
+  scoreSearchField,
+  type AnmatRow,
+} from "../src/search/mapping.ts";
 import { TestDb } from "./TestDb.ts";
 
 // --- Mock upstreams -------------------------------------------------------------
@@ -193,6 +200,56 @@ describe("search ranking", () => {
       "b",
       "c",
     ]);
+  });
+
+  test("keeps MFP's verified flag only on verified items", () => {
+    const item = (id: number, verified?: boolean) => ({
+      item: { id, version: "v", description: `Food ${id}`, verified, nutritional_contents: { energy: { value: 1 } } },
+    });
+    const foods = mapMfpSearchResults({ items: [item(1, true), item(2, false), item(3)] }, []);
+    expect(foods.map((food) => food.verified)).toEqual([true, undefined, undefined]);
+    expect("verified" in foods[1]!).toBe(false);
+  });
+
+  test("ranks MFP name matches before brand-only matches, verified first", () => {
+    // Shaped like MFP's real "aduki" page: a brand called Aduki floods the top.
+    const food = (name: string, brand: string, verified = false) => ({
+      id: name,
+      canonicalKey: name,
+      source: "mfp" as const,
+      sourceLabel: "MFP" as const,
+      name,
+      brand,
+      ...(verified ? { verified: true as const } : {}),
+    });
+    const page = [
+      food("Aduki", "Aduki bonen"),
+      food("Mansikkahillo", "Aduki"),
+      food("A Aduki Beans", "A Aduki Beans"),
+      food("Riisimuro", "Aduki"),
+      food("Aduki Beans", "Eden", true),
+      food("Kookoshiutale", "Aduki"),
+      food("Organic Aduki Beans", "Eden", true),
+    ];
+    expect(rankMfpResults(page, "aduki").map((f) => `${f.name}/${f.brand}`)).toEqual([
+      "Aduki Beans/Eden",
+      "Organic Aduki Beans/Eden",
+      "Aduki/Aduki bonen",
+      "A Aduki Beans/A Aduki Beans",
+      "Mansikkahillo/Aduki",
+      "Riisimuro/Aduki",
+      "Kookoshiutale/Aduki",
+    ]);
+    // Plurals, accents and a half-typed last word still count as name matches.
+    expect(rankMfpResults([food("Pizza", "x"), food("Adzuki Bean Burger", "y")], "adzuki beans")[0]!.name).toBe(
+      "Adzuki Bean Burger",
+    );
+    expect(rankMfpResults([food("Pan", "x"), food("Lechuga", "y")], "lech")[0]!.name).toBe("Lechuga");
+    expect(rankMfpResults([food("Pan", "x"), food("Jamón cocido", "y")], "jamon")[0]!.name).toBe("Jamón cocido");
+    // Every item in the page is kept.
+    expect(rankMfpResults(page, "").map((f) => f.name)).toEqual(
+      ["Aduki Beans", "Organic Aduki Beans", "Aduki", "Mansikkahillo", "A Aduki Beans", "Riisimuro", "Kookoshiutale"],
+    );
   });
 
   test("builds case-insensitive GLOB patterns like ILIKE", () => {

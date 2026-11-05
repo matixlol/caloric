@@ -192,6 +192,8 @@ struct SearchFood: Codable, Identifiable, Equatable {
     var serving: String?
     var nutrition: Nutrition?
     var resultId: String?
+    /// MyFitnessPal's verified (official) entries; absent for everything else.
+    var verified: Bool? = nil
     var meta: String { [brand, serving].compactMap { $0 }.joined(separator: " • ") }
 }
 struct SearchResponse: Decodable { var foods: [SearchFood]; var hasMore: Bool? }
