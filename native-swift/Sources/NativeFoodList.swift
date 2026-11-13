@@ -67,6 +67,7 @@ struct NativeFoodList: UIViewRepresentable {
     final class Coordinator: NSObject, UITableViewDataSource, UITableViewDelegate {
         var parent: NativeFoodList
         private var heightCache: [String: (FoodRecord, CGFloat, CGFloat)] = [:]
+        @MainActor private static let sizingHost = UIHostingController(rootView: FoodRowContent(row: FoodRecord(id: "", data: FoodEntry(meal: .breakfast, foodName: "", portion: 1, createdAt: 0, dateKey: "", sortIndex: 0), updatedAt: 0)))
         init(parent: NativeFoodList) { self.parent = parent }
         func tableView(_ tableView: UITableView, numberOfRowsInSection section: Int) -> Int { parent.rows.count }
         func tableView(_ tableView: UITableView, cellForRowAt indexPath: IndexPath) -> UITableViewCell {
@@ -102,8 +103,10 @@ struct NativeFoodList: UIViewRepresentable {
         }
         func height(for row: FoodRecord, width: CGFloat) -> CGFloat {
             if let cached = heightCache[row.id], cached.0 == row, cached.1 == width { return cached.2 }
-            let content = UIHostingController(rootView: FoodRowContent(row: row))
-            let height = ceil(content.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height)
+            // One sizing host for every row: creating a hosting controller per row cost ~10 ms each at launch.
+            let sizing = Self.sizingHost
+            sizing.rootView = FoodRowContent(row: row)
+            let height = ceil(sizing.sizeThatFits(in: CGSize(width: width, height: .greatestFiniteMagnitude)).height)
             let result = max(52, height)
             heightCache[row.id] = (row, width, result)
             return result

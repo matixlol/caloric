@@ -50,11 +50,12 @@ final class SocialStore {
     private(set) var day = ""
     @ObservationIgnored private let api: APIClient
     @ObservationIgnored private var dailyGeneration = UUID()
+    @ObservationIgnored private var dailyLoadedAt: Date?
     init(api: APIClient? = nil) { self.api = api ?? APIClient() }
     func activate(userID: String?) {
         guard self.userID != userID else { return }
         self.userID = userID; overview = nil; summaries = []; error = nil; dailyError = nil; day = ""
-        loading = false; loadingDaily = false; pending = false; dailyGeneration = UUID()
+        loading = false; loadingDaily = false; pending = false; dailyGeneration = UUID(); dailyLoadedAt = nil
     }
     func loadOverview() async {
         guard let userID else { return }
@@ -70,10 +71,16 @@ final class SocialStore {
             overview = result; error = nil
         } catch { if self.userID == userID, !Task.isCancelled { self.error = error.localizedDescription } }
     }
+    /// Foreground / reachability refresh: skipped while the same day is loading or was just loaded.
+    func loadDailyIfStale(_ day: String, interval: TimeInterval = 10) async {
+        if self.day == day, loadingDaily || dailyLoadedAt.map({ Date().timeIntervalSince($0) < interval }) == true { return }
+        await loadDaily(day)
+    }
     func loadDaily(_ day: String) async {
         guard let userID else { return }
         let generation = UUID(); dailyGeneration = generation
-        if self.day != day { summaries = [] }; self.day = day
+        // Show the last known totals for this day immediately so the card doesn't pop in and shift the diary.
+        if self.day != day { summaries = cachedSummaries(userID: userID, day: day); dailyLoadedAt = nil }; self.day = day
         loadingDaily = true; dailyError = nil
         defer { if dailyGeneration == generation { loadingDaily = false } }
         if AppConfiguration.uiTesting {
@@ -85,8 +92,20 @@ final class SocialStore {
         do {
             let result: FriendSummaries = try await api.authenticated("social/daily-summaries", userID: userID, query: [URLQueryItem(name: "dateKey", value: day)])
             guard self.userID == userID, dailyGeneration == generation, !Task.isCancelled else { return }
-            summaries = result.summaries
+            if summaries != result.summaries { summaries = result.summaries }
+            dailyLoadedAt = Date()
+            cacheSummaries(result.summaries, userID: userID, day: day)
         } catch { if self.userID == userID, dailyGeneration == generation, !Task.isCancelled { dailyError = error.localizedDescription } }
+    }
+    private struct CachedSummaries: Codable { var day: String; var summaries: [FriendSummary] }
+    private func cachedSummaries(userID: String, day: String) -> [FriendSummary] {
+        guard !AppConfiguration.uiTesting, let data = UserDefaults.standard.data(forKey: "friendSummaries.\(userID)"),
+              let cached = try? JSONDecoder().decode(CachedSummaries.self, from: data), cached.day == day else { return [] }
+        return cached.summaries
+    }
+    private func cacheSummaries(_ summaries: [FriendSummary], userID: String, day: String) {
+        guard !AppConfiguration.uiTesting, let data = try? JSONEncoder().encode(CachedSummaries(day: day, summaries: summaries)) else { return }
+        UserDefaults.standard.set(data, forKey: "friendSummaries.\(userID)")
     }
     func mutate(_ path: String, values: [String: String] = [:], method: String = "POST") async {
         guard let userID, !pending else { return }

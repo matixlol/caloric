@@ -142,7 +142,7 @@ struct UserSettings: Codable, Equatable {
     }
 }
 
-struct SettingsRecord: Codable {
+struct SettingsRecord: Codable, Equatable {
     var id = "settings"
     var data: UserSettings
     var updatedAt: Int64

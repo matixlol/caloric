@@ -168,7 +168,8 @@ final class NativeAuth {
             throw APIError.signedOut
         }
         let cookie = AuthCookie.sessionCookie(from: response) ?? original.cookie
-        try save(AuthCredential(user: result.user, cookie: cookie))
+        let refreshed = AuthCredential(user: result.user, cookie: cookie)
+        if refreshed != original { try save(refreshed) } // Keychain writes are synchronous IPC
         error = nil
     }
 

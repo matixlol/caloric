@@ -10,7 +10,7 @@ struct AILogView: View {
     var body: some View {
         AssistantView(chat: chat, voice: voice, isPresented: isPresented)
             .onChange(of: store.userID, initial: true) { _, id in
-                chat.reset(accountID: id); _ = voice.stop(cancelled: true)
+                chat.reset(accountID: id); voice.stop(cancelled: true)
                 #if DEBUG
                 if AppConfiguration.uiTesting, id != nil, ProcessInfo.processInfo.arguments.contains("-seed-chat") {
                     chat.messages = AssistantDemo.conversation()
@@ -20,8 +20,8 @@ struct AILogView: View {
                 }
                 #endif
             }
-            .onChange(of: isPresented) { _, presented in if !presented { _ = voice.stop(cancelled: true) } }
+            .onChange(of: isPresented) { _, presented in if !presented { voice.stop(cancelled: true) } }
             .onChange(of: scenePhase) { _, phase in chat.setForeground(phase == .active) }
-            .onDisappear { _ = voice.stop(cancelled: true) }
+            .onDisappear { voice.stop(cancelled: true) }
     }
 }

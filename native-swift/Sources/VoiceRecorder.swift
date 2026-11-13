@@ -20,6 +20,9 @@ final class VoiceRecorder {
     var duration: String { String(format: "%d:%02d", seconds / 60, seconds % 60) }
 
     init() {
+        // Load the audio session category and AAC encoder ahead of the first hold, off the main thread.
+        // SwiftUI may build throwaway @State initial values; the static runs once per process.
+        audioQueue.asyncAfter(deadline: .now() + 1) { _ = Self.prewarmed }
         interruptionObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: .main) { [weak self] notification in
             guard let type = notification.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
                   type == AVAudioSession.InterruptionType.began.rawValue else { return }
@@ -71,21 +74,31 @@ final class VoiceRecorder {
         guard startID == id else { return }
         guard granted else { error = "Allow microphone access in Settings to log food with voice."; return }
         do {
-            // Audio-route activation can be slow, especially with Bluetooth. Keep
-            // touch feedback and lock/cancel gestures responsive while it finishes.
+            // Audio-route activation and starting the audio queue can each take hundreds of
+            // milliseconds (more with Bluetooth). Do both off the main thread so touch feedback,
+            // animations and lock/cancel gestures stay responsive.
             let prepared: AVAudioRecorder = try await withCheckedThrowingContinuation { continuation in
                 audioQueue.async {
-                    do { continuation.resume(returning: try Self.prepareRecorder()) }
-                    catch { continuation.resume(throwing: error) }
+                    do {
+                        let recorder = try Self.prepareRecorder()
+                        guard recorder.record() else {
+                            try? FileManager.default.removeItem(at: recorder.url)
+                            throw URLError(.cannotCreateFile)
+                        }
+                        continuation.resume(returning: recorder)
+                    } catch { continuation.resume(throwing: error) }
                 }
             }
             guard startID == id else {
-                audioQueue.async { prepared.stop(); try? FileManager.default.removeItem(at: prepared.url) }
+                audioQueue.async {
+                    prepared.stop(); try? FileManager.default.removeItem(at: prepared.url)
+                    try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+                }
                 return
             }
             recorder = prepared
-            guard prepared.record() else { throw URLError(.cannotCreateFile) }
             recording = true; starting = false; seconds = 0; levels = Array(repeating: 0.08, count: 18); error = nil
+            PerformanceLog.mark("voice recording")
             timer = Task { [weak self] in
                 while !Task.isCancelled {
                     do { try await Task.sleep(for: .milliseconds(65)) } catch { return }
@@ -103,32 +116,48 @@ final class VoiceRecorder {
             self.error = "Could not start recording. \(error.localizedDescription)"
         }
     }
-    nonisolated private static func prepareRecorder() throws -> AVAudioRecorder {
+    nonisolated private static let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
+    /// Setting the category does not activate the session, so other apps' audio is untouched until recording.
+    nonisolated private static func configureCategory() throws {
         let session = AVAudioSession.sharedInstance()
+        guard session.category != .playAndRecord || session.mode != .default || session.categoryOptions != [.defaultToSpeaker, .allowBluetoothHFP] else { return }
         try session.setCategory(.playAndRecord, mode: .default, options: [.defaultToSpeaker, .allowBluetoothHFP])
-        try session.setActive(true)
+    }
+    nonisolated private static let prewarmed: Void = {
+        try? configureCategory()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("caloric-prewarm-\(UUID().uuidString).m4a")
+        _ = try? AVAudioRecorder(url: url, settings: settings)
+        try? FileManager.default.removeItem(at: url)
+    }()
+    nonisolated private static func prepareRecorder() throws -> AVAudioRecorder {
+        try configureCategory()
+        try AVAudioSession.sharedInstance().setActive(true)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("caloric-\(UUID().uuidString).m4a")
         do {
-            let recorder = try AVAudioRecorder(url: url, settings: [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue])
+            let recorder = try AVAudioRecorder(url: url, settings: settings)
             recorder.isMeteringEnabled = true
             guard recorder.prepareToRecord() else { throw URLError(.cannotCreateFile) }
             return recorder
         } catch { try? FileManager.default.removeItem(at: url); throw error }
     }
-    func stop(cancelled: Bool = false) -> URL? {
+    /// Stops on the audio queue (finalizing the file can block); `completion` receives a finished
+    /// recording on the main actor. Cancelled or too-short recordings are deleted.
+    func stop(cancelled: Bool = false, completion: (@MainActor (URL) -> Void)? = nil) {
         startID = nil; starting = false; timer?.cancel(); timer = nil
-        let url = recorder?.url
-        let elapsed = recorder?.currentTime ?? 0
-        recorder?.stop(); recorder = nil; recording = false
+        let active = recorder
+        let elapsed = active?.currentTime ?? 0
+        recorder = nil; recording = false
         #if DEBUG
         simulatedStart = nil
         #endif
-        audioQueue.async { try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation) }
-        if cancelled || elapsed < 0.4, let url {
-            try? FileManager.default.removeItem(at: url)
-            if !cancelled { error = "Hold the microphone while speaking, then release to send." }
-            return nil
+        let keep = active != nil && !cancelled && elapsed >= 0.4
+        if active != nil, !cancelled, !keep { error = "Hold the microphone while speaking, then release to send." }
+        audioQueue.async {
+            active?.stop()
+            try? AVAudioSession.sharedInstance().setActive(false, options: .notifyOthersOnDeactivation)
+            guard let url = active?.url else { return }
+            guard keep, let completion else { try? FileManager.default.removeItem(at: url); return }
+            Task { @MainActor in completion(url) }
         }
-        return url
     }
 }

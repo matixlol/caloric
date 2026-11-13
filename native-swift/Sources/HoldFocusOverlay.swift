@@ -1,6 +1,6 @@
 import SwiftUI
 
-private struct HoldFocusRegion {
+private struct HoldFocusRegion: Equatable {
     let bounds: Anchor<CGRect>
     let cornerRadius: CGFloat
 }

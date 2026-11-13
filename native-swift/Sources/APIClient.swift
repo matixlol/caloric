@@ -45,7 +45,7 @@ final class APIClient: SyncAPI {
     func send<T: Decodable>(_ request: URLRequest, as: T.Type = T.self) async throws -> T {
         let (data, response) = try await session.data(for: request)
         try Self.validate(response, data: data)
-        do { return try JSONDecoder().decode(T.self, from: data) }
+        do { return try await Self.decode(T.self, from: data) }
         catch let error as DecodingError {
             let path: [CodingKey]
             switch error {
@@ -55,6 +55,10 @@ final class APIClient: SyncAPI {
             }
             throw APIError.invalidResponse(path.isEmpty ? "response" : path.map(\.stringValue).joined(separator: "."))
         }
+    }
+    /// Large payloads (the whole diary on bootstrap) decode off the main thread.
+    nonisolated private static func decode<T: Decodable>(_ type: T.Type, from data: Data) async throws -> T {
+        try JSONDecoder().decode(type, from: data)
     }
     func reauthenticate(_ request: URLRequest, userID: String?) async throws -> URLRequest {
         var refreshed = request

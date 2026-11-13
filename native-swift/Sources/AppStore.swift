@@ -3,7 +3,7 @@ import Observation
 
 @MainActor @Observable
 final class AppStore {
-    private(set) var records: [FoodRecord] = []
+    private(set) var records: [FoodRecord] = [] { didSet { entryIndex = nil } }
     private(set) var recipeRecords: [RecipeRecord] = []
     private(set) var settingsRecord = SettingsRecord(data: UserSettings(), updatedAt: 0)
     private(set) var userID: String?
@@ -20,6 +20,8 @@ final class AppStore {
     @ObservationIgnored private var syncQueued = false
     @ObservationIgnored private var retryAttempt = 0
     @ObservationIgnored private let retryDelays: [Duration]
+    /// Active entries sorted once per change, grouped by day; rebuilt lazily after `records` changes.
+    @ObservationIgnored private var entryIndex: EntryIndex?
 
     init(api: (any SyncAPI)? = nil, directory: URL? = nil, syncEnabled: Bool = true,
          retryDelays: [Duration] = [.seconds(1), .seconds(3), .seconds(10)]) {
@@ -31,25 +33,30 @@ final class AppStore {
             : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CaloricSwift"))
     }
     var settings: UserSettings { settingsRecord.data }
-    var entries: [FoodRecord] {
-        records.filter { $0.deletedAt == nil }.sorted {
-            $0.data.createdAt == $1.data.createdAt ? $0.id > $1.id : $0.data.createdAt > $1.data.createdAt
-        }
+    var entries: [FoodRecord] { index.active }
+    private var index: EntryIndex {
+        let records = self.records // registers observation of the source rows
+        if let entryIndex { return entryIndex }
+        let built = EntryIndex(records)
+        entryIndex = built
+        return built
     }
     var recipes: [RecipeRecord] { recipeRecords.filter { $0.deletedAt == nil }.sorted { $0.data.name.localizedCaseInsensitiveCompare($1.data.name) == .orderedAscending } }
     var dirty: Bool { settingsRecord.dirty || records.contains(where: \.dirty) || recipeRecords.contains(where: \.dirty) }
     func entries(on day: String, meal: Meal? = nil) -> [FoodRecord] {
-        entries.filter { $0.data.dateKey == day && (meal == nil || $0.data.meal == meal) }.sorted {
-            $0.data.sortIndex == $1.data.sortIndex ? $0.data.createdAt < $1.data.createdAt : $0.data.sortIndex < $1.data.sortIndex
-        }
+        let rows = index.byDay[day] ?? []
+        guard let meal else { return rows }
+        return rows.filter { $0.data.meal == meal }
     }
     func activate(userID: String?) async {
         syncTask?.cancel()
         retryAttempt = 0
+        let previous = self.userID
         self.userID = userID
         records = []; recipeRecords = []; settingsRecord = SettingsRecord(data: UserSettings(), updatedAt: 0)
         database = nil; ready = false; lastSyncedAt = nil; error = nil; syncError = nil
-        WidgetSnapshot.clear()
+        // A fresh launch rewrites the same account's widget right after loading; only clear another account's data.
+        if userID == nil || (previous != nil && previous != userID) { WidgetSnapshot.clear() }
         guard let userID else { return }
         do {
             let filename = userID.utf8.map { String(format: "%02x", $0) }.joined()
@@ -58,10 +65,14 @@ final class AppStore {
             recipeRecords = try database!.loadRecipes()
             settingsRecord = try database!.loadSettings() ?? settingsRecord
             ready = true
+            PerformanceLog.mark("local diary loaded")
             updateWidget()
             if syncEnabled && !AppConfiguration.uiTesting { await synchronize() }
             await ensureBackup()
-        } catch { self.error = "Could not load your local data. \(error.localizedDescription)" }
+        } catch {
+            WidgetSnapshot.clear()
+            self.error = "Could not load your local data. \(error.localizedDescription)"
+        }
     }
     @discardableResult
     func add(food: SearchFood, meal: Meal, day: String = LocalDay.key(), portion: Double = 1) throws -> FoodRecord {
@@ -237,20 +248,33 @@ final class AppStore {
             }
         }
         let removedRecipes = recipeRecords.filter { row in !nextRecipes.contains { $0.id == row.id } }
+        // Usually nothing changed: write and publish only the differences (no full rewrite per sync).
+        let changed = Self.changes(from: records, to: next)
+        let changedRecipes = Self.changes(from: recipeRecords, to: nextRecipes)
+        let settingsChanged = nextSettings != settingsRecord
+        guard !removed.isEmpty || !changed.isEmpty || !removedRecipes.isEmpty || !changedRecipes.isEmpty || settingsChanged else { return }
         try database.transaction {
             for row in removed {
                 var tombstone = row; tombstone.deletedAt = max(LocalDay.milliseconds(), row.updatedAt)
                 try database.save(tombstone)
             }
-            for row in next { try database.save(row) }
+            for row in changed { try database.save(row) }
             for row in removedRecipes {
                 var tombstone = row; tombstone.deletedAt = max(LocalDay.milliseconds(), row.updatedAt)
                 try database.save(tombstone)
             }
-            for row in nextRecipes { try database.save(row) }
-            try database.save(nextSettings)
+            for row in changedRecipes { try database.save(row) }
+            if settingsChanged { try database.save(nextSettings) }
         }
-        records = next; recipeRecords = nextRecipes; settingsRecord = nextSettings; updateWidget()
+        if records != next { records = next }
+        if recipeRecords != nextRecipes { recipeRecords = nextRecipes }
+        if settingsChanged { settingsRecord = nextSettings }
+        updateWidget()
+    }
+    /// Rows in `next` that are new or differ from `current`.
+    private static func changes<Row: Identifiable & Equatable>(from current: [Row], to next: [Row]) -> [Row] where Row.ID == String {
+        let existing = Dictionary(current.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
+        return next.filter { existing[$0.id] != $0 }
     }
     func acknowledge(_ sent: PushRequest, response: PushResponse) throws {
         guard let database else { return }
@@ -264,12 +288,19 @@ final class AppStore {
         for row in sent.recipes where response.acceptedRecipeIds.contains(row.id) {
             if let i = nextRecipes.firstIndex(where: { $0.id == row.id && $0.updatedAt == row.updatedAt }) { nextRecipes[i].dirty = false }
         }
+        let changed = Self.changes(from: records, to: next)
+        let changedRecipes = Self.changes(from: recipeRecords, to: nextRecipes)
+        let settingsChanged = nextSettings != settingsRecord
+        guard !changed.isEmpty || !changedRecipes.isEmpty || settingsChanged else { return }
         try database.transaction {
-            for row in next { try database.save(row) }
-            for row in nextRecipes { try database.save(row) }
-            try database.save(nextSettings)
+            for row in changed { try database.save(row) }
+            for row in changedRecipes { try database.save(row) }
+            if settingsChanged { try database.save(nextSettings) }
         }
-        records = next; recipeRecords = nextRecipes; settingsRecord = nextSettings; updateWidget()
+        if !changed.isEmpty { records = next }
+        if !changedRecipes.isEmpty { recipeRecords = nextRecipes }
+        if settingsChanged { settingsRecord = nextSettings }
+        updateWidget()
     }
     func synchronize() async {
         guard syncEnabled, let activeID = userID, ready, !AppConfiguration.uiTesting else { return }
@@ -277,7 +308,8 @@ final class AppStore {
         isSyncing = true
         defer {
             isSyncing = false
-            if syncQueued { syncQueued = false; scheduleSync() }
+            // The finished sync already served foreground / reachability requests; only edits made meanwhile need another.
+            if syncQueued { syncQueued = false; if dirty { scheduleSync() } }
         }
         do {
             var uploadError: Error?
@@ -303,11 +335,18 @@ final class AppStore {
             }
             else if dirty { syncError = "Some local changes were not accepted by the server." }
             else { syncError = nil; lastSyncedAt = Date(); retryAttempt = 0 }
+            PerformanceLog.mark("sync finished")
             await ensureBackup()
         } catch {
             // Offline edits remain durable and pending; foreground/reachability retries them.
             if userID == activeID, !Task.isCancelled { syncError = "Could not sync. \(error.localizedDescription)"; retrySync(after: error) }
         }
+    }
+    /// Foreground / reachability refresh: skipped while a sync is running or just finished, unless edits are pending.
+    func synchronizeIfStale(_ interval: TimeInterval = 10) async {
+        if isSyncing { return }
+        if !dirty, let lastSyncedAt, Date().timeIntervalSince(lastSyncedAt) < interval { return }
+        await synchronize()
     }
     func ensureBackup() async {
         guard let userID, ready, !AppConfiguration.uiTesting else { return }
@@ -317,5 +356,19 @@ final class AppStore {
     func updateWidget() {
         guard ready, userID != nil, !AppConfiguration.uiTesting else { return }
         WidgetSnapshot.write(nutrition: Nutrition.total(entries(on: LocalDay.key())), settings: settings)
+    }
+}
+
+/// Active entries sorted newest first, and per-day lists in diary order.
+private struct EntryIndex {
+    let active: [FoodRecord]
+    let byDay: [String: [FoodRecord]]
+    init(_ records: [FoodRecord]) {
+        active = records.filter { $0.deletedAt == nil }.sorted {
+            $0.data.createdAt == $1.data.createdAt ? $0.id > $1.id : $0.data.createdAt > $1.data.createdAt
+        }
+        byDay = Dictionary(grouping: active, by: \.data.dateKey).mapValues { rows in
+            rows.sorted { $0.data.sortIndex == $1.data.sortIndex ? $0.data.createdAt < $1.data.createdAt : $0.data.sortIndex < $1.data.sortIndex }
+        }
     }
 }

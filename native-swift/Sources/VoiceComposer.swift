@@ -22,6 +22,8 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
     @State private var locked = false
     @State private var lockProgress: CGFloat = 0
     @State private var cancelProgress: CGFloat = 0
+    @State private var touchHaptic = UIImpactFeedbackGenerator(style: .light)
+    @State private var lockHaptic = UINotificationFeedbackGenerator()
     private var active: Bool { holding || voice.recording || voice.starting }
     private var hasText: Bool { !input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     private var cancelling: Bool { cancelProgress >= 1 && !locked }
@@ -73,6 +75,7 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
             }
             .onChange(of: voice.starting) { _, starting in if !starting && !voice.recording { reset() } }
             .onChange(of: scenePhase) { _, phase in if phase != .active { finish(cancelled: true) } }
+            .onAppear { touchHaptic.prepare() }
             .onDisappear { finish(cancelled: true) }
     }
 
@@ -89,15 +92,9 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
                 Text(!voice.recording ? "Preparing microphone…" : cancelling ? "Cancelling" : locked ? "Recording locked" : "Recording")
                     .font(.system(size: 12, weight: .semibold)).lineLimit(1)
                 Spacer(minLength: 0)
-                Text(voice.duration).font(.system(size: 14, weight: .semibold)).monospacedDigit()
-                    .accessibilityLabel("Recording duration \(voice.duration)")
+                RecordingDuration(voice: voice)
             }
-            HStack(spacing: 3) {
-                ForEach(voice.levels.indices, id: \.self) { index in
-                    Capsule().fill(cancelling ? Color.secondary : Theme.tint)
-                        .frame(maxWidth: .infinity).frame(height: 5 + voice.levels[index] * 27)
-                }
-            }.frame(height: 32).animation(reduceMotion ? nil : .linear(duration: 0.065), value: voice.levels).accessibilityHidden(true)
+            RecordingLevels(voice: voice, cancelling: cancelling)
             if locked {
                 HStack {
                     Button { finish(cancelled: true) } label: { Label("Discard", systemImage: "trash") }
@@ -182,8 +179,10 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
 
     private func beginRecording() {
         guard !disabled, !locked, !active else { return }
+        PerformanceLog.mark("voice touch down")
         holding = true; focus.wrappedValue = false; cancelProgress = 0; lockProgress = 0
-        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+        touchHaptic.impactOccurred(); touchHaptic.prepare()
+        lockHaptic.prepare()
         Task { guard holding || locked else { return }; await voice.start() }
     }
     private func moveRecording(_ translation: CGSize) {
@@ -194,13 +193,14 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
             finish(cancelled: true)
         } else if lockProgress >= 1 {
             locked = true; holding = false; cancelProgress = 0
-            UINotificationFeedbackGenerator().notificationOccurred(.success)
+            lockHaptic.notificationOccurred(.success)
         }
     }
 
     private func finish(cancelled: Bool) {
         let duration = voice.duration
-        if let audio = voice.stop(cancelled: cancelled) { sendVoice(audio, duration) }
+        let send = sendVoice
+        voice.stop(cancelled: cancelled) { audio in send(audio, duration) }
         reset()
     }
     private func reset() { holding = false; locked = false; cancelProgress = 0; lockProgress = 0 }
@@ -211,5 +211,29 @@ extension VoiceComposer where Leading == EmptyView, Accessory == EmptyView {
          sendText: @escaping () -> Void, sendVoice: @escaping (URL, String) -> Void, glassNamespace: Namespace.ID) {
         self.init(input: input, voice: voice, focus: focus, disabled: disabled, sendText: sendText, sendVoice: sendVoice,
                   glassNamespace: glassNamespace, leading: { EmptyView() }, accessory: { EmptyView() })
+    }
+}
+
+/// The meter updates ~15 times a second; only these small views observe it, so the composer,
+/// its glass and the screen-wide hold-focus overlay are not re-evaluated on every level change.
+private struct RecordingDuration: View {
+    let voice: VoiceRecorder
+    var body: some View {
+        Text(voice.duration).font(.system(size: 14, weight: .semibold)).monospacedDigit()
+            .accessibilityLabel("Recording duration \(voice.duration)")
+    }
+}
+
+private struct RecordingLevels: View {
+    let voice: VoiceRecorder
+    let cancelling: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    var body: some View {
+        HStack(spacing: 3) {
+            ForEach(voice.levels.indices, id: \.self) { index in
+                Capsule().fill(cancelling ? Color.secondary : Theme.tint)
+                    .frame(maxWidth: .infinity).frame(height: 5 + voice.levels[index] * 27)
+            }
+        }.frame(height: 32).animation(reduceMotion ? nil : .linear(duration: 0.065), value: voice.levels).accessibilityHidden(true)
     }
 }

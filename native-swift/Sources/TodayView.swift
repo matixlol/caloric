@@ -79,7 +79,7 @@ struct TodayView: View {
                     }
                 }.allowsHitTesting(false)
             }
-            .onAppear { visible = true }
+            .onAppear { visible = true; PerformanceLog.markOnce("diary visible") }
             .onDisappear { visible = false; drag = nil; mealAdd = nil }
             .onChange(of: day) { _, _ in drag = nil; mealAdd = nil }
             .task(id: day) { await social.loadDaily(day) }

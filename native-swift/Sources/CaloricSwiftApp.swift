@@ -22,9 +22,9 @@ struct RootView: View {
     private var activeID: String? { AppConfiguration.uiTesting ? "ui-test-user" : auth.user?.id }
     var body: some View {
         Group {
-            if !AppConfiguration.uiTesting && !auth.isLoaded {
-                ProgressView()
-            } else if AppConfiguration.uiTesting || auth.user != nil {
+            // A signed-in account opens straight to its local diary; the session is revalidated in the
+            // background (an invalid session signs out, a network failure keeps the cached account).
+            if AppConfiguration.uiTesting || auth.user != nil {
                 if store.ready {
                     TodayView()
                 } else if let error = store.error {
@@ -32,6 +32,8 @@ struct RootView: View {
                         Button("Retry") { Task { await store.activate(userID: activeID) } }
                     }
                 } else { ProgressView() }
+            } else if !auth.isLoaded {
+                ProgressView()
             } else {
                 SignInView()
             }
@@ -59,14 +61,15 @@ struct RootView: View {
                 #endif
             }
             .onChange(of: scenePhase) { _, phase in
-                if phase == .active { Task { await auth.refreshOnResume(); await store.synchronize(); store.updateWidget(); await store.ensureBackup(); await social.loadDaily(social.day.isEmpty ? LocalDay.key() : social.day) } }
+                if phase == .active { Task { await auth.refreshOnResume(); await store.synchronizeIfStale(); store.updateWidget(); await store.ensureBackup(); await social.loadDailyIfStale(social.day.isEmpty ? LocalDay.key() : social.day) } }
             }
             .task {
-                if !AppConfiguration.uiTesting { await auth.restore() }
+                MainThreadHitchMonitor.shared.startIfRequested()
+                if !AppConfiguration.uiTesting { await auth.restore(); PerformanceLog.mark("session restored") }
                 let monitor = NWPathMonitor()
                 networkMonitor = monitor
                 monitor.pathUpdateHandler = { path in
-                    if path.status == .satisfied { Task { @MainActor in await store.synchronize(); await social.loadDaily(social.day.isEmpty ? LocalDay.key() : social.day) } }
+                    if path.status == .satisfied { Task { @MainActor in await store.synchronizeIfStale(); await social.loadDailyIfStale(social.day.isEmpty ? LocalDay.key() : social.day) } }
                 }
                 monitor.start(queue: DispatchQueue(label: "caloric.reachability"))
             }.onDisappear { networkMonitor?.cancel() }

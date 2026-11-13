@@ -75,7 +75,8 @@ struct DroppedImage: Transferable {
 struct CameraPicker: UIViewControllerRepresentable {
     let captured: (UIImage) -> Void
     @Environment(\.dismiss) private var dismiss
-    static var isAvailable: Bool { UIImagePickerController.isSourceTypeAvailable(.camera) }
+    /// Queried once: the check is IPC and the menu is rebuilt on every composer update.
+    static let isAvailable = UIImagePickerController.isSourceTypeAvailable(.camera)
     func makeUIViewController(context: Context) -> UIImagePickerController {
         let picker = UIImagePickerController()
         picker.sourceType = .camera

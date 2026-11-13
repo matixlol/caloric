@@ -257,6 +257,8 @@ private struct AssistantComposerBar: View {
     let sendText: () -> Void
     let sendVoice: (URL, String) -> Void
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// `hasImages` asks the pasteboard server; refresh it on change / foreground instead of on every render.
+    @State private var pasteboardHasImages = false
 
     var body: some View {
         VoiceComposer(input: $draft.input, voice: voice, focus: focus, disabled: chat.streaming, sendText: sendText, sendVoice: sendVoice,
@@ -289,6 +291,9 @@ private struct AssistantComposerBar: View {
             }
         }
         .animation(reduceMotion ? nil : .spring(response: 0.3, dampingFraction: 0.85), value: draft.attachments.count + draft.loading)
+        .task { pasteboardHasImages = UIPasteboard.general.hasImages }
+        .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in pasteboardHasImages = UIPasteboard.general.hasImages }
+        .onReceive(NotificationCenter.default.publisher(for: UIApplication.didBecomeActiveNotification)) { _ in pasteboardHasImages = UIPasteboard.general.hasImages }
     }
 
     private var attachButton: some View {
@@ -297,7 +302,7 @@ private struct AssistantComposerBar: View {
             if CameraPicker.isAvailable {
                 Button { draft.showCamera = true } label: { Label("Take Photo", systemImage: "camera") }
             }
-            if UIPasteboard.general.hasImages {
+            if pasteboardHasImages {
                 Button { draft.paste() } label: { Label("Paste Photo", systemImage: "doc.on.clipboard") }
             }
         } label: {
