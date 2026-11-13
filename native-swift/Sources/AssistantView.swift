@@ -309,7 +309,7 @@ private struct AssistantComposerBar: View {
             Image(systemName: "plus").font(.system(size: 20, weight: .semibold)).foregroundStyle(.primary)
                 .frame(width: 48, height: 48)
                 .caloricGlass(in: Circle(), interactive: true)
-                .glassIdentity("composer-attach", in: glassNamespace)
+                .glassIdentity("composer-attach", in: glassNamespace).glassMaterializes()
         }
         .menuOrder(.fixed)
         .disabled(draft.isFull)

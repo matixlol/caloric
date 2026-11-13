@@ -97,6 +97,11 @@ extension View {
         if #available(iOS 26, *) { glassEffect(.regular.tint(tint).interactive(interactive), in: shape) }
         else { background(.regularMaterial, in: shape) }
     }
+    /// Fade this glass in / out on its own instead of merging into a neighbouring glass shape.
+    @ViewBuilder func glassMaterializes() -> some View {
+        if #available(iOS 26, *) { glassEffectTransition(.materialize) }
+        else { self }
+    }
     @ViewBuilder func glassIdentity(_ id: String, in namespace: Namespace.ID) -> some View {
         if #available(iOS 26, *) { glassEffectID(id, in: namespace) }
         else { self }

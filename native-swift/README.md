@@ -67,4 +67,6 @@ Build 25 marks MyFitnessPal-verified foods with a seal after the name, and Voice
 
 Build 26 opens straight to the saved diary instead of waiting for the server to confirm the session, runs one sync per launch instead of two, and removes the main-thread stalls after syncing and on the first frame. Voice recording starts and stops off the main thread, with the audio setup loaded ahead of the first press. See [PERFORMANCE.md](PERFORMANCE.md).
 
+Build 27 fixes the voice-note start animation: the text field's glass now morphs straight into the recording card (no oversized glass shape or sliding content), the photo button and lock indicator fade on their own, and the card starts at 0:00 with a flat waveform instead of showing the previous note.
+
 The widget uses App Group `group.lol.mati.caloric.swift` and bundle ID `lol.mati.caloric.swift.CaloricWidget`. Daily backups use the separate `iCloud.lol.mati.caloric.swift` CloudDocuments container. Camera, microphone and iCloud behavior require verification on a device; simulator tests cover manual barcode entry and synthetic voice gestures. Native app updates ship through TestFlight.

@@ -41,6 +41,7 @@ final class VoiceRecorder {
 
     func start() async {
         guard !recording, startID == nil else { return }
+        resetMeter()
         let id = UUID(); startID = id; starting = true; error = nil
         defer { if startID == id { startID = nil; starting = false } }
         #if DEBUG
@@ -115,6 +116,11 @@ final class VoiceRecorder {
             _ = stop(cancelled: true)
             self.error = "Could not start recording. \(error.localizedDescription)"
         }
+    }
+    /// Called on touch down, before the recording card appears, so it never shows the previous note.
+    func resetMeter() {
+        guard !recording, startID == nil else { return }
+        seconds = 0; levels = Array(repeating: 0.08, count: 18)
     }
     nonisolated private static let settings: [String: Any] = [AVFormatIDKey: kAudioFormatMPEG4AAC, AVSampleRateKey: 44100, AVNumberOfChannelsKey: 1, AVEncoderAudioQualityKey: AVAudioQuality.high.rawValue]
     /// Setting the category does not activate the session, so other apps' audio is untouched until recording.

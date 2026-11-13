@@ -32,8 +32,8 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
         VStack(spacing: 8) {
             accessory()
             HStack(alignment: .bottom, spacing: 10) {
-                if !active { leading() }
-                if active { recordingCard.transition(.opacity.combined(with: .move(edge: .bottom))) }
+                if !active { leading().glassMaterializes().transition(.opacity) }
+                if active { recordingCard.transition(.opacity) }
                 else if let openField { fieldButton(openField) }
                 else {
                     TextField(placeholder, text: $input, axis: .vertical)
@@ -133,10 +133,10 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
                         }
                         Image(systemName: "chevron.up").font(.system(size: 11, weight: .bold))
                     }.foregroundStyle(.red).frame(width: 54).padding(.vertical, 8)
-                        .caloricGlass(in: Capsule()).glassIdentity("voice-lock", in: glassNamespace)
+                        .caloricGlass(in: Capsule()).glassMaterializes()
                         .holdFocus(cornerRadius: 27)
                         .offset(y: -68).allowsHitTesting(false)
-                        .transition(.opacity.combined(with: .scale)).accessibilityHidden(true)
+                        .transition(.opacity.combined(with: .offset(y: 16))).accessibilityHidden(true)
                 }
             }
             .overlay {
@@ -180,6 +180,7 @@ struct VoiceComposer<Leading: View, Accessory: View>: View {
     private func beginRecording() {
         guard !disabled, !locked, !active else { return }
         PerformanceLog.mark("voice touch down")
+        voice.resetMeter()
         holding = true; focus.wrappedValue = false; cancelProgress = 0; lockProgress = 0
         touchHaptic.impactOccurred(); touchHaptic.prepare()
         lockHaptic.prepare()
