@@ -158,8 +158,8 @@ export class AudioTooLarge extends Data.TaggedError("AudioTooLarge")<{ readonly 
 export const validateAudio = (file: UploadedFile) =>
   file.bytes.byteLength > maxAudioBytes ? Effect.fail(new AudioTooLarge({ bytes: file.bytes.byteLength })) : Effect.void;
 
-// The upload's own type, used when transcoding fails (backend/ did the same).
-export const fallbackAudioMediaType = (file: UploadedFile) => {
-  const type = file.contentType.trim().toLowerCase();
+// The upload's own type, used when transcoding fails.
+export const fallbackAudioMediaType = (contentType: string) => {
+  const type = contentType.trim().toLowerCase();
   return type.startsWith("audio/") ? type : "audio/mp4";
 };

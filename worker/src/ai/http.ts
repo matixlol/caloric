@@ -12,23 +12,15 @@ import * as HttpApiBuilder from "effect/http-api/HttpApiBuilder";
 import { Api } from "../api/Api.ts";
 import { CurrentUser } from "../api/Authentication.ts";
 import { UpstreamFailure } from "../api/Errors.ts";
-import { AudioTranscoder } from "../audio/AudioTranscoder.ts";
 import { Auth, currentUserId as sessionUserId } from "../auth/Auth.ts";
 import { aiSessionId } from "../ids.ts";
 import { systemMessage, systemPrompt } from "./Agent.ts";
-import type { UserMessagePart } from "./Domain.ts";
+import type { ImagePart } from "./Domain.ts";
 import { buildRecentLogContextPrompt, parseRecentLogHints } from "./RecentLogContext.ts";
 import { AiSessionObject, AiSessionObjectLive } from "./SessionObject.ts";
 import { AiSessionStore } from "./SessionStore.ts";
 import { makeTurnId, sessionIdOfTurn } from "./TurnId.ts";
-import {
-  fallbackAudioMediaType,
-  parseTurnRequest,
-  TurnRejected,
-  type UploadedFile,
-  validateAudio,
-  validateImage,
-} from "./TurnRequest.ts";
+import { parseTurnRequest, TurnRejected, validateAudio, validateImage } from "./TurnRequest.ts";
 
 // --- POST /ai/session (HttpApi) ---------------------------------------------
 
@@ -83,7 +75,6 @@ export const AiRoutes = HttpRouter.use(
   Effect.fnUntraced(function* (router) {
     const auth = yield* Auth;
     const store = yield* AiSessionStore;
-    const transcoder = yield* AudioTranscoder;
     const sessions = yield* AiSessionObject;
 
     const currentUserId = Effect.fnUntraced(function* (request: HttpServerRequest.HttpServerRequest) {
@@ -95,19 +86,6 @@ export const AiRoutes = HttpRouter.use(
       );
       if (!userId) return yield* unauthorized();
       return userId;
-    });
-
-    // Several audio-native models only accept WAV/MP3/FLAC, so phones keep
-    // uploading compact m4a and the container decodes it. If that fails the
-    // original upload is sent as-is.
-    const encodeAudio = Effect.fnUntraced(function* (file: UploadedFile) {
-      yield* validateAudio(file);
-      const wav = yield* transcoder.toWav(file.bytes, file.contentType).pipe(
-        Effect.map((bytes) => ({ mediaType: "audio/wav", base64: Base64.encode(bytes) })),
-        Effect.tapCause((cause) => Effect.logError("ai_audio_decode_failed", cause)),
-        Effect.orElseSucceed(() => ({ mediaType: fallbackAudioMediaType(file), base64: Base64.encode(file.bytes) })),
-      );
-      return { type: "audio", ...wav, ...(file.name ? { fileName: file.name } : {}) } satisfies UserMessagePart;
     });
 
     const postTurn = Effect.gen(function* () {
@@ -135,18 +113,19 @@ export const AiRoutes = HttpRouter.use(
         if (!message && !audio && images.length === 0) {
           return yield* new TurnRejected({ status: 400, body: { error: "action.message, audio, or a photo is required" } });
         }
-        const media: Array<UserMessagePart> = [];
+        const parts: Array<ImagePart> = [];
         for (const image of images) {
           const mediaType = yield* validateImage(image);
-          media.push({ type: "image", mediaType, dataUrl: toDataUrl(mediaType, image.bytes) });
+          parts.push({ mediaType, dataUrl: toDataUrl(mediaType, image.bytes) });
         }
-        if (audio) media.push(yield* encodeAudio(audio));
-        return media;
+        // Decoded later, inside the turn (see Domain.ts, VoiceNote).
+        if (audio) yield* validateAudio(audio);
+        return parts;
       });
       const [found, prepared] = yield* Effect.all([owned, Effect.result(prepareMedia)], { concurrency: "unbounded" });
       if (!found) return yield* sessionNotFound();
       if (Result.isFailure(prepared)) return yield* Effect.fail(prepared.failure);
-      const media = prepared.success;
+      const voiceNote = audio && { contentType: audio.contentType, bytes: audio.bytes, ...(audio.name ? { fileName: audio.name } : {}) };
 
       const turnId = yield* Option.match(makeTurnId(parsed.sessionId), {
         onNone: () => Effect.fail(sessionNotFound()),
@@ -154,7 +133,7 @@ export const AiRoutes = HttpRouter.use(
       });
       const session = sessions.getByName(parsed.sessionId);
       yield* session
-        .startTurn({ turnId, sessionId: parsed.sessionId, userId, message, media })
+        .startTurn({ turnId, sessionId: parsed.sessionId, userId, message, images: prepared.success, ...(voiceNote ? { audio: voiceNote } : {}) })
         .pipe(Effect.catchTag("AiSessionNotFound", () => Effect.fail(sessionNotFound())));
       yield* Effect.annotateCurrentSpan({ "app.ai.turn_id": turnId, "app.ai.image_count": images.length });
       return yield* attachTurn(session, turnId, -1);

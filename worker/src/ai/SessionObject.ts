@@ -2,11 +2,11 @@ import { RuntimeContext } from "alchemy";
 import * as Cloudflare from "alchemy/Cloudflare";
 import type { HttpEffect } from "alchemy/Http";
 import * as LanguageModel from "effect/ai/LanguageModel";
-import * as Prompt from "effect/ai/Prompt";
 import * as Effect from "effect/Effect";
 import * as Layer from "effect/Layer";
 import * as Semaphore from "effect/Semaphore";
 import * as HttpServerRequest from "effect/http/HttpServerRequest";
+import { AudioTranscoder } from "../audio/AudioTranscoder.ts";
 import { FoodSearch } from "../search/FoodSearch.ts";
 import { runAssistantLoop } from "./Agent.ts";
 import {
@@ -19,14 +19,16 @@ import { AssistantModelLive } from "./Model.ts";
 import { AiSessionStore } from "./SessionStore.ts";
 import { turnEventStream } from "./Sse.ts";
 import { makeTurnRunner, type TurnStorage } from "./Turns.ts";
+import { userMessage } from "./UserMessage.ts";
 
 // One Durable Object per AI session (addressed by session id). It is the only
 // writer of the session's conversation while a turn runs, runs turns detached
 // from requests, and keeps their events for replay (see Turns.ts).
 
 export interface AiSessionObjectShape {
-  // Supersedes any running turn, appends the user message to the stored
-  // session and starts the turn. Fails when the session isn't the user's.
+  // Supersedes any running turn and starts the turn, which appends the user
+  // message to the stored session. Fails when the session isn't the user's.
+  // Returns before media is decoded, so the app gets the turn id right away.
   readonly startTurn: (input: StartTurnInput) => Effect.Effect<void, AiSessionNotFound | AiStoreError>;
   readonly lookupTurn: (turnId: string, userId: string) => Effect.Effect<TurnLookup>;
   readonly fetch: HttpEffect<Cloudflare.DurableObjectState | RuntimeContext>;
@@ -37,22 +39,13 @@ export class AiSessionObject extends Cloudflare.DurableObject<AiSessionObject, A
   errors: [AiSessionNotFound, AiStoreError],
 }) {}
 
-const userMessage = (input: StartTurnInput): Prompt.Message => {
-  const text = input.message ? [Prompt.makePart("text", { text: input.message })] : [];
-  const media = input.media.map((part) =>
-    part.type === "image"
-      ? Prompt.makePart("file", { mediaType: part.mediaType, data: part.dataUrl })
-      : Prompt.makePart("file", { mediaType: part.mediaType, data: part.base64, fileName: part.fileName }),
-  );
-  return Prompt.makeMessage("user", { content: [...text, ...media] });
-};
-
 export const AiSessionObjectLive = AiSessionObject.make(
   Effect.gen(function* () {
     const state = yield* Cloudflare.DurableObjectState;
     const store = yield* AiSessionStore;
     const foodSearch = yield* FoodSearch;
     const model = yield* LanguageModel.LanguageModel;
+    const transcoder = yield* AudioTranscoder;
 
     return Effect.gen(function* () {
       // Storage calls need the instance's runtime context; turns run detached
@@ -74,21 +67,24 @@ export const AiSessionObjectLive = AiSessionObject.make(
           Effect.logError("ai.turn_failed", cause).pipe(Effect.as({ code: "ai_turn_failed", message: "Unknown error." })),
         keepAlive: (running) => inRuntime(state.waitUntil(running)),
       });
-      // Starting is load-then-save on the shared conversation; serialize it.
+      // Starting loads the shared conversation and supersedes the running turn
+      // (which saves it); serialize it.
       const starting = yield* Semaphore.make(1);
 
       const startTurn = Effect.fn("AiSession.startTurn")(function* (input: StartTurnInput) {
         yield* runner.supersede;
         const session = yield* store.load(input.sessionId, input.userId);
         if (!session) return yield* new AiSessionNotFound({ sessionId: input.sessionId });
-        session.conversation.push(userMessage(input));
-        yield* store.save(session);
 
         yield* runner.start({
           turnId: input.turnId,
           userId: input.userId,
           run: (emit) =>
             Effect.gen(function* () {
+              // Inside the detached run: decoding a voice note can wait on a
+              // cold container, and must continue if the app disconnects.
+              session.conversation.push(yield* inRuntime(userMessage(input)));
+              yield* inRuntime(store.save(session));
               if (input.message) yield* emit.resolvedUserMessage(input.message);
               yield* runAssistantLoop(session, {
                 emit: emit.event,
@@ -98,6 +94,7 @@ export const AiSessionObjectLive = AiSessionObject.make(
             }).pipe(
               Effect.provideService(LanguageModel.LanguageModel, model),
               Effect.provideService(FoodSearch, foodSearch),
+              Effect.provideService(AudioTranscoder, transcoder),
               Effect.annotateLogs({ sessionId: input.sessionId, turnId: input.turnId }),
             ),
         });

@@ -47,18 +47,28 @@ export type TurnMessage =
   | { readonly type: "event"; readonly event: AgentEvent }
   | { readonly type: "done" };
 
-// What the Worker hands the session object for a user message. Media is
-// already validated and base64-encoded (images as data URLs).
-export type UserMessagePart =
-  | { readonly type: "image"; readonly mediaType: string; readonly dataUrl: string }
-  | { readonly type: "audio"; readonly mediaType: string; readonly base64: string; readonly fileName?: string };
+// What the Worker hands the session object for a user message. Photos are
+// validated data URLs. A voice note is the validated original upload: the
+// session object decodes it inside the turn, so a cold container can't delay
+// the turn id (until the app has it, leaving the app loses the message).
+export interface ImagePart {
+  readonly mediaType: string;
+  readonly dataUrl: string;
+}
+
+export interface VoiceNote {
+  readonly contentType: string;
+  readonly bytes: Uint8Array;
+  readonly fileName?: string;
+}
 
 export interface StartTurnInput {
   readonly turnId: string;
   readonly sessionId: string;
   readonly userId: string;
   readonly message: string;
-  readonly media: ReadonlyArray<UserMessagePart>;
+  readonly images: ReadonlyArray<ImagePart>;
+  readonly audio?: VoiceNote;
 }
 
 export type TurnLookup = "found" | "not_found" | "unauthorized";
