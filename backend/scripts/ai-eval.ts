@@ -65,6 +65,8 @@ type CaseResult = {
   steps?: number;
   outputTokens?: number;
   costUsd?: number;
+  // Wall-clock time with at least one food search in flight (parallel searches overlap).
+  searchMs?: number;
 };
 
 async function readJson<T>(name: string): Promise<T> {
@@ -309,10 +311,21 @@ async function run(spec: string) {
     };
     const result: CaseResult = { sessionId: session.id, model: spec, reasoning: flags.reasoning!, ms: 0, searches: [], texts: [], suggestions: [] };
     const started = performance.now();
+    let inFlight = 0;
+    let busySince = 0;
+    result.searchMs = 0;
+    const timedSearch: typeof search = async (query, limit) => {
+      if (inFlight++ === 0) busySince = performance.now();
+      try {
+        return await search(query, limit);
+      } finally {
+        if (--inFlight === 0) result.searchMs! += performance.now() - busySince;
+      }
+    };
     try {
       await runAssistantLoop(state, {
         assistant,
-        search,
+        search: timedSearch,
         onUsage: (usage) => {
           result.inputTokens = (result.inputTokens ?? 0) + usage.inputTokens;
           result.outputTokens = (result.outputTokens ?? 0) + usage.outputTokens;
@@ -338,6 +351,7 @@ async function run(spec: string) {
       result.error = error instanceof Error ? error.message.slice(0, 300) : String(error);
     }
     result.ms = Math.round(performance.now() - started);
+    result.searchMs = Math.round(result.searchMs ?? 0);
     result.steps = state.conversation.filter((message) => message.role === "assistant").length;
     done++;
     if (done % 10 === 0) console.log(`${label}: ${done}/${cases.length}`);
@@ -351,6 +365,8 @@ async function run(spec: string) {
   const errors = results.filter((r) => r.error).length;
   const noSuggestion = results.filter((r) => !r.error && r.suggestions.length === 0).length;
   const ms = results.map((r) => r.ms).sort((a, b) => a - b);
+  const modelMs = results.map((r) => r.ms - (r.searchMs ?? 0)).sort((a, b) => a - b);
+  console.log(`${label}: model-only p50 ${modelMs[Math.floor(modelMs.length / 2)]}ms p90 ${modelMs[Math.floor(modelMs.length * 0.9)]}ms`);
   const costed = results.filter((r) => r.costUsd !== undefined);
   if (costed.length) console.log(`${label}: mean cost $${(costed.reduce((a, r) => a + r.costUsd!, 0) / costed.length).toFixed(4)}/request, mean tokens in ${Math.round(costed.reduce((a, r) => a + (r.inputTokens ?? 0), 0) / costed.length)} out ${Math.round(costed.reduce((a, r) => a + (r.outputTokens ?? 0), 0) / costed.length)}`);
   console.log(`${label}: ${results.length} cases, ${errors} errors, ${noSuggestion} without suggestions, p50 ${ms[Math.floor(ms.length / 2)]}ms p90 ${ms[Math.floor(ms.length * 0.9)]}ms -> ${out}`);
@@ -521,6 +537,8 @@ async function report(files: string[]) {
     const graded = run.map((r) => ({ r, g: cache[`${r.sessionId}|${file}`] })).filter((x) => x.g);
     const sum = (f: (g: (typeof graded)[number]["g"]) => number) => graded.reduce((a, x) => a + f(x.g!), 0);
     const ms = run.map((r) => r.ms).sort((a, b) => a - b);
+    const modelMs = run.map((r) => r.ms - (r.searchMs ?? 0)).sort((a, b) => a - b);
+    const costed = run.filter((r) => r.costUsd !== undefined);
     rows.push({
       run: file.replace(/^.*\//, "").replace(/\.json$/, ""),
       n: graded.length,
@@ -536,6 +554,9 @@ async function report(files: string[]) {
       errors: run.filter((r) => r.error).length,
       p50ms: ms[Math.floor(ms.length / 2)],
       p90ms: ms[Math.floor(ms.length * 0.9)],
+      modelP50ms: modelMs[Math.floor(modelMs.length / 2)],
+      modelP90ms: modelMs[Math.floor(modelMs.length * 0.9)],
+      costPerReq: costed.length ? +(costed.reduce((a, r) => a + r.costUsd!, 0) / costed.length).toFixed(4) : undefined,
     });
   }
   console.table(rows);
