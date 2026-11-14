@@ -324,6 +324,7 @@ private struct AssistantComposerBar: View {
 private struct AssistantConversation: View {
     let chat: AILogService
     let draft: AssistantDraft
+    @Environment(AppStore.self) private var store
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
@@ -350,8 +351,13 @@ private struct AssistantConversation: View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange)
             Text(text).font(.footnote).foregroundStyle(Theme.label).frame(maxWidth: .infinity, alignment: .leading)
+            if chat.unsent != nil {
+                Button("Retry") { chat.retryUnsent(store: store) }
+                    .font(.footnote.weight(.semibold)).foregroundStyle(.orange)
+                    .disabled(chat.streaming).accessibilityIdentifier("ai-retry")
+            }
         }.padding(12).background(Color.orange.opacity(0.12), in: RoundedRectangle(cornerRadius: 14, style: .continuous))
-            .accessibilityElement(children: .combine)
+            .accessibilityElement(children: .contain)
     }
 }
 

@@ -69,4 +69,6 @@ Build 26 opens straight to the saved diary instead of waiting for the server to 
 
 Build 27 fixes the voice-note start animation: the text field's glass now morphs straight into the recording card (no oversized glass shape or sliding content), the photo button and lock indicator fade on their own, and the card starts at 0:00 with a flat waveform instead of showing the previous note.
 
+Build 28 stops voice notes and messages from silently disappearing when you leave the app right after sending. The app keeps running in the background until the server has the message, then resumes the reply when you return. If the upload still can't finish, the chat shows “Your message wasn't sent.” with a Retry button that resends the same recording.
+
 The widget uses App Group `group.lol.mati.caloric.swift` and bundle ID `lol.mati.caloric.swift.CaloricWidget`. Daily backups use the separate `iCloud.lol.mati.caloric.swift` CloudDocuments container. Camera, microphone and iCloud behavior require verification on a device; simulator tests cover manual barcode entry and synthetic voice gestures. Native app updates ship through TestFlight.

@@ -105,6 +105,74 @@ final class AILogTests: XCTestCase {
         XCTAssertEqual(AIHTTPStub.requests.last?.url?.query, "cursor=1")
     }
 
+    private var expireBackgroundTime: (() -> Void)?
+    private var heldBackgroundTime: Set<Int> = []
+    private func fakeBackgroundTime() {
+        var next = 1
+        chat.beginBackgroundTime = { [unowned self] expired in
+            expireBackgroundTime = expired; next += 1; heldBackgroundTime.insert(next)
+            return UIBackgroundTaskIdentifier(rawValue: next)
+        }
+        chat.endBackgroundTime = { [unowned self] in heldBackgroundTime.remove($0.rawValue) }
+    }
+
+    func testBackgroundingBeforeTurnIDFinishesUploadThenResumes() async throws {
+        fakeBackgroundTime()
+        AIHTTPStub.set([sessionReply, .init(body: prefix, finish: false), .init(body: prefix + "data: [DONE]\n\n")])
+        chat.submit("Message", store: store)
+        chat.setForeground(false)
+        try await waitUntil { chat.activeTurnID == "turn-a" && heldBackgroundTime.isEmpty }
+        try await Task.sleep(for: .milliseconds(100))
+        XCTAssertNil(chat.error)
+        XCTAssertNil(chat.unsent)
+        XCTAssertTrue(chat.streaming)
+        chat.setForeground(true)
+        try await waitUntil { !chat.streaming }
+        XCTAssertNil(chat.error)
+        XCTAssertEqual(chat.messages.last?.text, "Ready 🍎")
+        XCTAssertEqual(AIHTTPStub.requests.last?.url?.path, "/ai/turn/turn-a/stream")
+    }
+
+    func testExpiredBackgroundTimeKeepsVoiceNoteForRetry() async throws {
+        fakeBackgroundTime()
+        let audio = folder.appendingPathComponent("note.m4a")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        try Data("m4a".utf8).write(to: audio)
+        AIHTTPStub.set([.init(body: "", finish: false)])
+        chat.submit("", store: store, audio: audio, duration: "0:20")
+        chat.setForeground(false)
+        try await Task.sleep(for: .milliseconds(50))
+        XCTAssertTrue(chat.streaming, "Backgrounding before the turn ID must not drop the upload")
+        expireBackgroundTime?()
+        try await waitUntil { !chat.streaming && chat.unsent != nil }
+        XCTAssertEqual(chat.error, "Your message wasn't sent.")
+        XCTAssertTrue(heldBackgroundTime.isEmpty)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: audio.path))
+        chat.setForeground(true)
+        AIHTTPStub.set([sessionReply, .init(body: prefix + "data: [DONE]\n\n")])
+        chat.retryUnsent(store: store)
+        try await waitUntil { !chat.streaming }
+        XCTAssertNil(chat.error)
+        XCTAssertNil(chat.unsent)
+        XCTAssertEqual(chat.messages.filter { $0.role == "user" }.map(\.kind), ["audio"])
+        XCTAssertEqual(chat.messages.last?.text, "Ready 🍎")
+        XCTAssertTrue(String(decoding: body(AIHTTPStub.requests[1]), as: UTF8.self).contains("filename=\"voice.m4a\""))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: audio.path))
+    }
+
+    func testFailedUploadOffersRetry() async throws {
+        AIHTTPStub.set([sessionReply])
+        chat.submit("Two eggs", store: store)
+        try await waitUntil { !chat.streaming }
+        XCTAssertNotNil(chat.unsent)
+        XCTAssertNotNil(chat.error)
+        AIHTTPStub.set([.init(body: prefix + "data: [DONE]\n\n")])
+        chat.retryUnsent(store: store)
+        try await waitUntil { !chat.streaming }
+        XCTAssertNil(chat.error)
+        XCTAssertEqual(chat.messages.filter { $0.role == "user" }.map(\.text), ["Two eggs"])
+    }
+
     func testServerErrorStopsLoadingAndKeepsExplanation() async throws {
         AIHTTPStub.set([sessionReply, .init(body: prefix + "data: {\"type\":\"error\",\"message\":\"Please try again\"}\n\n", finish: false)])
         chat.submit("Message", store: store)

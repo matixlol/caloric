@@ -1,5 +1,6 @@
 import Foundation
 import Observation
+import UIKit
 
 struct ApprovalOutput: Codable, Equatable { var approved: Bool; var reason: String? }
 struct FoodSuggestion: Codable, Identifiable, Equatable {
@@ -97,6 +98,16 @@ final class AILogService {
     private var activeUserMessageID: String?
     private var terminal = false
     private var foreground = true
+    /// A message the server never acknowledged, kept so the user can send it again.
+    private(set) var unsent: UnsentMessage?
+    struct UnsentMessage { var messageID: String; var text: String; var audio: URL?; var duration: String?; var images: [AssistantImage] }
+    private var acknowledgedMessageID: String?
+    @ObservationIgnored private var sendGrace = UIBackgroundTaskIdentifier.invalid
+    /// Keeps the app running after it backgrounds until the server acknowledges the upload.
+    @ObservationIgnored var beginBackgroundTime: (@escaping () -> Void) -> UIBackgroundTaskIdentifier = { expired in
+        UIApplication.shared.beginBackgroundTask(withName: "Send AI message") { MainActor.assumeIsolated { expired() } }
+    }
+    @ObservationIgnored var endBackgroundTime: (UIBackgroundTaskIdentifier) -> Void = { UIApplication.shared.endBackgroundTask($0) }
     @ObservationIgnored private var task: Task<Void, Never>?
     @ObservationIgnored private var timeoutTask: Task<Void, Never>?
     @ObservationIgnored private var operationID: UUID?
@@ -116,7 +127,7 @@ final class AILogService {
         timeoutTask = Task { [weak self, requestTimeout] in
             do { try await Task.sleep(for: requestTimeout) } catch { return }
             guard let self, operationID == id else { return }
-            operationID = nil
+            operationID = nil; releaseSendGrace()
             task?.cancel(); task = nil; timeoutTask = nil
             activeTurnID = nil; streaming = false
             error = "The AI response took too long. Please try again."
@@ -138,7 +149,7 @@ final class AILogService {
     }
     /// Cancels any running request and forgets the server session and visible conversation.
     func startNewConversation() {
-        operationID = nil; timeoutTask?.cancel(); timeoutTask = nil
+        operationID = nil; timeoutTask?.cancel(); timeoutTask = nil; releaseSendGrace(); discardUnsent()
         task?.cancel(); task = nil; sessionID = nil; messages = []; streaming = false; error = nil
         activeTurnID = nil; appliedSequence = -1; activeAssistantID = nil; activeUserMessageID = nil; terminal = false
     }
@@ -166,16 +177,25 @@ final class AILogService {
     }
     func submit(_ text: String, store: AppStore, audio: URL? = nil, duration: String? = nil, images: [AssistantImage] = []) {
         guard !streaming, accountID != nil else { return }
+        discardUnsent()
         var message = ChatMessage(kind: audio == nil ? "text" : "audio", role: "user", text: audio == nil ? text : "Voice message", duration: duration)
         message.images = images
         messages.append(message); streaming = true; error = nil
         activeTurnID = nil; appliedSequence = -1; activeAssistantID = nil; activeUserMessageID = message.id; terminal = false
         let activeAccount = accountID
         let operation = beginOperation()
+        holdSendGrace()
+        let draft = UnsentMessage(messageID: message.id, text: text, audio: audio, duration: duration, images: images)
         task = Task {
             defer {
+                if operationID == operation { releaseSendGrace() }
+                // Until the server sends the turn ID nothing can be resumed. Keep the
+                // message (and its recording) so the failure is visible and retryable.
+                if acknowledgedMessageID != draft.messageID, accountID == activeAccount, messages.contains(where: { $0.id == draft.messageID }) {
+                    unsent = draft
+                    if error == nil { error = "Your message wasn't sent." }
+                } else if let audio { try? FileManager.default.removeItem(at: audio) }
                 finishOperation(operation)
-                if let audio { try? FileManager.default.removeItem(at: audio) }
             }
             do {
                 if sessionID == nil {
@@ -215,7 +235,11 @@ final class AILogService {
         let payload = try JSONDecoder().decode(StreamPayload.self, from: frame)
         if let seq = payload.seq, seq <= appliedSequence { return }
         switch payload.type {
-        case "turn": activeTurnID = payload.turnId
+        case "turn":
+            activeTurnID = payload.turnId; acknowledgedMessageID = userMessageID
+            // The turn now runs server-side and can be resumed; stop holding background time.
+            releaseSendGrace()
+            if !foreground { task?.cancel() }
         case "status": if payload.status == "ready" { terminal = true; activeTurnID = nil }
         case "done": terminal = true; activeTurnID = nil
         case "event": if let event = payload.event { apply(event) }
@@ -296,7 +320,12 @@ final class AILogService {
     }
     func setForeground(_ active: Bool) {
         foreground = active
-        if !active { task?.cancel(); return }
+        if !active {
+            // Before the turn ID arrives there is nothing to resume, so let the upload
+            // finish in background time instead of dropping the message.
+            if activeTurnID != nil || sendGrace == .invalid { task?.cancel() }
+            return
+        }
         guard activeTurnID != nil, task == nil, let userMessageID = activeUserMessageID else { return }
         let account = accountID
         let operation = beginOperation()
@@ -308,6 +337,29 @@ final class AILogService {
             catch is CancellationError { }
             catch { if !Task.isCancelled, accountID == account, operationID == operation { activeTurnID = nil; self.error = "Could not restore the AI response. \(error.localizedDescription)" } }
         }
+    }
+    /// Sends a message the server never acknowledged again, replacing its failed bubble.
+    func retryUnsent(store: AppStore) {
+        guard let draft = unsent, !streaming else { return }
+        unsent = nil
+        messages.removeAll { $0.id == draft.messageID }
+        submit(draft.text, store: store, audio: draft.audio, duration: draft.duration, images: draft.images)
+    }
+    private func discardUnsent() {
+        if let audio = unsent?.audio { try? FileManager.default.removeItem(at: audio) }
+        unsent = nil
+    }
+    private func holdSendGrace() {
+        releaseSendGrace()
+        sendGrace = beginBackgroundTime { [weak self] in
+            guard let self else { return }
+            releaseSendGrace()
+            if !foreground, activeTurnID == nil { task?.cancel() }
+        }
+    }
+    private func releaseSendGrace() {
+        guard sendGrace != .invalid else { return }
+        endBackgroundTime(sendGrace); sendGrace = .invalid
     }
     /// Logs or rejects a suggestion. `portion` and `meal` let the user adjust it before adding.
     @discardableResult
