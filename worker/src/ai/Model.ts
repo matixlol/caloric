@@ -41,9 +41,9 @@ export const AssistantModelLive: Layer.Layer<
   LanguageModel.LanguageModel,
   Effect.gen(function* () {
     const apiKey = yield* Config.Redacted("OPENROUTER_API_KEY").pipe(Config.option);
-    const modelId = yield* Config.String("AI_MODEL").pipe(Config.withDefault("meta/muse-wonder"));
+    const modelId = yield* Config.String("AI_MODEL").pipe(Config.withDefault("google/gemini-4-hydrogen"));
     const effort = yield* Config.Literals(reasoningEfforts, "AI_REASONING_EFFORT").pipe(
-      Config.withDefault<ReasoningEffort>("minimal"),
+      Config.withDefault<ReasoningEffort>("low"),
     );
     const client = yield* OpenRouterClient.make({ apiKey: Option.getOrUndefined(apiKey), siteTitle: "Caloric" });
     return yield* OpenRouterLanguageModel.make(openRouterModel(modelId, effort)).pipe(
