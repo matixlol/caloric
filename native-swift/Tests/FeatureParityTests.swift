@@ -79,6 +79,9 @@ final class FeatureParityTests: XCTestCase {
         XCTAssertNil(QuickAdd.nutrition(calories: "0", split: UserSettings()))
         let nutrition = QuickAdd.nutrition(calories: "400", split: UserSettings())
         XCTAssertEqual(nutrition?.protein, 30); XCTAssertEqual(nutrition?.carbs, 50); XCTAssertEqual(nutrition?.fat, 8.9)
+        var split = UserSettings(); split.macroProteinPct = 40; split.macroCarbsPct = 40; split.macroFatPct = 20
+        let gesture = QuickCalories.food(300, split: split).nutrition
+        XCTAssertEqual(gesture?.calories, 300); XCTAssertEqual(gesture?.protein, 30); XCTAssertEqual(gesture?.carbs, 30); XCTAssertEqual(gesture?.fat, 6.7)
     }
     func testQuickAddSplitComesFromExistingMacrosOrDailyRatios() {
         var daily = UserSettings(); daily.macroProteinPct = 40; daily.macroCarbsPct = 40; daily.macroFatPct = 20

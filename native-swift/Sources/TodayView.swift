@@ -123,7 +123,7 @@ struct TodayView: View {
         switch session.selection {
         case let .calories(calories):
             withAnimation {
-                store.perform { _ = try store.add(food: QuickCalories.food(calories), meal: session.meal, day: session.day) }
+                store.perform { _ = try store.add(food: QuickCalories.food(calories, split: store.settings), meal: session.meal, day: session.day) }
             }
         case .barcode: sheet = .barcode(session.meal, session.day)
         case nil: break

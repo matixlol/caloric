@@ -99,9 +99,11 @@ enum QuickAdd {
         (calories * Double(percent) / 100 / kcalPerGram * 10).rounded() / 10
     }
     static func nutrition(calories: String, split: UserSettings) -> Nutrition? {
-        guard let value = Self.calories(calories) else { return nil }
-        return Nutrition(calories: value, protein: grams(value, percent: split.macroProteinPct, kcalPerGram: 4),
-                         carbs: grams(value, percent: split.macroCarbsPct, kcalPerGram: 4), fat: grams(value, percent: split.macroFatPct, kcalPerGram: 9))
+        Self.calories(calories).map { nutrition(calories: $0, split: split) }
+    }
+    static func nutrition(calories value: Double, split: UserSettings) -> Nutrition {
+        Nutrition(calories: value, protein: grams(value, percent: split.macroProteinPct, kcalPerGram: 4),
+                  carbs: grams(value, percent: split.macroCarbsPct, kcalPerGram: 4), fat: grams(value, percent: split.macroFatPct, kcalPerGram: 9))
     }
     /// The calorie split an existing entry's macros imply, falling back to the user's daily ratios when it has none.
     static func split(of nutrition: Nutrition?, fallback: UserSettings) -> UserSettings {

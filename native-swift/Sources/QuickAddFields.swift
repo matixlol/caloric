@@ -7,8 +7,8 @@ enum QuickCalories {
         guard delta >= 0, !values.isEmpty else { return nil }
         return values[min(values.count - 1, Int((delta / 25).rounded()))]
     }
-    static func food(_ calories: Double) -> SearchFood {
-        SearchFood(id: "quick", canonicalKey: "quick", source: "manual", sourceLabel: "", name: "Quick add", serving: "Manual entry", nutrition: Nutrition(calories: calories))
+    static func food(_ calories: Double, split: UserSettings) -> SearchFood {
+        SearchFood(id: "quick", canonicalKey: "quick", source: "manual", sourceLabel: "", name: "Quick add", serving: "Manual entry", nutrition: QuickAdd.nutrition(calories: calories, split: split))
     }
 }
 

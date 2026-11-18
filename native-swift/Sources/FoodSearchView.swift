@@ -140,7 +140,7 @@ struct FoodSearchView: View {
             HStack(spacing: 10) {
                 if quick { PrimaryButton(title: "Add quick", enabled: manualNutrition != nil) { addQuick(manualNutrition) } }
                 else { HoldSlideButton(title: ingredientMode ? "Add to recipe" : "Add to \(meal.label)", enabled: selected != nil || selectedRecipe != nil, values: (1...12).map { Double($0) / 4 }, selection: $portionPick, tapped: { add(portion: selectedPortion) }, committed: { add(portion: $0) }) }
-                if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: QuickCalories.values, selection: $caloriePick, tapped: { if !quick { split = store.settings }; withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(Nutrition(calories: $0)) }).frame(width: 108) }
+                if !ingredientMode { HoldSlideButton(title: "Quick add", enabled: true, secondary: true, values: QuickCalories.values, selection: $caloriePick, tapped: { if !quick { split = store.settings }; withAnimation { quick.toggle(); selected = nil; selectedRecipeID = nil } }, committed: { addQuick(QuickAdd.nutrition(calories: $0, split: store.settings)) }).frame(width: 108) }
             }
         }.padding(.horizontal, 16).padding(.vertical, 12)
       }
