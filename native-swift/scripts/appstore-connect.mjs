@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { createPrivateKey, sign } from 'node:crypto';
@@ -9,7 +9,8 @@ import { fileURLToPath } from 'node:url';
 export async function requestApple(path, method = 'GET', body) {
   if (!path?.startsWith('/v1/') || path.startsWith('//')) throw new Error('Expected an App Store Connect /v1/ path');
   const configPath = process.env.CALORIC_APPLE_CREDENTIALS || join(homedir(), '.config/caloric/apple.json');
-  const config = JSON.parse(readFileSync(configPath, 'utf8'));
+  const { ASC_KEY_PATH: keyPath, ASC_KEY_ID: keyID, ASC_ISSUER_ID: issuerID } = process.env;
+  const config = existsSync(configPath) || !keyPath ? JSON.parse(readFileSync(configPath, 'utf8')) : { keyPath, keyID, issuerID };
   const now = Math.floor(Date.now() / 1000);
   const encode = value => Buffer.from(JSON.stringify(value)).toString('base64url');
   const unsigned = `${encode({ alg: 'ES256', kid: config.keyID, typ: 'JWT' })}.${encode({

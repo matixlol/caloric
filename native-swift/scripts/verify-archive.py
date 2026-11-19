@@ -6,6 +6,8 @@ import subprocess
 import sys
 
 archive = Path(sys.argv[1])
+# Automatic signing archives with a development identity; the export re-signs for distribution.
+automatic = "--automatic-signing" in sys.argv[2:]
 app = archive / "Products/Applications/CaloricSwift.app"
 widget = app / "PlugIns/CaloricWidget.appex"
 expected = [(app, "lol.mati.caloric.swift"), (widget, "lol.mati.caloric.swift.CaloricWidget")]
@@ -24,7 +26,7 @@ try:
         profile_result = subprocess.run(["security", "cms", "-D", "-i", str(product / "embedded.mobileprovision")], capture_output=True)
         profile = plistlib.loads(profile_result.stdout)
         for value in (entitlements, profile["Entitlements"]):
-            if value.get("application-identifier") != f"BQ7842UUHJ.{bundle}" or value.get("get-task-allow", False):
+            if value.get("application-identifier") != f"BQ7842UUHJ.{bundle}" or (value.get("get-task-allow", False) and not automatic):
                 raise ValueError("Release does not use the distribution identity")
             if "group.lol.mati.caloric.swift" not in value.get("com.apple.security.application-groups", []):
                 raise ValueError("App Group is missing")
