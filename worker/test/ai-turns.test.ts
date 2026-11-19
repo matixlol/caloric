@@ -3,6 +3,7 @@ import * as Cause from "effect/Cause";
 import * as Deferred from "effect/Deferred";
 import * as Effect from "effect/Effect";
 import * as Stream from "effect/Stream";
+import * as TestClock from "effect/testing/TestClock";
 import type { TurnMessage } from "../src/ai/Domain.ts";
 import * as Fiber from "effect/Fiber";
 import { makeTurnRunner, type TurnEmitter, type TurnRunnerOptions, type TurnStorage } from "../src/ai/Turns.ts";
@@ -227,6 +228,21 @@ describe("turn runner", () => {
           { type: "done" },
         ]);
       }),
+    ));
+
+  test("replays a finished turn to an app that returns from the background minutes later", () =>
+    Effect.runPromise(
+      Effect.gen(function* () {
+        const { storage } = memoryStorage();
+        const runner = makeRunner(storage);
+        yield* runner.start({ turnId: "t8", userId: "u1", run: (emit) => emit.event({ kind: "assistant", text: "Logged." }) });
+        yield* Effect.yieldNow;
+
+        yield* TestClock.adjust("15 minutes");
+        yield* runner.alarm;
+        expect(yield* runner.lookup("t8", "u1")).toBe("found");
+        expect(assistantTexts(yield* collect(runner.attach("t8", -1)))).toEqual(["Logged."]);
+      }).pipe(Effect.provide(TestClock.layer())),
     ));
 
   test("finishes a turn orphaned by a restart and deletes it after retention", () =>

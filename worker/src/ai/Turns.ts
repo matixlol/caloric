@@ -93,7 +93,9 @@ export interface TurnRunnerOptions {
 export const makeTurnRunner = (options: TurnRunnerOptions) => {
   const { storage } = options;
   const deadlineMs = Duration.toMillis(Duration.fromInputUnsafe(options.deadline ?? "3 minutes"));
-  const retentionMs = Duration.toMillis(Duration.fromInputUnsafe(options.retention ?? "5 minutes"));
+  // The app resumes a turn when it returns to the foreground, which can be
+  // long after the turn finished; once it ages out the reply is lost (404).
+  const retentionMs = Duration.toMillis(Duration.fromInputUnsafe(options.retention ?? "1 day"));
   const turns = new Map<string, LiveTurn>();
 
   const broadcast = (live: LiveTurn, message: TurnMessage) => {
