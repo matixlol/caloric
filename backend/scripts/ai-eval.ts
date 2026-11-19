@@ -40,6 +40,8 @@ const { values: flags, positionals } = parseArgs({
     export: { type: "string" },
     // judgements file for judge-import/report, e.g. judgements-claude.json for subagent grades.
     cache: { type: "string", default: "judgements.json" },
+    // JSON map of sessionId -> diary lines the user saved during or after the session.
+    diary: { type: "string" },
   },
 });
 
@@ -67,6 +69,8 @@ type CaseResult = {
   costUsd?: number;
   // Wall-clock time with at least one food search in flight (parallel searches overlap).
   searchMs?: number;
+  // Time until the first model step finished and its first search started.
+  firstStepMs?: number;
 };
 
 async function readJson<T>(name: string): Promise<T> {
@@ -315,6 +319,7 @@ async function run(spec: string) {
     let busySince = 0;
     result.searchMs = 0;
     const timedSearch: typeof search = async (query, limit) => {
+      result.firstStepMs ??= Math.round(performance.now() - started);
       if (inFlight++ === 0) busySince = performance.now();
       try {
         return await search(query, limit);
@@ -409,6 +414,7 @@ async function judge(files: string[]) {
   const sessions = new Map((await readJson<ExportedSession[]>("sessions.json")).map((s) => [s.id, s]));
   const transcripts: Record<string, string> = (await Bun.file(`${dir}/transcripts.json`).exists()) ? await readJson(`transcripts.json`) : {};
   const runs = await Promise.all(files.map((file) => readJson<CaseResult[]>(file)));
+  const diary: Record<string, string[]> = flags.diary ? await readJson(flags.diary) : {};
   const judgeModel = createAssistantModel(flags.judge!, "low", { openRouterApiKey: process.env.OPENROUTER_API_KEY });
   const cachePath = `${dir}/${flags.cache}`;
   const cache: Record<string, unknown> = (await Bun.file(cachePath).exists()) ? await readJson(cachePath) : {};
@@ -454,6 +460,9 @@ async function judge(files: string[]) {
       `SESSION TIME (UTC): ${session.created_at}`,
       `USER REQUEST: ${request}`,
       later ? `HINDSIGHT — LATER IN THE ORIGINAL CONVERSATION:\n${later}` : "HINDSIGHT: the user did not follow up.",
+      diary[sessionId]?.length
+        ? `DIARY ENTRIES THE USER SAVED DURING OR SHORTLY AFTER THIS SESSION (strong evidence of what they actually ate; may include unrelated manual logs, and DELETED ones were removed again):\n${diary[sessionId]!.join("\n")}`
+        : "",
       "",
       ...labelled.map((c) => `CANDIDATE ${c.label}:\n${describeSuggestions(c.result)}`),
       "",
@@ -528,6 +537,8 @@ async function judgeImport(files: string[]) {
   await report(files);
 }
 
+const pct = (values: number[], p: number) => [...values].sort((a, b) => a - b)[Math.floor(values.length * p)];
+
 async function report(files: string[]) {
   const cache: Record<string, { score: number; missing: number; extra: number; wrongItem: number; portionOff: number; wrongMeal: number; junkText: boolean }> =
     await readJson(flags.cache!);
@@ -553,9 +564,10 @@ async function report(files: string[]) {
       junk: graded.filter((x) => x.g!.junkText).length,
       errors: run.filter((r) => r.error).length,
       p50ms: ms[Math.floor(ms.length / 2)],
-      p90ms: ms[Math.floor(ms.length * 0.9)],
+      p95ms: ms[Math.floor(ms.length * 0.95)],
       modelP50ms: modelMs[Math.floor(modelMs.length / 2)],
-      modelP90ms: modelMs[Math.floor(modelMs.length * 0.9)],
+      modelP95ms: modelMs[Math.floor(modelMs.length * 0.95)],
+      firstStepP50ms: pct(run.map((r) => r.firstStepMs).filter((v): v is number => v !== undefined), 0.5),
       costPerReq: costed.length ? +(costed.reduce((a, r) => a + r.costUsd!, 0) / costed.length).toFixed(4) : undefined,
     });
   }
