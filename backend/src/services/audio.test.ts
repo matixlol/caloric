@@ -13,6 +13,10 @@ describe("transcodeAudioToWav", () => {
     expect(wav.subarray(0, 4).toString()).toBe("RIFF");
     expect(wav.readUInt16LE(22)).toBe(1);
     expect(wav.readUInt32LE(24)).toBe(16000);
+    // Real chunk sizes, not the 0xFFFFFFFF placeholders a piped WAV carries.
+    expect(wav.readUInt32LE(4)).toBe(wav.byteLength - 8);
+    const data = wav.indexOf("data");
+    expect(wav.readUInt32LE(data + 4)).toBe(wav.byteLength - data - 8);
   });
 
   test("rejects input that is not audio", async () => {
