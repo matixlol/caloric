@@ -105,6 +105,20 @@ final class AILogTests: XCTestCase {
         XCTAssertEqual(AIHTTPStub.requests.last?.url?.query, "cursor=1")
     }
 
+    func testExpiredTurnOnResumeKeepsTheSessionForTheNextMessage() async throws {
+        AIHTTPStub.set([sessionReply, .init(body: prefix, finish: false), .init(status: 404, body: #"{"error":"turn_not_found"}"#), .init(body: prefix + "data: [DONE]\n\n")])
+        chat.submit("Voice note", store: store)
+        try await waitUntil { chat.appliedSequence == 1 }
+        chat.setForeground(false)
+        try await Task.sleep(for: .milliseconds(100))
+        chat.setForeground(true)
+        try await waitUntil { !chat.streaming && chat.error != nil }
+        chat.submit("And a coffee", store: store)
+        try await waitUntil { !chat.streaming }
+        XCTAssertNil(chat.error)
+        XCTAssertEqual(AIHTTPStub.requests.map { $0.url!.path }, ["/ai/session", "/ai/turn", "/ai/turn/turn-a/stream", "/ai/turn"])
+    }
+
     private var expireBackgroundTime: (() -> Void)?
     private var heldBackgroundTime: Set<Int> = []
     private func fakeBackgroundTime() {

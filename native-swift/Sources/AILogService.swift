@@ -291,7 +291,9 @@ final class AILogService {
                     (bytes, response) = try await session.bytes(for: api.reauthenticate(request, userID: account))
                 }
                 defer { bytes.task.cancel() }
-                if (response as? HTTPURLResponse)?.statusCode == 404 { sessionID = nil }
+                // 403: the session isn't this user's, so start a new one. A 404 only
+                // means a resumed turn aged out; the session keeps its conversation.
+                if (response as? HTTPURLResponse)?.statusCode == 403 { sessionID = nil }
                 try APIClient.validate(response)
                 var decoder = SSEByteDecoder()
                 for try await byte in bytes {
