@@ -12,6 +12,9 @@ final class AppStore {
     private(set) var lastSyncedAt: Date?
     private(set) var syncError: String?
     var error: String?
+    /// The store the running UI owns, when this process has one; Siri intents prefer it over
+    /// opening the database directly so edits appear live and sync immediately.
+    @ObservationIgnored static private(set) weak var active: AppStore?
     @ObservationIgnored private var database: SQLiteStore?
     @ObservationIgnored private var syncTask: Task<Void, Never>?
     @ObservationIgnored private let api: any SyncAPI
@@ -28,9 +31,19 @@ final class AppStore {
         self.api = api ?? APIClient()
         self.syncEnabled = syncEnabled
         self.retryDelays = retryDelays
-        self.directory = directory ?? (AppConfiguration.uiTesting
+        self.directory = directory ?? Self.storageDirectory()
+        Self.active = self
+    }
+
+    /// The SQLite database file for an account, shared by the app and Siri intents.
+    nonisolated static func storageDirectory() -> URL {
+        AppConfiguration.uiTesting
             ? FileManager.default.temporaryDirectory.appendingPathComponent("CaloricUITests-\(ProcessInfo.processInfo.processIdentifier)")
-            : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CaloricSwift"))
+            : FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0].appendingPathComponent("CaloricSwift")
+    }
+    nonisolated static func databaseURL(userID: String, in directory: URL? = nil) -> URL {
+        let hex = userID.utf8.map { String(format: "%02x", $0) }.joined()
+        return (directory ?? storageDirectory()).appendingPathComponent("\(hex).sqlite")
     }
     var settings: UserSettings { settingsRecord.data }
     var entries: [FoodRecord] { index.active }
@@ -59,8 +72,7 @@ final class AppStore {
         if userID == nil || (previous != nil && previous != userID) { WidgetSnapshot.clear() }
         guard let userID else { return }
         do {
-            let filename = userID.utf8.map { String(format: "%02x", $0) }.joined()
-            database = try SQLiteStore(url: directory.appendingPathComponent("\(filename).sqlite"))
+            database = try SQLiteStore(url: Self.databaseURL(userID: userID, in: directory))
             records = try database!.loadEntries()
             recipeRecords = try database!.loadRecipes()
             settingsRecord = try database!.loadSettings() ?? settingsRecord
